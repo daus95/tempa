@@ -1,0 +1,33 @@
+{
+    "sources": {
+        "prd": "specs/prd",
+        "docs": "docs",
+        "epics": "specs/pbi/epics",
+        "clarifications": "specs/clarifications",
+        "apps": "apps"
+    },
+    "models": {
+        "clarify": "claude-opus-4-8",
+        "plan": "claude-sonnet-5",
+        "implement": "claude-sonnet-5"
+    },
+    "features_per_session": null,
+    "max_session_run": 30,
+    "max_clarification_run": 10,
+    "last_clarification_findings": {
+        "critical": 1,
+        "major": 5,
+        "minor": 5
+    },
+    "last_auto_answer": 8,
+    "epic": [],
+    "workspace": {
+        "root": null,
+        "docs": "docs",
+        "adr": "adr",
+        "specs": "specs",
+        "apps": "apps",
+        "infra": "infra",
+        "archive": "archive"
+    }
+}
