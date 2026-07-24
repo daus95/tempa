@@ -15,9 +15,9 @@
     "max_session_run": 30,
     "max_clarification_run": 10,
     "last_clarification_findings": {
-        "critical": 1,
-        "major": 5,
-        "minor": 5
+        "critical": 0,
+        "major": 0,
+        "minor": 3
     },
     "last_auto_answer": 8,
     "epic": [],
