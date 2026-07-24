@@ -1,12 +1,12 @@
-# `--implement` Details (Run Implementation)
+# `implement` Details (Run Implementation)
 
 See [README.md](../README.md) — Step 3 (Run Implementation) — for a short summary. This
 document explains the details.
 
 ```bash
-py tempa.py --implement                 # poll every 60 seconds (drafts a plan first if there's no task yet)
-py tempa.py --implement --replan        # force a fresh plan first, then continue implementation
-py tempa.py --implement --features 4    # cap at 4 features per session (overrides config)
+py tempa.py implement                 # poll every 60 seconds (drafts a plan first if there's no task yet)
+py tempa.py implement --replan        # force a fresh plan first, then continue implementation
+py tempa.py implement --features 4    # cap at 4 features per session (overrides config)
 ```
 
 ## Flow
@@ -35,7 +35,7 @@ Work-selection priority each time the runner polls (this implements the 1–4 se
 
 The runner stops automatically when: every epic is done, an epic is `failed`, the
 `max_session_run` limit is reached, or Claude's **usage limit** is hit (exit 2; the epic is
-left as-is so it can be resumed once the limit resets — just run `--implement` again).
+left as-is so it can be resumed once the limit resets — just run `implement` again).
 
 ## Epic Status Lifecycle
 
@@ -56,37 +56,37 @@ config.json during the session; the harness only marks it `failed` when a sessio
 ## Monitor
 
 ```bash
-py tempa.py --status                # summary of all epic + feature + QA status
-py tempa.py --show-folders          # active working folder
+py tempa.py status                  # summary of all epic + feature + QA status
+py tempa.py show-folders            # active working folder
 ```
 
 ## Recovery (if something goes wrong)
 
 ```bash
-py tempa.py --implement --reset          # epic on_progress → pending (clears session_id)
-py tempa.py --implement --reset-failed   # all failed epics → pending
-py tempa.py --implement --reset-qa       # force re-QA for every done epic
-py tempa.py --implement --clear      # delete ALL files in qa/ and logs/ (QA reports + session logs)
-py tempa.py --implement --clear-plan # clear plan: wipes specs/pbi contents + empties the "epic" array
-py tempa.py --clarify --clear        # clear clarifications: deletes files in specs/clarifications (except claude.md)
-py tempa.py --clear                  # runs all three --clear commands above, behind one confirmation
+py tempa.py implement --reset          # epic on_progress → pending (clears session_id)
+py tempa.py implement --reset-failed   # all failed epics → pending
+py tempa.py implement --reset-qa       # force re-QA for every done epic
+py tempa.py implement --clear      # delete ALL files in qa/ and logs/ (QA reports + session logs)
+py tempa.py implement --clear-plan # clear plan: wipes specs/pbi contents + empties the "epic" array
+py tempa.py clarify --clear        # clear clarifications: deletes files in specs/clarifications (except claude.md)
+py tempa.py clear                  # runs all three clear commands above, behind one confirmation
 ```
 
-> `--implement --clear`, `--implement --clear-plan`, `--clarify --clear` (and the combined
-> `--clear`) are **destructive**:
-> - `--implement --clear` deletes ALL files in `qa/` and `logs/` (config.json is left untouched).
-> - `--implement --clear-plan` deletes the ENTIRE contents of the `specs/pbi` folder (including
+> `implement --clear`, `implement --clear-plan`, `clarify --clear` (and the combined
+> `clear`) are **destructive**:
+> - `implement --clear` deletes ALL files in `qa/` and `logs/` (config.json is left untouched).
+> - `implement --clear-plan` deletes the ENTIRE contents of the `specs/pbi` folder (including
 >   `README.md`/`findings.md`/`workplan.md`) and empties the `epic` array in config.json.
-> - `--clarify --clear` deletes all contents of the `specs/clarifications` folder EXCEPT
+> - `clarify --clear` deletes all contents of the `specs/clarifications` folder EXCEPT
 >   `claude.md` (config.json is left untouched).
 >
 > All of them ask for confirmation (`type "yes"`) before deleting; add `--yes` to skip the
-> confirmation (e.g. for non-interactive use). `--clear` asks once and then runs all three.
+> confirmation (e.g. for non-interactive use). `clear` asks once and then runs all three.
 
 ## Manual verification
 
 Manually verify a single epic (produces a report in `verify/`):
 
 ```bash
-py tempa.py --verify EPIC-05
+py tempa.py verify EPIC-05
 ```

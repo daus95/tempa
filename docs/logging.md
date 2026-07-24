@@ -8,9 +8,9 @@ See [README.md](../README.md) for a summary.
 | `logs/session_*.txt` | Log per implementation session |
 | `logs/qa_*.txt` | Log per QA session |
 | `logs/clarification_*` · `logs/apply_clarification_*` | Clarification loop logs |
-| `logs/plan_epics_*` | Plan-drafting log (automatic via `--implement`) |
+| `logs/plan_epics_*` | Plan-drafting log (automatic via `implement`) |
 | `qa/EPIC-NN-qa-*.md` | QA findings report per epic |
 | `verify/EPIC-NN-verify-*.md` | Manual verification report |
 
-To wipe everything in `qa/` and `logs/`: `py tempa.py --implement --clear` (asks for
+To wipe everything in `qa/` and `logs/`: `py tempa.py implement --clear` (asks for
 confirmation; add `--yes` to skip). See [docs/command-reference.md](command-reference.md).

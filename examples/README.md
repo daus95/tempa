@@ -14,10 +14,10 @@ Write the specification](../README.md#step-1--write-the-specification) in the ma
 1. Pick the scenario closest to your needs, or use it purely as a reference for writing
    style.
 2. Copy the contents of the relevant scenario's `PRD.md` into the `sources.prd` folder
-   (default: `specs/prd`) inside your target project (the project you already ran `--init`
+   (default: `specs/prd`) inside your target project (the project you already ran `init`
    on — not this Tempa folder).
-3. Continue with Tempa's normal workflow: `py tempa.py --clarify` → answer the clarification
-   questions → `py tempa.py --implement`.
+3. Continue with Tempa's normal workflow: `py tempa.py clarify` → answer the clarification
+   questions → `py tempa.py implement`.
 
 Both PRDs are deliberately written in full (Purpose, Business Process, Data Model, UI
 Concept, Tech Stack), following the five aspects recommended in the main README, so that

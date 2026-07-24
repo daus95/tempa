@@ -26,14 +26,14 @@ The AI model is stored in `config.json` under the `models` key.
 
 | Stage | Used by | Default |
 |-------|----------------|---------|
-| `clarify` | `--clarify` | `claude-opus-4-8` (opus-4.8) |
-| `plan` | plan drafting (automatic via `--implement`, or `--implement --replan`) | `claude-sonnet-5` (sonnet-5) |
-| `implement` | `--implement`, QA, `--verify` | `claude-sonnet-5` (sonnet-5) |
+| `clarify` | `clarify` | `claude-opus-4-8` (opus-4.8) |
+| `plan` | plan drafting (automatic via `implement`, or `implement --replan`) | `claude-sonnet-5` (sonnet-5) |
+| `implement` | `implement`, QA, `verify` | `claude-sonnet-5` (sonnet-5) |
 
 ```bash
-py tempa.py --set-model --clarify opus-4.8 --plan sonnet-5 --implement sonnet-5
-py tempa.py --set-model --implement claude-opus-4-8    # accepts an alias or a full model id
-py tempa.py --show-models                              # show the model per stage
+py tempa.py set-model --clarify opus-4.8 --plan sonnet-5 --implement sonnet-5
+py tempa.py set-model --implement claude-opus-4-8    # accepts an alias or a full model id
+py tempa.py show-models                              # show the model per stage
 ```
 
 - Values accept an **alias** (`opus-4.8`, `sonnet-5`, `haiku-4.5`, `fable-5`) or a **full
