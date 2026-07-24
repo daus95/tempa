@@ -1,13 +1,13 @@
-# Clarification Mode Reference (`--clarify`)
+# Clarification Mode Reference (`clarify`)
 
-Full reference for every `--clarify` mode: manual (default), `--auto-answer`, `--apply`, and
+Full reference for every `clarify` mode: manual (default), `--auto-answer`, `--apply`, and
 `--finalize`. See [README.md](../README.md) — Step 2 (Answer Clarifications) — for the
 recommended iterative flow.
 
-## Manual mode (default) — `py tempa.py --clarify`
+## Manual mode (default) — `py tempa.py clarify`
 
 ```bash
-py tempa.py --clarify
+py tempa.py clarify
 ```
 
 Runs **one evaluation pass**, then stops:
@@ -20,19 +20,19 @@ Runs **one evaluation pass**, then stops:
    (so it's easy to open).
 3. A suggested next step, based on severity:
    - `critical == 0` **and** `major == 0` → clarification is considered done; recommends
-     moving on to `--implement` (plan drafting will run automatically first).
+     moving on to `implement` (plan drafting will run automatically first).
    - `critical == 0` (still some `major`) → recommends answering manually, **or** finishing
-     automatically with `--clarify --finalize`.
+     automatically with `clarify --finalize`.
    - `critical > 0` → recommends reviewing & answering manually in the result file, then
-     running `--clarify` again.
+     running `clarify` again.
 
 You can open the result file, **answer the clarifications manually** (editing the PRD/spec
-per your decisions), then call `--clarify` again for the next iteration.
+per your decisions), then call `clarify` again for the next iteration.
 
-## Auto-answer mode — `py tempa.py --clarify --auto-answer`
+## Auto-answer mode — `py tempa.py clarify --auto-answer`
 
 ```bash
-py tempa.py --clarify --auto-answer
+py tempa.py clarify --auto-answer
 ```
 
 Automatically answers clarification findings that are **still unanswered** (one pass,
@@ -47,10 +47,10 @@ Automatically answers clarification findings that are **still unanswered** (one 
 
 Useful as a middle ground: let Claude answer first, then you review/correct.
 
-## Apply mode — `py tempa.py --clarify --apply`
+## Apply mode — `py tempa.py clarify --apply`
 
 ```bash
-py tempa.py --clarify --apply
+py tempa.py clarify --apply
 ```
 
 Applies the answers/resolutions **already recorded** in the clarification file into the
@@ -58,15 +58,15 @@ PRD/spec document (`sources.prd`) — one session, **without** re-evaluating. Th
 after answering (whether manually or via `--auto-answer`): Claude reads the resolutions in
 `sources.clarifications`, then edits the relevant PRD/spec documents, and updates
 `last_clarification_findings`. If there's no clarification result yet, the harness asks you
-to run `--clarify` first.
+to run `clarify` first.
 
 Difference from `--finalize`: `--apply` doesn't re-evaluate — it only applies existing
 answers. `--finalize` combines evaluate + apply in a loop.
 
-## Finalize mode (automatic clarification) — `py tempa.py --clarify --finalize`
+## Finalize mode (automatic clarification) — `py tempa.py clarify --finalize`
 
 ```bash
-py tempa.py --clarify --finalize
+py tempa.py clarify --finalize
 ```
 
 Performs **automatic evaluation and answering** in a loop (up to `max_clarification_run`

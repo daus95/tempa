@@ -54,18 +54,18 @@ C:\tools\tempa\           (Tempa folder — separate)
 Quickly check everything is ready before moving to the next step:
 
 ```bash
-py tempa.py --test          # verifies the Claude CLI can Write/Read/Delete a file
+py tempa.py test            # verifies the Claude CLI can Write/Read/Delete a file
 ```
 
 ---
 
 ### Step 3 — Initial Setup
 
-Point Tempa at the project you want to work on with `--init`, passing the (absolute) path
+Point Tempa at the project you want to work on with `init`, passing the (absolute) path
 to your project folder:
 
 ```bash
-py tempa.py --init C:\repo\<your-repo>
+py tempa.py init C:\repo\<your-repo>
 ```
 
 This command will:
@@ -129,7 +129,7 @@ Not sure how to start, or just want to try Tempa out first? The [examples/](exam
 folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
 database) you can copy straight into `specs/prd` — see [examples/README.md](examples/README.md).
 
-### Step 2 — Answer clarifications (`--clarify`)
+### Step 2 — Answer clarifications (`clarify`)
 
 The goal: the system asks about anything ambiguous/unclear in the PRD, you answer, and those
 answers get applied back into the PRD — repeated until there are no more `critical`/`major`
@@ -139,10 +139,10 @@ not as alternatives to pick from.
 #### A. Answer manually — during the early iterations
 
 ```bash
-py tempa.py --clarify          # evaluate: system writes questions + recommended answers to a file
+py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file
 # → open the resulting file, answer each question yourself
-py tempa.py --clarify --apply  # apply your answers back into the PRD
-py tempa.py --clarify          # re-evaluate, repeat while critical/major findings remain
+py tempa.py clarify --apply  # apply your answers back into the PRD
+py tempa.py clarify          # re-evaluate, repeat while critical/major findings remain
 ```
 
 **When:** during the early iterations (usually the first 3–4 rounds).
@@ -154,7 +154,7 @@ starts off pointed in the right direction.
 #### B. Answer automatically — once recommendations prove accurate
 
 ```bash
-py tempa.py --clarify --finalize
+py tempa.py clarify --finalize
 ```
 
 **When:** after a few manual rounds, once you notice the system's recommended answers over
@@ -170,13 +170,13 @@ findings may still remain, and that's **fine**: minor findings will be resolved 
 during implementation (Step 3). So once `--finalize` finishes, you can move straight on to
 implementation without needing to chase down the remaining minor findings.
 
-Full reference for every mode (`--clarify` manual, `--auto-answer`, `--apply`, `--finalize`):
+Full reference for every mode (`clarify` manual, `--auto-answer`, `--apply`, `--finalize`):
 see [docs/clarify-modes.md](docs/clarify-modes.md).
 
-### Step 3 — Run implementation (`--implement`)
+### Step 3 — Run implementation (`implement`)
 
 ```bash
-py tempa.py --implement
+py tempa.py implement
 ```
 
 Just run this. The system will (automatically, unattended): draft a plan if there's no task
