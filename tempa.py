@@ -208,6 +208,24 @@ def _arg_value(flag: str) -> str | None:
     return None
 
 
+def _reject_unknown_flags(command_label: str, known_flags: set[str]) -> None:
+    """Typo guard: error out (exit 1) if sys.argv has a "--xxx" token that isn't one of
+    `known_flags` (which should include the command's own primary flag). Without this, an
+    unrecognized flag is silently ignored — at best a no-op, at worst it falls through to a
+    completely different default action (e.g. a mistyped --implement reset flag silently
+    starting a full implementation run instead of erroring).
+
+    `--show-prompt` is always allowed since it's a global modifier accepted by every
+    session-running command. Only whole-token flags are checked, so this does not catch a
+    typo in a flag's VALUE (e.g. the path after --root)."""
+    known = known_flags | {"--show-prompt"}
+    unknown = [a for a in sys.argv[1:] if a.startswith("--") and a not in known]
+    if unknown:
+        log(f"ERROR: unrecognized flag(s) for {command_label}: {', '.join(unknown)}")
+        log(f"Valid flags: {', '.join(sorted(known_flags))}")
+        sys.exit(1)
+
+
 def load_prompt(name: str, fallback: str = "") -> str:
     """Load a prompt template from PROMPT_DIR/<name>.md.
 
@@ -2479,21 +2497,25 @@ if __name__ == "__main__":
     elif "--status" in sys.argv:
         print_status()
     elif "--init" in sys.argv:
+        _reject_unknown_flags("--init", {"--init"})
         run_init()
     elif "--set-folders" in sys.argv:
+        _reject_unknown_flags("--set-folders", {"--set-folders", "--root", "--docs", "--adr", "--specs", "--apps", "--infra", "--archive"})
         set_working_folders()
     elif "--show-folders" in sys.argv:
         print_workspace()
     elif "--set-model" in sys.argv:
+        _reject_unknown_flags("--set-model", {"--set-model", "--clarify", "--plan", "--implement"})
         set_models()
     elif "--show-models" in sys.argv:
         print_models()
     elif "--test" in sys.argv:
         run_test()
-    elif "--clarify" in sys.argv and "--clear" in sys.argv:
-        run_clarify_clear()
     elif "--clarify" in sys.argv:
-        if "--finalize" in sys.argv:
+        _reject_unknown_flags("--clarify", {"--clarify", "--clear", "--finalize", "--apply", "--auto-answer", "--yes"})
+        if "--clear" in sys.argv:
+            run_clarify_clear()
+        elif "--finalize" in sys.argv:
             run_clarify_finalize()
         elif "--apply" in sys.argv:
             run_clarify_apply()
@@ -2507,77 +2529,82 @@ if __name__ == "__main__":
         print("To clear a previous plan result: py tempa.py --implement --clear-plan")
         sys.exit(1)
     elif "--verify" in sys.argv:
+        _reject_unknown_flags("--verify", {"--verify"})
         idx = sys.argv.index("--verify")
         if idx + 1 >= len(sys.argv):
             print("Usage: py tempa.py --verify <epic>  (e.g. --verify EPIC-05)")
             sys.exit(1)
         run_verify(sys.argv[idx + 1])
-    elif "--implement" in sys.argv and "--reset-failed" in sys.argv:
-        config = load_config()
-        reset_count = 0
-        for i, session in enumerate(config.get("epic") or []):
-            if session["status"] == "failed":
-                label = session.get("epic_name", f"epic_{i}")
-                config["epic"][i]["status"] = "pending"
-                config["epic"][i].pop("claude_session_id", None)
-                reset_count += 1
-                log(f"Reset [{label}] → pending")
-        if reset_count == 0:
-            log("No failed sessions found — nothing to reset")
-        else:
-            save_config(config)
-            log(f"Reset {reset_count} failed session(s). Ready to restart.")
-    elif "--implement" in sys.argv and "--reset-qa" in sys.argv:
-        config = load_config()
-        reset_count = 0
-        for i, session in enumerate(config.get("epic") or []):
-            if session["status"] == "done" and (session.get("qa_passed", False) or session.get("qa_status") in ("ongoing", "done")):
-                label = session.get("epic_name", f"epic_{i}")
-                config["epic"][i]["qa_passed"] = False
-                config["epic"][i]["qa_status"] = "idle"
-                config["epic"][i]["qa_session_id"] = ""
-                config["epic"][i]["qa_total_run"] = 0
-                config["epic"][i]["qa_report_filename"] = ""
-                reset_count += 1
-                log(f"Reset QA [{label}] → qa_passed=false, qa_status=idle")
-        if reset_count == 0:
-            log("No done epics with QA state found — nothing to reset")
-        else:
-            save_config(config)
-            log(f"Reset QA for {reset_count} epic(s). QA will be re-run.")
-    elif "--implement" in sys.argv and "--reset" in sys.argv:
-        config = load_config()
-        reset_count = 0
-        for i, session in enumerate(config.get("epic") or []):
-            if session["status"] == "on_progress":
-                label = session.get("epic_name", f"epic_{i}")
-                config["epic"][i]["status"] = "pending"
-                config["epic"][i].pop("claude_session_id", None)
-                reset_count += 1
-                log(f"Reset [{label}] → pending (session_id cleared)")
-        if reset_count == 0:
-            log("No on_progress sessions found — nothing to reset")
-        else:
-            save_config(config)
-            log(f"Reset {reset_count} session(s). Ready to restart.")
-    elif "--implement" in sys.argv and "--clear-plan" in sys.argv:
-        run_plan_clear()
-    elif "--implement" in sys.argv and "--clear" in sys.argv:
-        run_implement_clear()
     elif "--implement" in sys.argv:
-        features_override = None
-        if "--features" in sys.argv:
-            idx = sys.argv.index("--features")
-            if idx + 1 >= len(sys.argv):
-                print("Usage: py tempa.py --implement --features <n>")
-                sys.exit(1)
-            try:
-                features_override = int(sys.argv[idx + 1])
-            except ValueError:
-                print(f"--features must be a number, not '{sys.argv[idx + 1]}'")
-                sys.exit(1)
-        main(features_override=features_override, replan="--replan" in sys.argv)
+        _reject_unknown_flags("--implement", {"--implement", "--reset-failed", "--reset-qa", "--reset",
+                                               "--clear-plan", "--clear", "--features", "--replan", "--yes"})
+        if "--reset-failed" in sys.argv:
+            config = load_config()
+            reset_count = 0
+            for i, session in enumerate(config.get("epic") or []):
+                if session["status"] == "failed":
+                    label = session.get("epic_name", f"epic_{i}")
+                    config["epic"][i]["status"] = "pending"
+                    config["epic"][i].pop("claude_session_id", None)
+                    reset_count += 1
+                    log(f"Reset [{label}] → pending")
+            if reset_count == 0:
+                log("No failed sessions found — nothing to reset")
+            else:
+                save_config(config)
+                log(f"Reset {reset_count} failed session(s). Ready to restart.")
+        elif "--reset-qa" in sys.argv:
+            config = load_config()
+            reset_count = 0
+            for i, session in enumerate(config.get("epic") or []):
+                if session["status"] == "done" and (session.get("qa_passed", False) or session.get("qa_status") in ("ongoing", "done")):
+                    label = session.get("epic_name", f"epic_{i}")
+                    config["epic"][i]["qa_passed"] = False
+                    config["epic"][i]["qa_status"] = "idle"
+                    config["epic"][i]["qa_session_id"] = ""
+                    config["epic"][i]["qa_total_run"] = 0
+                    config["epic"][i]["qa_report_filename"] = ""
+                    reset_count += 1
+                    log(f"Reset QA [{label}] → qa_passed=false, qa_status=idle")
+            if reset_count == 0:
+                log("No done epics with QA state found — nothing to reset")
+            else:
+                save_config(config)
+                log(f"Reset QA for {reset_count} epic(s). QA will be re-run.")
+        elif "--reset" in sys.argv:
+            config = load_config()
+            reset_count = 0
+            for i, session in enumerate(config.get("epic") or []):
+                if session["status"] == "on_progress":
+                    label = session.get("epic_name", f"epic_{i}")
+                    config["epic"][i]["status"] = "pending"
+                    config["epic"][i].pop("claude_session_id", None)
+                    reset_count += 1
+                    log(f"Reset [{label}] → pending (session_id cleared)")
+            if reset_count == 0:
+                log("No on_progress sessions found — nothing to reset")
+            else:
+                save_config(config)
+                log(f"Reset {reset_count} session(s). Ready to restart.")
+        elif "--clear-plan" in sys.argv:
+            run_plan_clear()
+        elif "--clear" in sys.argv:
+            run_implement_clear()
+        else:
+            features_override = None
+            if "--features" in sys.argv:
+                idx = sys.argv.index("--features")
+                if idx + 1 >= len(sys.argv):
+                    print("Usage: py tempa.py --implement --features <n>")
+                    sys.exit(1)
+                try:
+                    features_override = int(sys.argv[idx + 1])
+                except ValueError:
+                    print(f"--features must be a number, not '{sys.argv[idx + 1]}'")
+                    sys.exit(1)
+            main(features_override=features_override, replan="--replan" in sys.argv)
     elif "--clear" in sys.argv:
+        _reject_unknown_flags("--clear", {"--clear", "--yes"})
         run_clear_all()
     else:
         print("No command given. Run 'py tempa.py --help' for usage.")
