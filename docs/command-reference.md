@@ -9,11 +9,11 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `show-folders` | Shows the active working folder + resolved absolute paths |
 | `set-model [--clarify m] [--plan m] [--implement m]` | Sets the AI model per stage (alias/id) |
 | `show-models` | Shows the AI model per stage |
-| `clarify` | Clarify the PRD — one manual evaluation pass (human-in-the-loop), then opens the clarification-answer web UI on the result (unless `--noui`) |
+| `clarify` | Clarify the PRD — one manual evaluation pass (human-in-the-loop), then opens the clarification-answer web UI on the result (unless `--noui`); saving in the UI auto-applies the answers, then asks whether to run another round |
 | `clarify --noui` | Same as `clarify`, but skip opening the answer web UI |
-| `answer <file>` | Reopen the clarification-answer web UI on an existing clarification result file |
+| `answer <file>` | Reopen the clarification-answer web UI on an existing clarification result file; saving auto-applies the answers, then asks whether to run another round |
 | `clarify --auto-answer` | Automatically answers findings that are still unanswered (no re-evaluation) |
-| `clarify --apply` | Applies answers from the clarification file into the PRD/spec document (no re-evaluation) |
+| `clarify --apply` | Applies answers from the clarification file into the PRD/spec document (no re-evaluation), then asks whether to run another round |
 | `clarify --finalize` | Evaluate + auto-answer, looping until there's no critical/major left |
 | `clarify --clear [--yes]` | Deletes all files in `specs/clarifications` except `claude.md` (asks for confirmation) |
 | `implement --clear-plan [--yes]` | Clears the plan: wipes all of `specs/pbi` + empties the `epic` array (asks for confirmation) |

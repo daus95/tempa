@@ -1362,6 +1362,10 @@ def run_clarify_once(noui: bool = False) -> None:
         if saved:
             log("Answers saved — applying them to the PRD/spec now...")
             _run_apply_step(load_config())
+            if _ask_continue_clarification():
+                log("Starting another clarification round...")
+                run_clarify_once(noui=noui)
+                return
 
     sys.exit(0)
 
@@ -1520,6 +1524,20 @@ def _run_apply_step(config: dict) -> bool:
     return True
 
 
+def _ask_continue_clarification() -> bool:
+    """After an apply step finishes (whether triggered from the web UI or via an explicit
+    --apply), ask the user whether to run another clarification round right away. Only
+    asked interactively; --finalize already loops by rule and never needs this prompt.
+    Returns False (skipping the prompt entirely) when stdin is not a TTY."""
+    if not sys.stdin.isatty():
+        return False
+    try:
+        answer = input("Run another clarification round now? [y/N]: ").strip().lower()
+    except EOFError:
+        answer = ""
+    return answer in ("y", "yes")
+
+
 def run_clarify_apply() -> None:
     """Apply the answers/resolutions recorded in the clarification files to the PRD/spec
     documents (one session, WITHOUT re-evaluating). Prerequisite: clarification results
@@ -1541,7 +1559,12 @@ def run_clarify_apply() -> None:
     _banner(f"Clarify (apply) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
-    sys.exit(0 if _run_apply_step(config) else 1)
+    success = _run_apply_step(config)
+    if success and _ask_continue_clarification():
+        log("Starting another clarification round...")
+        run_clarify_once(noui=False)
+        return
+    sys.exit(0 if success else 1)
 
 
 def _resolve_clarification_file(file_arg: str, clarifications_path: str) -> Path:
@@ -1576,6 +1599,10 @@ def run_answer_command(file_arg: str) -> None:
     if saved:
         log("Answers saved — applying them to the PRD/spec now...")
         _run_apply_step(load_config())
+        if _ask_continue_clarification():
+            log("Starting another clarification round...")
+            run_clarify_once(noui=False)
+            return
     sys.exit(0)
 
 
