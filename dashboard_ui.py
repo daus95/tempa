@@ -390,19 +390,47 @@ def _file_severity_stats(path: Path) -> dict | None:
     }
 
 
-def _load_clarify_applied_hashes() -> dict:
-    """config.json's "clarify_applied_hashes" — {filename: content-hash-at-last-apply},
-    stamped by tempa.py's _record_clarify_applied_state() right after a successful
-    `tempa clarify --apply`. Read directly from config.json (rather than importing
-    tempa.py, which imports this module) so the two stay decoupled; config.json always
-    lives next to this file, same as tempa.py."""
+def _load_dashboard_config() -> dict:
+    """Read config.json directly (rather than importing tempa.py, which imports this
+    module) so the two stay decoupled; config.json always lives next to this file,
+    same as tempa.py. Returns {} if it can't be read/parsed."""
     config_path = Path(__file__).resolve().parent / "config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    hashes = config.get("clarify_applied_hashes")
+    return config if isinstance(config, dict) else {}
+
+
+def _load_clarify_applied_hashes() -> dict:
+    """config.json's "clarify_applied_hashes" — {filename: content-hash-at-last-apply},
+    stamped by tempa.py's _record_clarify_applied_state() right after a successful
+    `tempa clarify --apply`."""
+    hashes = _load_dashboard_config().get("clarify_applied_hashes")
     return hashes if isinstance(hashes, dict) else {}
+
+
+def _workspace_initialized() -> bool:
+    """Whether `tempa init` has ever been run — workspace.root is set once on first
+    init and never cleared afterward, so it's the only reliable signal (specs/prd
+    paths always resolve to *some* folder even when uninitialized, via WORKING_DIR
+    fallbacks in tempa.py, so probing the filesystem can't distinguish the two)."""
+    return bool(_load_dashboard_config().get("workspace", {}).get("root"))
+
+
+def _last_clarification_findings() -> dict:
+    """config.json's "last_clarification_findings" — written by the Claude session
+    itself at the end of `clarify`/`clarify --apply`/`clarify --finalize`, not by any
+    Python code here. {critical, major, minor} counts, defaulting each to 0."""
+    f = _load_dashboard_config().get("last_clarification_findings") or {}
+    return {"critical": f.get("critical", 0), "major": f.get("major", 0), "minor": f.get("minor", 0)}
+
+
+def _epic_sessions() -> list:
+    """config.json's "epic" array — the same per-epic/feature progress data
+    `tempa status` (print_status()) formats to the console."""
+    epics = _load_dashboard_config().get("epic")
+    return epics if isinstance(epics, list) else []
 
 
 def _clarify_files_overview(clar_dir: Path) -> tuple[list[dict], list[dict]]:
@@ -514,6 +542,101 @@ def _start_clarify_run(server, mode: str) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Implementation run (Start / Stop Implementation) — same subprocess/log-polling
+# shape as the clarify run above, but `tempa implement` is a long-running poll loop
+# (runs until every epic is done, not one bounded session), so this also tracks the
+# live Popen so a Stop button can kill it.
+# ---------------------------------------------------------------------------
+
+def _new_implement_run_state() -> dict:
+    return {
+        "lock": threading.Lock(),
+        "running": False,
+        "lines": [],
+        "progress": None,
+        "returncode": None,
+        "process": None,
+    }
+
+
+def _start_implement_run(server) -> bool:
+    """Start `tempa implement` as a background subprocess, same log-streaming shape
+    as _start_clarify_run. Returns False without starting anything if a run is
+    already in progress."""
+    run = server.implement_run
+    with run["lock"]:
+        if run["running"]:
+            return False
+        run["running"] = True
+        run["lines"] = []
+        run["progress"] = None
+        run["returncode"] = None
+        run["process"] = None
+
+    def worker() -> None:
+        tempa_py = Path(__file__).resolve().parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "implement"]
+        returncode = -1
+        try:
+            process = subprocess.Popen(
+                cmd,
+                # implement's plain run path never calls input() (confirmed: only the
+                # destructive --clear/--clear-plan/--reset* flags do, none of which
+                # this spawns) — DEVNULL is defense in depth, matching the clarify
+                # runner, in case that ever changes.
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            with run["lock"]:
+                run["process"] = process
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                with run["lock"]:
+                    if _PROGRESS_LINE_RE.match(line):
+                        run["progress"] = line
+                    else:
+                        run["lines"].append(line)
+            process.wait()
+            returncode = process.returncode
+        except OSError as e:
+            with run["lock"]:
+                run["lines"].append(f"[error] Could not start implement process: {e}")
+        with run["lock"]:
+            run["running"] = False
+            run["progress"] = None
+            run["process"] = None
+            run["returncode"] = returncode
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _stop_implement_run(server) -> bool:
+    """Kill the running `tempa implement` subprocess. Uses `taskkill /T /F` on
+    Windows to kill its whole process tree — implement spawns the actual `claude`
+    CLI call as a child of this same process, and plain Popen.terminate() only
+    kills the immediate process, leaving that child running (and still burning
+    Claude usage) in the background. Returns False if nothing is running."""
+    run = server.implement_run
+    with run["lock"]:
+        process = run["process"]
+    if process is None:
+        return False
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            process.terminate()
+    except OSError:
+        return False
+    return True
+
+
 def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
     """Write the given answers into `path` (one clarification result file) and return
     its updated (answered, total) counts."""
@@ -585,8 +708,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             unanswered, answered = _clarify_files_overview(self.server.clar_dir)
             self._send_json(200, {
                 "ok": True,
+                "workspace": {"initialized": _workspace_initialized()},
                 "spec": {"tree": build_tree(self.server.prd_dir)},
-                "clarify": {"unanswered": unanswered, "answered": answered},
+                "clarify": {"unanswered": unanswered, "answered": answered,
+                            "findings": _last_clarification_findings()},
             })
         elif route == "/api/spec/file":
             self._handle_spec_file(parse_qs(parsed.query))
@@ -594,6 +719,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_file(parse_qs(parsed.query))
         elif route == "/api/clarify/run":
             self._handle_clarify_run_status(parse_qs(parsed.query))
+        elif route == "/api/implement/run":
+            self._handle_implement_run_status(parse_qs(parsed.query))
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -675,6 +802,25 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "progress": run["progress"],
             })
 
+    def _handle_implement_run_status(self, query: dict) -> None:
+        try:
+            since = int((query.get("since", ["0"])[0]))
+        except ValueError:
+            since = 0
+        run = self.server.implement_run
+        with run["lock"]:
+            lines = list(run["lines"][max(since, 0):])
+            total = len(run["lines"])
+            self._send_json(200, {
+                "ok": True, "running": run["running"],
+                "returncode": run["returncode"], "lines": lines, "next": total,
+                "progress": run["progress"],
+                # Epics are read fresh from config.json on every poll (not cached) —
+                # the Status tab shows the same data the "Log" tab's run is actively
+                # writing into config.json, so it needs to reflect live progress too.
+                "epics": _epic_sessions(),
+            })
+
     # -- POST ---------------------------------------------------------------
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -690,6 +836,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_save()
         elif parsed.path == "/api/clarify/run":
             self._handle_clarify_run_start()
+        elif parsed.path == "/api/implement/run":
+            self._handle_implement_run_start()
+        elif parsed.path == "/api/implement/stop":
+            self._handle_implement_run_stop()
+        elif parsed.path == "/api/clear":
+            self._handle_clear_all()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -846,6 +998,53 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True})
 
+    def _handle_implement_run_start(self) -> None:
+        # Server-side gate, not just a disabled button client-side — tempa.py's
+        # `implement` itself has no awareness of clarification findings and will
+        # happily start regardless, so this is the only thing actually enforcing it.
+        findings = _last_clarification_findings()
+        if findings["critical"] or findings["major"]:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot start implementation while critical/major clarification findings remain.",
+            })
+            return
+        if not _start_implement_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Implementation is already running."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_implement_run_stop(self) -> None:
+        if not _stop_implement_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Implementation is not running."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_clear_all(self) -> None:
+        if self.server.clarify_run["running"] or self.server.implement_run["running"]:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot clear while a clarify or implementation run is in progress.",
+            })
+            return
+        tempa_py = Path(__file__).resolve().parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "clear", "--yes"]
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._send_json(500, {"ok": False, "error": f"Could not run clear: {e}"})
+            return
+        output = result.stdout or ""
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "error": output.strip() or f"Clear failed (exit code {result.returncode})."})
+            return
+        self._send_json(200, {"ok": True, "output": output})
+
 
 def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> bool:
     """Serve the dashboard on a random 127.0.0.1 port, open it in the default
@@ -866,6 +1065,7 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     server.page_html = page_html
     server.any_saved = False
     server.clarify_run = _new_clarify_run_state()
+    server.implement_run = _new_implement_run_state()
 
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}/"
@@ -891,6 +1091,8 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     answered_json = json.dumps(clarify_answered, ensure_ascii=False)
     prd_name = json.dumps(prd_dir.name, ensure_ascii=False)
     view_json = json.dumps(initial_view if initial_view in ("home", "specification", "clarification") else "home")
+    workspace_initialized_json = json.dumps(_workspace_initialized())
+    clarify_findings_json = json.dumps(_last_clarification_findings(), ensure_ascii=False)
     return (
         _PAGE_TEMPLATE
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -898,6 +1100,8 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__CLARIFY_ANSWERED__*/null", answered_json)
         .replace("/*__PRD_NAME__*/null", prd_name)
         .replace("/*__INITIAL_VIEW__*/null", view_json)
+        .replace("/*__WORKSPACE_INITIALIZED__*/null", workspace_initialized_json)
+        .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
     )
 
 
@@ -1001,14 +1205,58 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .editor { width: 100%; height: 100%; border: 0; resize: none; padding: 18px 22px;
     font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace;
     color: var(--text); background: var(--panel); outline: none; tab-size: 4; }
-  .placeholder-pane, .home-pane, .impl-pane { display: flex; align-items: center;
+  .placeholder-pane { display: flex; align-items: center;
     justify-content: center; color: var(--muted); text-align: center; padding: 40px; }
 
-  /* ---- watermark / coming-soon ---- */
-  .watermark { font-size: 15px; opacity: .8; }
-  .watermark .brand { font-size: 46px; font-weight: 800; letter-spacing: 2px;
-    color: var(--border-strong); margin-bottom: 10px; }
-  .impl-pane .brand { font-size: 40px; margin-bottom: 10px; }
+  /* ---- home page (step-by-step workflow) ---- */
+  .home-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; }
+  .home-brand { font-size: 40px; font-weight: 800; letter-spacing: 2px;
+    color: var(--border-strong); text-align: center; margin-bottom: 28px; }
+  .home-init-prompt { display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 60px 20px; color: var(--muted); text-align: center; }
+  .home-init-icon { font-size: 48px; }
+  .home-init-text { max-width: 480px; line-height: 1.6; }
+  .home-init-text code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  .home-steps { display: flex; flex-direction: column; gap: 18px; max-width: 720px; margin: 0 auto; }
+  .home-step { border: 1px solid var(--border-strong); border-radius: 10px; padding: 18px 22px;
+    background: var(--panel); }
+  .home-step.locked { opacity: 0.55; }
+  .home-step-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .home-step-num { display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff;
+    font-weight: 700; font-size: 0.85rem; flex: none; }
+  .home-step-title { font-weight: 700; font-size: 1.02rem; }
+  .home-step-desc { color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
+  .home-step-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  .home-step-status { margin-top: 10px; font-size: 0.88rem; color: var(--text); }
+  .home-danger-zone { max-width: 720px; margin: 32px auto 0; padding-top: 20px;
+    border-top: 1px solid var(--border); text-align: center; }
+  .home-clear-btn { background: var(--panel); color: var(--danger); border-color: var(--danger);
+    font-weight: 600; padding: 8px 18px; }
+  .home-clear-btn:hover:not(:disabled) { background: var(--danger); color: #fff; }
+  .home-clear-btn:disabled { opacity: 0.5; cursor: default; }
+  .home-danger-zone .home-step-desc { margin-top: 8px; }
+
+  /* ---- implementation page (start/stop + status/log tabs) ---- */
+  .impl-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; }
+  .impl-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .impl-header-status { color: var(--muted); font-size: 0.85rem; }
+  .impl-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong); margin-bottom: 18px; }
+  .impl-tab { background: transparent; border: none; border-radius: 0; padding: 8px 16px;
+    font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .impl-tab:hover:not(:disabled) { border-color: transparent; color: var(--text); }
+  .impl-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .impl-tab-panel.hidden { display: none; }
+  .impl-epic-card { border: 1px solid var(--border-strong); border-radius: 8px; padding: 12px 16px;
+    margin-bottom: 12px; max-width: 860px; background: var(--panel); }
+  .impl-epic-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; }
+  .impl-epic-name { font-weight: 700; }
+  .impl-epic-status { color: var(--muted); text-transform: capitalize; }
+  .impl-epic-progress, .impl-epic-lastrun { color: var(--muted); font-size: 0.82rem; }
+  .impl-qa-ok { color: var(--ok); font-weight: 600; font-size: 0.8rem; }
+  .impl-qa-pending { color: var(--major); font-weight: 600; font-size: 0.8rem; }
+  .impl-feature-list { margin-top: 8px; padding-left: 4px; }
+  .impl-feature-row { display: flex; gap: 8px; font-size: 0.85rem; padding: 2px 0; color: var(--text); }
 
   /* ---- rendered markdown (spec viewer) ---- */
   .markdown-body { max-width: 860px; }
@@ -1167,9 +1415,68 @@ _PAGE_TEMPLATE = r"""<!doctype html>
     </div>
     <div class="content">
       <div id="homePane" class="pane home-pane">
-        <div class="watermark">
-          <div class="brand">TEMPA</div>
-          <div>Select Specification or Clarification on the left to get started.</div>
+        <div class="home-brand">TEMPA</div>
+        <div id="homeNotInit" class="home-init-prompt hidden">
+          <div class="home-init-icon">📁</div>
+          <div class="home-init-text">
+            No application repository folder has been set yet.<br>
+            Run <code>tempa init &lt;path&gt;</code> first to set the project root folder.
+          </div>
+        </div>
+        <div id="homeSteps" class="home-steps hidden">
+          <div class="home-step" id="homeStep1">
+            <div class="home-step-header">
+              <span class="home-step-num">1</span>
+              <span class="home-step-title">Upload Specification</span>
+            </div>
+            <p class="home-step-desc">Upload specification documents (PRD) as the basis for clarification and implementation.</p>
+            <div class="home-step-actions">
+              <button type="button" class="big-action" id="homeAddFileBtn">
+                <span class="big-action-icon">📄</span>
+                <span class="big-action-label">Add File</span>
+              </button>
+              <button type="button" class="big-action" id="homeAddFolderBtn">
+                <span class="big-action-icon">📁</span>
+                <span class="big-action-label">Add Folder</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep1Status"></div>
+          </div>
+          <div class="home-step" id="homeStep2">
+            <div class="home-step-header">
+              <span class="home-step-num">2</span>
+              <span class="home-step-title">Clarification</span>
+            </div>
+            <p class="home-step-desc">Run clarification to find and resolve ambiguities/conflicts in the specification.</p>
+            <div class="home-step-actions">
+              <button type="button" class="clarify-run-btn" id="homeStartClarifyBtn">
+                <span>▶️</span><span>Start Clarification</span>
+              </button>
+              <button type="button" class="clarify-run-btn secondary" id="homeFinalizeClarifyBtn">
+                <span>🏁</span><span>Finalized Clarification</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep2Status"></div>
+          </div>
+          <div class="home-step" id="homeStep3">
+            <div class="home-step-header">
+              <span class="home-step-num">3</span>
+              <span class="home-step-title">Start Implementation</span>
+            </div>
+            <p class="home-step-desc">Start the automated implementation process based on the clarification results.</p>
+            <div class="home-step-actions">
+              <button type="button" class="clarify-run-btn" id="homeStartImplementBtn">
+                <span>🚀</span><span>Start Implementation</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep3Status"></div>
+          </div>
+          <div class="home-danger-zone">
+            <button type="button" class="home-clear-btn" id="homeClearAllBtn">
+              <span>🗑️</span><span>Clear All</span>
+            </button>
+            <p class="home-step-desc">Delete all plan, QA, log, and clarification results (specification files will not be deleted). This action cannot be undone.</p>
+          </div>
         </div>
       </div>
       <div id="specPane" class="pane hidden">
@@ -1228,9 +1535,24 @@ _PAGE_TEMPLATE = r"""<!doctype html>
         </div>
       </div>
       <div id="implPane" class="pane impl-pane hidden">
-        <div>
-          <div class="brand">🚧</div>
-          <div>Implementation view is coming soon.</div>
+        <div class="impl-header">
+          <button type="button" class="clarify-run-btn" id="startImplementBtn">
+            <span>🚀</span><span>Start Implementation</span>
+          </button>
+          <button type="button" class="clarify-run-btn secondary hidden" id="stopImplementBtn">
+            <span>⏹️</span><span>Stop Implementation</span>
+          </button>
+          <span class="impl-header-status" id="implHeaderStatus"></span>
+        </div>
+        <div class="impl-tabs">
+          <button type="button" class="impl-tab active" id="implTabStatusBtn">Status</button>
+          <button type="button" class="impl-tab" id="implTabLogBtn">Log</button>
+        </div>
+        <div class="impl-tab-panel" id="implStatusPanel">
+          <div id="implStatusBody"></div>
+        </div>
+        <div class="impl-tab-panel hidden" id="implLogPanel">
+          <div class="clarify-log-body" id="implLogBody"></div>
         </div>
       </div>
     </div>
@@ -1249,6 +1571,8 @@ const INITIAL_CLARIFY_UNANSWERED = /*__CLARIFY_UNANSWERED__*/null;
 const INITIAL_CLARIFY_ANSWERED = /*__CLARIFY_ANSWERED__*/null;
 const PRD_NAME = /*__PRD_NAME__*/null;
 const INITIAL_VIEW = /*__INITIAL_VIEW__*/null;
+const INITIAL_WORKSPACE_INITIALIZED = /*__WORKSPACE_INITIALIZED__*/null;
+const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -1396,7 +1720,18 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
   applyAnswersBtn = $("applyAnswersBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
-  clarifyLogStatus = $("clarifyLogStatus");
+  clarifyLogStatus = $("clarifyLogStatus"),
+  homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
+  homeStep1 = $("homeStep1"), homeStep2 = $("homeStep2"), homeStep3 = $("homeStep3"),
+  homeStep1Status = $("homeStep1Status"), homeStep2Status = $("homeStep2Status"), homeStep3Status = $("homeStep3Status"),
+  homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
+  homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
+  homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
+  startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
+  implHeaderStatus = $("implHeaderStatus"),
+  implTabStatusBtn = $("implTabStatusBtn"), implTabLogBtn = $("implTabLogBtn"),
+  implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
+  implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody");
 
 const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl"];
 
@@ -1418,6 +1753,11 @@ const state = {
   clarifyDirty: false,
   clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
   clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
+  workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
+  clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
+  epics: [],
+  implTab: "status",
+  implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -1492,9 +1832,13 @@ async function selectTop(key) {
   // View/Edit/Save toolbar (driven by currentKind) hides for every section overview.
   state.currentKind = null;
   if (key === "specification" || key === "clarification") state.expandedTop[key] = true;
-  if (key === "home") showPane("home");
-  else if (key === "implementation") showPane("impl");
-  else if (key === "specification") {
+  if (key === "home") {
+    renderHomeWorkflow();
+    showPane("home");
+  } else if (key === "implementation") {
+    refreshImplementRun();
+    showPane("impl");
+  } else if (key === "specification") {
     state.specShowingOverview = true;
     renderSpecOverview();
     showPane("specOverview");
@@ -1505,6 +1849,81 @@ async function selectTop(key) {
   }
   renderSidebar();
 }
+
+// ---------------------------------------------------------------------------
+// Home page — step-by-step workflow (init check -> upload spec -> clarify -> implement)
+// ---------------------------------------------------------------------------
+function renderHomeWorkflow() {
+  homeNotInit.classList.toggle("hidden", state.workspaceInitialized);
+  homeSteps.classList.toggle("hidden", !state.workspaceInitialized);
+  if (!state.workspaceInitialized) return;
+
+  const specCount = countSpecFiles(state.specTree);
+  const step1Done = specCount > 0;
+  homeStep1Status.textContent = step1Done
+    ? (specCount === 1 ? "1 specification file uploaded." : `${specCount} specification files uploaded.`)
+    : "No specification files yet.";
+
+  const step2Locked = !step1Done;
+  homeStep2.classList.toggle("locked", step2Locked);
+  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
+  const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
+  const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
+  homeStep2Status.textContent = step2Locked
+    ? "Upload a specification first (step 1)."
+    : totalFindings === 0
+      ? "No clarification results yet — click Start Clarification to begin."
+      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered.`;
+
+  const findings = state.clarifyFindings;
+  const findingsClean = findings.critical === 0 && findings.major === 0;
+  const step3Locked = step2Locked || !findingsClean;
+  homeStep3.classList.toggle("locked", step3Locked);
+  homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
+  homeStep3Status.textContent = step2Locked
+    ? "Finish step 2 first."
+    : findingsClean
+      ? "Ready to start implementation."
+      : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
+}
+
+homeAddFileBtn.addEventListener("click", () => { addFileInput.value = ""; addFileInput.click(); });
+homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; addFolderInput.click(); });
+
+homeStartClarifyBtn.addEventListener("click", async () => {
+  await selectTop("clarification");
+  startClarifyRun("run");
+});
+homeFinalizeClarifyBtn.addEventListener("click", async () => {
+  await selectTop("clarification");
+  startClarifyRun("finalize");
+});
+homeStartImplementBtn.addEventListener("click", async () => {
+  await selectTop("implementation");
+  startImplementRun();
+});
+
+homeClearAllBtn.addEventListener("click", async () => {
+  if (!window.confirm(
+    "Are you sure you want to delete ALL data (plan, QA, log, and clarification results)?\n" +
+    "Specification files will NOT be deleted.\n\nThis action CANNOT be undone.")) return;
+  homeClearAllBtn.disabled = true;
+  try {
+    const res = await fetch("/api/clear", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Clear failed.", true); return; }
+    toast("All data cleared successfully.");
+    await refreshClarifyList();
+    state.epics = [];
+    renderHomeWorkflow();
+  } catch (e) {
+    toast("Network error while clearing.", true);
+  } finally {
+    homeClearAllBtn.disabled = false;
+  }
+});
 
 function renderLeafSection(key, icon, label) {
   const wrap = document.createElement("div");
@@ -1769,7 +2188,8 @@ function stopClarifyPolling() {
 }
 
 function returncodeMessage(code, mode) {
-  const label = mode === "apply" ? "Apply" : mode === "finalize" ? "Finalize" : "Clarification";
+  const label = mode === "apply" ? "Apply" : mode === "finalize" ? "Finalize"
+    : mode === "implement" ? "Implementation" : "Clarification";
   if (code === 0) return `${label} run finished.`;
   if (code === 2) return `${label} stopped — Claude usage limit reached.`;
   if (code === 3) return `${label} stopped — authentication error.`;
@@ -1858,6 +2278,168 @@ async function checkClarifyRunOnLoad() {
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
+
+// ---------------------------------------------------------------------------
+// Implementation run (Start/Stop Implementation + Status/Log tabs)
+// ---------------------------------------------------------------------------
+function setImplTab(tab) {
+  state.implTab = tab;
+  implTabStatusBtn.classList.toggle("active", tab === "status");
+  implTabLogBtn.classList.toggle("active", tab === "log");
+  implStatusPanel.classList.toggle("hidden", tab !== "status");
+  implLogPanel.classList.toggle("hidden", tab !== "log");
+}
+implTabStatusBtn.addEventListener("click", () => setImplTab("status"));
+implTabLogBtn.addEventListener("click", () => setImplTab("log"));
+
+function epicStatusIcon(status) {
+  return { done: "✅", on_progress: "🔄", pending: "⬜", failed: "❌", require_fixing: "🔧" }[status] || "❔";
+}
+function featureStatusIcon(status) {
+  return { done: "✅", failed: "❌", require_fixing: "🔧" }[status] || "⬜";
+}
+
+function renderImplementStatus() {
+  implStatusBody.innerHTML = "";
+  if (!state.epics.length) {
+    implStatusBody.innerHTML = '<div class="clarify-log-empty">No plan/epic yet. A plan will be generated automatically the first time implementation starts.</div>';
+    return;
+  }
+  for (const epic of state.epics) {
+    const card = document.createElement("div");
+    card.className = "impl-epic-card";
+    const qaTag = epic.status === "done"
+      ? (epic.qa_passed ? '<span class="impl-qa-ok">QA ok</span>' : '<span class="impl-qa-pending">QA --</span>')
+      : "";
+    const lastRun = epic.last_run ? escapeHtml(epic.last_run.slice(0, 16).replace("T", " ")) : "-";
+    const features = (epic.features || []).map((f) =>
+      `<div class="impl-feature-row"><span>${featureStatusIcon(f.status)}</span><span>${escapeHtml(f.id)} — ${escapeHtml(f.name)}</span></div>`
+    ).join("");
+    card.innerHTML =
+      `<div class="impl-epic-header">` +
+        `<span class="impl-epic-icon">${epicStatusIcon(epic.status)}</span>` +
+        `<span class="impl-epic-name">${escapeHtml(epic.epic_name || "?")}</span>` +
+        `<span class="impl-epic-status">${escapeHtml(epic.status || "")}</span>` +
+        `<span class="impl-epic-progress">${epic.completed_features || 0}/${epic.total_features || 0} features</span>` +
+        `<span class="impl-epic-lastrun">last run: ${lastRun}</span>` +
+        qaTag +
+      `</div>` +
+      `<div class="impl-feature-list">${features}</div>`;
+    implStatusBody.appendChild(card);
+  }
+}
+
+function renderImplementLog() {
+  implLogBody.innerHTML = "";
+  if (!state.implementRun.lines.length && !state.implementRun.progress) {
+    implLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
+    return;
+  }
+  for (const text of state.implementRun.lines) implLogBody.appendChild(appendClarifyLogRow(text));
+  if (state.implementRun.progress) implLogBody.appendChild(appendClarifyLogRow(state.implementRun.progress));
+  implLogBody.scrollTop = implLogBody.scrollHeight;
+}
+
+function updateImplementControls() {
+  const findings = state.clarifyFindings;
+  const clean = findings.critical === 0 && findings.major === 0;
+  startImplementBtn.disabled = state.implementRun.running || !clean;
+  stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
+  implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
+}
+
+function stopImplementPolling() {
+  if (state.implementRun.pollTimer) {
+    clearInterval(state.implementRun.pollTimer);
+    state.implementRun.pollTimer = null;
+  }
+}
+
+// Single fetch+render used both as the recurring 1s poll tick AND as a one-off
+// refresh (page load, navigating into the Implementation section) — unlike
+// clarify's two separate functions, implement only ever has one "mode", so there's
+// no per-mode state to keep in sync between them.
+async function refreshImplementRun() {
+  try {
+    const res = await fetch("/api/implement/run?since=" + state.implementRun.nextIndex);
+    const data = await res.json();
+    if (!data.ok) return;
+    if (data.lines.length) {
+      state.implementRun.lines.push(...data.lines);
+      state.implementRun.nextIndex = data.next;
+    }
+    state.implementRun.progress = data.progress;
+    state.epics = data.epics || [];
+    renderImplementLog();
+    renderImplementStatus();
+    const wasRunning = state.implementRun.running;
+    state.implementRun.running = data.running;
+    updateImplementControls();
+    homeStartImplementBtn.disabled = data.running || !(state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
+    if (data.running && !state.implementRun.pollTimer) startImplementPolling();
+    if (!data.running) {
+      stopImplementPolling();
+      if (wasRunning && data.returncode !== null) {
+        toast(returncodeMessage(data.returncode, "implement"), data.returncode !== 0);
+      }
+    }
+  } catch (e) { /* transient network hiccup — next tick retries */ }
+}
+
+function startImplementPolling() {
+  stopImplementPolling();
+  state.implementRun.pollTimer = setInterval(refreshImplementRun, 1000);
+  refreshImplementRun();
+}
+
+async function startImplementRun() {
+  if (state.implementRun.running) return;
+  const findings = state.clarifyFindings;
+  if (findings.critical > 0 || findings.major > 0) {
+    toast("There are still critical/major findings — resolve clarification first.", true);
+    return;
+  }
+  startImplementBtn.disabled = true;
+  state.implementRun.lines = [];
+  state.implementRun.progress = null;
+  state.implementRun.nextIndex = 0;
+  implHeaderStatus.textContent = "Running…";
+  renderImplementLog();
+  setImplTab("log");
+  try {
+    const res = await fetch("/api/implement/run", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      toast(data.error || "Could not start implementation.", true);
+      updateImplementControls();
+      return;
+    }
+    state.implementRun.running = true;
+    updateImplementControls();
+    startImplementPolling();
+  } catch (e) {
+    toast("Network error starting implementation.", true);
+    updateImplementControls();
+  }
+}
+
+async function stopImplementRun() {
+  if (!state.implementRun.running) return;
+  if (!window.confirm("Stop the implementation process that is currently running?")) return;
+  stopImplementBtn.disabled = true;
+  try {
+    const res = await fetch("/api/implement/stop", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) toast(data.error || "Could not stop implementation.", true);
+  } catch (e) {
+    toast("Network error stopping implementation.", true);
+  } finally {
+    stopImplementBtn.disabled = false;
+  }
+}
+
+startImplementBtn.addEventListener("click", startImplementRun);
+stopImplementBtn.addEventListener("click", stopImplementRun);
 
 // ---------------------------------------------------------------------------
 // Specification: open / mode / save
@@ -1965,8 +2547,11 @@ async function refreshSpecTree() {
     const data = await res.json();
     if (data.ok) {
       state.specTree = data.spec.tree;
+      state.workspaceInitialized = !!data.workspace.initialized;
+      state.clarifyFindings = data.clarify.findings;
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
+      if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
     }
   } catch (e) { /* keep stale tree on network error */ }
 }
@@ -2183,8 +2768,11 @@ async function refreshClarifyList() {
     if (data.ok) {
       state.clarifyUnanswered = data.clarify.unanswered || [];
       state.clarifyAnswered = data.clarify.answered || [];
+      state.workspaceInitialized = !!data.workspace.initialized;
+      state.clarifyFindings = data.clarify.findings;
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
+      if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
     }
   } catch (e) { /* keep stale list on network error */ }
 }
@@ -2216,8 +2804,12 @@ $("refreshBtn").addEventListener("click", async () => {
       state.specTree = data.spec.tree;
       state.clarifyUnanswered = data.clarify.unanswered || [];
       state.clarifyAnswered = data.clarify.answered || [];
+      state.workspaceInitialized = !!data.workspace.initialized;
+      state.clarifyFindings = data.clarify.findings;
       renderSidebar();
+      if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
+      if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
       toast("Rescanned.");
     }
   } catch (e) { toast("Could not refresh.", true); }
@@ -2262,9 +2854,11 @@ if (INITIAL_VIEW === "specification") {
   renderClarifyOverview();
   showPane("clarifyOverview");
 } else {
+  renderHomeWorkflow();
   showPane("home");
 }
 checkClarifyRunOnLoad();
+refreshImplementRun();
 </script>
 </body>
 </html>
