@@ -2227,8 +2227,8 @@ USAGE
   py tempa.py implement --clear    Delete ALL files in the qa/ and logs/ folders (asks for confirmation; --yes to skip)
 
   -- Monitoring & Utilities --
-  py tempa.py spec --show          Open a Windows-Explorer-style web UI for the specs folder: browse the file/subfolder
-                                  tree, view or edit any markdown file, and save changes back to disk (Ctrl+C to stop)
+  py tempa.py spec --show          Open a Windows-Explorer-style web UI for the PRD folder (sources.prd): browse the
+                                  file/subfolder tree, view or edit any markdown file, and save changes back to disk (Ctrl+C to stop)
   py tempa.py verify <epic>        Verify whether the epic specification has been implemented
   py tempa.py clear                Run implement --clear + implement --clear-plan + clarify --clear together,
                                   behind a single confirmation (asks for confirmation; --yes to skip)
@@ -2322,25 +2322,26 @@ def print_status() -> None:
 
 
 def run_spec_show() -> None:
-    """Open the spec explorer web UI for the specifications folder: a tree of files
+    """Open the spec explorer web UI for the PRD folder (sources.prd): a tree of files
     and subfolders on the left, a markdown view/edit pane on the right. Blocks until
     the user stops the server (Ctrl+C)."""
     config = load_config()
-    specs_dir = resolve_specs_dir(config)
-    if not specs_dir.exists():
-        log(f"Specs folder not found: {specs_dir}")
-        log("Create it (or set it with 'py tempa.py set-folders --specs <rel>' / "
+    prd_dir_str = get_sources(config).get("prd", "")
+    prd_dir = Path(prd_dir_str) if prd_dir_str else resolve_specs_dir(config) / "prd"
+    if not prd_dir.exists():
+        log(f"PRD folder not found: {prd_dir}")
+        log("Create it (or point sources.prd at the right folder in config.json / "
             "'py tempa.py init <root>') and add specification files first.")
         sys.exit(1)
-    if not specs_dir.is_dir():
-        log(f"Specs path is not a folder: {specs_dir}")
+    if not prd_dir.is_dir():
+        log(f"PRD path is not a folder: {prd_dir}")
         sys.exit(1)
     try:
         import spec_ui
     except ImportError as e:
         log(f"Could not load the spec UI module (spec_ui.py): {e}")
         sys.exit(1)
-    spec_ui.run_spec_ui(specs_dir)
+    spec_ui.run_spec_ui(prd_dir)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
