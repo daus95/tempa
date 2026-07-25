@@ -973,7 +973,7 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   </aside>
   <div class="splitter" id="splitter"></div>
   <main class="main">
-    <div class="toolbar">
+    <div class="toolbar hidden" id="toolbar">
       <span class="filepath" id="filepath">Home</span>
       <div class="seg hidden" id="specSeg">
         <button id="viewBtn" class="active">View</button>
@@ -1187,7 +1187,7 @@ function renderMarkdown(src) {
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEditor"),
-  filepathEl = $("filepath"), specSeg = $("specSeg"),
+  toolbarEl = $("toolbar"), filepathEl = $("filepath"), specSeg = $("specSeg"),
   viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"),
   clarifySummary = $("clarifySummary"), clarifyBody = $("clarifyBody"),
   clarifyUnansweredTbody = $("clarifyUnansweredTbody"), clarifyAnsweredTbody = $("clarifyAnsweredTbody"),
@@ -1226,8 +1226,12 @@ function showPane(name) {
 
 function updateToolbar() {
   const kind = state.currentKind;
+  // The toolbar (View/Edit/Save) only makes sense while an actual file is open; the
+  // Home/Specification/Clarification/Implementation overview panes hide it entirely.
+  toolbarEl.classList.toggle("hidden", kind === null);
+  if (kind === null) return;
   specSeg.classList.toggle("hidden", kind !== "spec");
-  saveBtn.classList.toggle("hidden", kind === null);
+  saveBtn.classList.remove("hidden");
   if (kind === "spec") {
     saveBtn.disabled = !state.specDirty || !state.isText;
     viewBtn.disabled = editBtn.disabled = !state.isText;
@@ -1247,14 +1251,6 @@ function updateToolbar() {
       dot.className = "dirty"; dot.textContent = "● unsaved";
       filepathEl.appendChild(dot);
     }
-  } else if (state.activeTop === "specification") {
-    filepathEl.textContent = "Specification";
-  } else if (state.activeTop === "clarification") {
-    filepathEl.textContent = "Clarification";
-  } else if (state.activeTop === "implementation") {
-    filepathEl.textContent = "Implementation";
-  } else {
-    filepathEl.textContent = "Home";
   }
 }
 
@@ -1288,6 +1284,9 @@ function renderSidebar() {
 async function selectTop(key) {
   if (!(await confirmDiscardIfDirty())) return;
   state.activeTop = key;
+  // Selecting a top-level section always exits "a file is open" mode, so the
+  // View/Edit/Save toolbar (driven by currentKind) hides for every section overview.
+  state.currentKind = null;
   if (key === "specification" || key === "clarification") state.expandedTop[key] = true;
   if (key === "home") showPane("home");
   else if (key === "implementation") showPane("impl");
