@@ -12,5 +12,5 @@ See [README.md](../README.md) for a summary.
 | `qa/EPIC-NN-qa-*.md` | QA findings report per epic |
 | `verify/EPIC-NN-verify-*.md` | Manual verification report |
 
-To wipe everything in `qa/` and `logs/`: `py tempa.py implement --clear` (asks for
+To wipe everything in `qa/` and `logs/`: `tempa implement --clear` (asks for
 confirmation; add `--yes` to skip). See [docs/command-reference.md](command-reference.md).

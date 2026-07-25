@@ -1360,17 +1360,17 @@ def run_clarify_once(noui: bool = False) -> None:
         print("[OK] No critical/major findings — clarification is considered DONE.", flush=True)
         if minor:
             print(f"     (Still {minor} minor finding(s) — considered acceptable.)", flush=True)
-        print("     Move on to the next stage:  py tempa.py implement  (auto plan runs first)", flush=True)
+        print("     Move on to the next stage:  tempa implement  (auto plan runs first)", flush=True)
     elif critical == 0:
         print(f"Only {major} major finding(s) remain (no critical). Next steps:", flush=True)
-        print("  1. Answer — manually in the file above, or automatically:  py tempa.py clarify --auto-answer", flush=True)
-        print("  2. Apply the answers to the PRD/spec:                      py tempa.py clarify --apply", flush=True)
-        print("  (Or do both at once, evaluate+apply loop:                 py tempa.py clarify --finalize)", flush=True)
+        print("  1. Answer — manually in the file above, or automatically:  tempa clarify --auto-answer", flush=True)
+        print("  2. Apply the answers to the PRD/spec:                      tempa clarify --apply", flush=True)
+        print("  (Or do both at once, evaluate+apply loop:                 tempa clarify --finalize)", flush=True)
     else:
         print(f"[!] There are {critical} critical finding(s). Next steps:", flush=True)
-        print("  1. Answer — manually in the file above, or automatically:  py tempa.py clarify --auto-answer", flush=True)
-        print("  2. Apply the answers to the PRD/spec:                      py tempa.py clarify --apply", flush=True)
-        print("  Then repeat py tempa.py clarify to verify.", flush=True)
+        print("  1. Answer — manually in the file above, or automatically:  tempa clarify --auto-answer", flush=True)
+        print("  2. Apply the answers to the PRD/spec:                      tempa clarify --apply", flush=True)
+        print("  Then repeat tempa clarify to verify.", flush=True)
 
     if not noui and report_files:
         saved = run_answer_ui(report_files)
@@ -1400,7 +1400,7 @@ def run_clarify_answer() -> None:
     clar_dir = Path(clarifications_path)
     existing = sorted(clar_dir.glob("*.md")) if clar_dir.exists() else []
     if not existing:
-        log("No clarification results to answer yet. Run first: py tempa.py clarify")
+        log("No clarification results to answer yet. Run first: tempa clarify")
         sys.exit(0)
 
     _banner(f"Clarify (auto-answer) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
@@ -1568,7 +1568,7 @@ def run_clarify_apply() -> None:
     clar_dir = Path(clarifications_path)
     existing = _clarification_result_files(clar_dir)
     if not existing:
-        log("No clarification results to apply yet. Run first: py tempa.py clarify")
+        log("No clarification results to apply yet. Run first: tempa clarify")
         sys.exit(0)
 
     _banner(f"Clarify (apply) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
@@ -1591,7 +1591,7 @@ def _clarification_result_files(clar_dir: Path) -> list[Path]:
 
 
 def run_answer_command() -> None:
-    """`py tempa.py answer` — reopen the clarification-answer web UI, without re-running
+    """`tempa answer` — reopen the clarification-answer web UI, without re-running
     clarify. Scans sources.clarifications for every clarification result file and — if at
     least one has an unanswered finding — opens the UI on ALL of them at once (one tab per
     file, each tab badged complete/incomplete), so nothing unanswered is missed. If every
@@ -1608,7 +1608,7 @@ def run_answer_command() -> None:
     clar_dir = Path(clarifications_path)
     paths = _clarification_result_files(clar_dir)
     if not paths:
-        log(f"No clarification files found in {clarifications_path}. Run first: py tempa.py clarify")
+        log(f"No clarification files found in {clarifications_path}. Run first: tempa clarify")
         sys.exit(0)
 
     statuses = [file_answer_status(p) for p in paths]
@@ -1960,7 +1960,7 @@ def print_workspace(config: dict | None = None) -> None:
 
     root = workspace.get("root", "")
     if not root:
-        print("  ⚠ Root folder has not been set. Set it with: py tempa.py set-folders --root <absolute_path>", flush=True)
+        print("  ⚠ Root folder has not been set. Set it with: tempa set-folders --root <absolute_path>", flush=True)
         return
 
     for key in DEFAULT_WORKSPACE:
@@ -1978,7 +1978,7 @@ def set_working_folders(args: argparse.Namespace) -> None:
     """Set the default working-folder layout in config.json (key "workspace").
 
     Usage:
-      py tempa.py set-folders --root <absolute_path>
+      tempa set-folders --root <absolute_path>
                  [--docs <rel>] [--adr <rel>] [--specs <rel>]
                  [--apps <rel>] [--infra <rel>] [--archive <rel>]
 
@@ -2012,7 +2012,7 @@ def set_working_folders(args: argparse.Namespace) -> None:
 
     if not workspace.get("root"):
         log("ERROR: root folder must be set (absolute path). "
-            "Example: py tempa.py set-folders --root C:\\work\\repo\\qlar-medical-clinic-backoffice")
+            "Example: tempa set-folders --root C:\\work\\repo\\qlar-medical-clinic-backoffice")
         sys.exit(1)
 
     config["workspace"] = workspace
@@ -2030,7 +2030,7 @@ def run_init(args: argparse.Namespace) -> None:
     clarify/implement first write to it.
 
     Usage:
-      py tempa.py init <absolute_path>
+      tempa init <absolute_path>
 
     Folders that already exist on disk are NOT recreated and their contents are NEVER
     overwritten — only folders that don't exist yet are created.
@@ -2038,7 +2038,7 @@ def run_init(args: argparse.Namespace) -> None:
     root = args.root
     if root is None:
         log("ERROR: init requires a root folder path (absolute). "
-            "Example: py tempa.py init C:\\work\\repo\\qlar-medical-clinic-backoffice")
+            "Example: tempa init C:\\work\\repo\\qlar-medical-clinic-backoffice")
         sys.exit(1)
 
     root_path = Path(root)
@@ -2146,7 +2146,7 @@ def set_models(args: argparse.Namespace) -> None:
     """Set the AI model per stage in config.json (key "models").
 
     Usage:
-      py tempa.py set-model [--clarify <model>] [--plan <model>] [--implement <model>]
+      tempa set-model [--clarify <model>] [--plan <model>] [--implement <model>]
 
     <model> accepts a friendly alias (opus-4.8, sonnet-5, haiku-4.5, fable-5) or a full
     model id (e.g. claude-opus-4-8). Stages omitted keep their current/default value.
@@ -2190,52 +2190,52 @@ Poll    : {POLL_INTERVAL_SEC}s
 USAGE
 
   -- Configuration --
-  py tempa.py init <abs>            Init project: set workspace.root + CREATE working folders on disk
+  tempa init <abs>            Init project: set workspace.root + CREATE working folders on disk
                                   (existing folders are skipped, their contents are never overwritten)
-  py tempa.py set-folders --root <abs> [--docs r] [--adr r] [--specs r] [--apps r] [--infra r] [--archive r]
+  tempa set-folders --root <abs> [--docs r] [--adr r] [--specs r] [--apps r] [--infra r] [--archive r]
                                   Only set the default working folders (without creating them on disk)
-  py tempa.py show-folders         Show the active working folders (+ resolved absolute paths)
-  py tempa.py set-model [--clarify m] [--plan m] [--implement m]
+  tempa show-folders         Show the active working folders (+ resolved absolute paths)
+  tempa set-model [--clarify m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-4.8, sonnet-5, ...)
-  py tempa.py show-models          Show the AI model per stage
-  py tempa.py test                 Permission test (verifies the claude CLI runs)
-  py tempa.py --help               Show this help
+  tempa show-models          Show the AI model per stage
+  tempa test                 Permission test (verifies the claude CLI runs)
+  tempa --help               Show this help
 
   -- Create Spec & Clarification --
-  py tempa.py clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path,
+  tempa clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path,
                                   then open the clarification-answer web UI on the result (add --noui to skip it)
-  py tempa.py clarify --noui       Same as above, but skip opening the answer web UI
-  py tempa.py answer               Scan sources.clarifications for clarification files, and — if any finding is
+  tempa clarify --noui       Same as above, but skip opening the answer web UI
+  tempa answer               Scan sources.clarifications for clarification files, and — if any finding is
                                   still unanswered — reopen the web UI on ALL of them (one tab per file, badged
                                   complete/incomplete), without re-running clarify
-  py tempa.py clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
-  py tempa.py clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
-  py tempa.py clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
-  py tempa.py clarify --clear      Delete all files in specs/clarifications except claude.md (asks for confirmation; --yes to skip)
+  tempa clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
+  tempa clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
+  tempa clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
+  tempa clarify --clear      Delete all files in specs/clarifications except claude.md (asks for confirmation; --yes to skip)
 
   -- Plan & Start Implementation --
-  py tempa.py implement            Start the agent runner (polls every {POLL_INTERVAL_SEC}s).
+  tempa implement            Start the agent runner (polls every {POLL_INTERVAL_SEC}s).
                                   If there's no task (epic/feature/QA) in config.json yet, run
                                   plan (lay out Epic/Feature/Task from the PRD) automatically first.
-  py tempa.py implement --replan   Force re-running plan first, then continue/start implementation
-  py tempa.py implement --features 4  Start with a limit of 4 features per session (overrides config)
-  py tempa.py implement --clear-plan  Clear plan: delete ALL contents of the specs/pbi folder + empty the "epic" array (asks for confirmation; --yes to skip)
+  tempa implement --replan   Force re-running plan first, then continue/start implementation
+  tempa implement --features 4  Start with a limit of 4 features per session (overrides config)
+  tempa implement --clear-plan  Clear plan: delete ALL contents of the specs/pbi folder + empty the "epic" array (asks for confirmation; --yes to skip)
                                   (plan generation itself is now part of implement, see above)
-  py tempa.py implement --reset         Reset on_progress → pending (clears session_id)
-  py tempa.py implement --reset-failed  Reset all failed → pending
-  py tempa.py implement --reset-qa      Reset qa_passed=false for all done epics (forces QA to re-run)
-  py tempa.py implement --clear    Delete ALL files in the qa/ and logs/ folders (asks for confirmation; --yes to skip)
+  tempa implement --reset         Reset on_progress → pending (clears session_id)
+  tempa implement --reset-failed  Reset all failed → pending
+  tempa implement --reset-qa      Reset qa_passed=false for all done epics (forces QA to re-run)
+  tempa implement --clear    Delete ALL files in the qa/ and logs/ folders (asks for confirmation; --yes to skip)
 
   -- Monitoring & Utilities --
-  py tempa.py spec --show          Open a Windows-Explorer-style web UI for the PRD folder (sources.prd): browse the
+  tempa spec --show          Open a Windows-Explorer-style web UI for the PRD folder (sources.prd): browse the
                                   file/subfolder tree, view or edit any markdown file, and save changes back to disk (Ctrl+C to stop)
-  py tempa.py verify <epic>        Verify whether the epic specification has been implemented
-  py tempa.py clear                Run implement --clear + implement --clear-plan + clarify --clear together,
+  tempa verify <epic>        Verify whether the epic specification has been implemented
+  tempa clear                Run implement --clear + implement --clear-plan + clarify --clear together,
                                   behind a single confirmation (asks for confirmation; --yes to skip)
-  py tempa.py status               Show a progress summary of all sessions
+  tempa status               Show a progress summary of all sessions
 
 GLOBAL FLAGS
-  --show-prompt                   Show the prompt sent to Claude on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `py tempa.py implement --show-prompt`.
+  --show-prompt                   Show the prompt sent to Claude on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
 
 CONFIG OPTIONS (config.json)
   features_per_session            Max features per session (null = no limit)
@@ -2331,7 +2331,7 @@ def run_spec_show() -> None:
     if not prd_dir.exists():
         log(f"PRD folder not found: {prd_dir}")
         log("Create it (or point sources.prd at the right folder in config.json / "
-            "'py tempa.py init <root>') and add specification files first.")
+            "'tempa init <root>') and add specification files first.")
         sys.exit(1)
     if not prd_dir.is_dir():
         log(f"PRD path is not a folder: {prd_dir}")
@@ -2508,7 +2508,7 @@ if __name__ == "__main__":
     cli_args = _build_arg_parser().parse_args()
 
     if cli_args.command is None:
-        print("No command given. Run 'py tempa.py --help' for usage.")
+        print("No command given. Run 'tempa --help' for usage.")
         sys.exit(1)
     elif cli_args.command == "status":
         print_status()
@@ -2526,7 +2526,7 @@ if __name__ == "__main__":
         run_test()
     elif cli_args.command == "spec":
         if not cli_args.show:
-            print("Usage: py tempa.py spec --show")
+            print("Usage: tempa spec --show")
             sys.exit(1)
         run_spec_show()
     elif cli_args.command == "clarify":
@@ -2534,9 +2534,9 @@ if __name__ == "__main__":
     elif cli_args.command == "answer":
         run_answer_command()
     elif cli_args.command == "plan":
-        print("Plan is now run automatically by 'py tempa.py implement' (when there's no "
-              "epic/feature/QA task yet), or force it with 'py tempa.py implement --replan'.")
-        print("To clear a previous plan result: py tempa.py implement --clear-plan")
+        print("Plan is now run automatically by 'tempa implement' (when there's no "
+              "epic/feature/QA task yet), or force it with 'tempa implement --replan'.")
+        print("To clear a previous plan result: tempa implement --clear-plan")
         sys.exit(1)
     elif cli_args.command == "verify":
         run_verify(cli_args.epic)

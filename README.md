@@ -11,7 +11,7 @@ implementing it, and running QA — all without needing to be watched.
 All state is stored in [`config.json`](config.json). All prompt templates are stored as
 `.md` files in the [`prompt/`](prompt/) folder so they're easy to read and edit.
 
-> Every interaction is a CLI command: `py tempa.py <command>`.
+> Every interaction is a CLI command: `tempa <command>`.
 
 ---
 
@@ -47,14 +47,28 @@ sibling folder, e.g. `C:\tools\tempa` or `C:\repo\tempa` (not `C:\repo\<your-rep
 C:\repo\<your-repo>\      (your repo — left untouched)
 C:\tools\tempa\           (Tempa folder — separate)
 ├─ tempa.py
+├─ tempa.cmd              (Windows launcher)
+├─ tempa                  (macOS/Linux launcher)
 ├─ config.json
 └─ prompt\
 ```
 
+Add that Tempa folder to your `PATH` so the `tempa` command works from anywhere:
+
+- **Windows:** add the folder (e.g. `C:\tools\tempa`) to your user `PATH`, then open a new
+  terminal. `tempa <command>` runs `tempa.cmd`, which calls `tempa <command>` internally.
+- **macOS/Linux:** add the folder to your `PATH` (e.g. in `~/.zshrc` / `~/.bashrc`:
+  `export PATH="$HOME/tools/tempa:$PATH"`), then open a new terminal. `tempa <command>` runs
+  the `tempa` script, which calls `python3 tempa.py <command>` internally — no `chmod` needed,
+  the executable bit is already set in the repo.
+
+Prefer not to touch `PATH`? Run it directly instead, from inside the Tempa folder:
+`./tempa.cmd <command>` (Windows) or `./tempa <command>` (macOS/Linux).
+
 Quickly check everything is ready before moving to the next step:
 
 ```bash
-py tempa.py test            # verifies the Claude CLI can Write/Read/Delete a file
+tempa test            # verifies the Claude CLI can Write/Read/Delete a file
 ```
 
 ---
@@ -65,7 +79,7 @@ Point Tempa at the project you want to work on with `init`, passing the (absolut
 to your project folder:
 
 ```bash
-py tempa.py init C:\repo\<your-repo>
+tempa init C:\repo\<your-repo>
 ```
 
 This command will:
@@ -139,7 +153,7 @@ not as alternatives to pick from.
 #### A. Answer manually — during the early iterations
 
 ```bash
-py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file
+tempa clarify          # evaluate: system writes questions + recommended answers to a file
 ```
 
 Once the evaluation finishes, Tempa opens the **clarification-answer web UI** on the result
@@ -147,8 +161,8 @@ file so you can answer right there (add `--noui` to skip it) — saving in the U
 applies your answers back into the PRD.
 
 Prefer editing the markdown file by hand instead? That still works: edit the result file
-yourself, then run `py tempa.py clarify --apply` to apply it back into the PRD. Re-open the
-UI anytime with `py tempa.py answer` — no file argument needed: it scans
+yourself, then run `tempa clarify --apply` to apply it back into the PRD. Re-open the
+UI anytime with `tempa answer` — no file argument needed: it scans
 `sources.clarifications` for every result file and, as long as at least one still has an
 unanswered finding, opens them **all** at once (one tab per file, badged complete/incomplete)
 so you never have to hunt down which file still needs an answer.
@@ -167,7 +181,7 @@ starts off pointed in the right direction.
 #### B. Answer automatically — once recommendations prove accurate
 
 ```bash
-py tempa.py clarify --finalize
+tempa clarify --finalize
 ```
 
 **When:** after a few manual rounds, once you notice the system's recommended answers over
@@ -189,7 +203,7 @@ see [docs/clarify-modes.md](docs/clarify-modes.md).
 ### Step 3 — Run implementation (`implement`)
 
 ```bash
-py tempa.py implement
+tempa implement
 ```
 
 Just run this. The system will (automatically, unattended): draft a plan if there's no task

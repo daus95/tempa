@@ -31,4 +31,4 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 
 **Global flag** — `--show-prompt`: shows the prompt sent to Claude in the console. By
 default the prompt is **not** shown (it's still logged to `logs/`). Applies to every command
-that runs a Claude session — pass it after the subcommand, e.g. `py tempa.py implement --show-prompt`.
+that runs a Claude session — pass it after the subcommand, e.g. `tempa implement --show-prompt`.

@@ -4,9 +4,9 @@ See [README.md](../README.md) — Step 3 (Run Implementation) — for a short su
 document explains the details.
 
 ```bash
-py tempa.py implement                 # poll every 60 seconds (drafts a plan first if there's no task yet)
-py tempa.py implement --replan        # force a fresh plan first, then continue implementation
-py tempa.py implement --features 4    # cap at 4 features per session (overrides config)
+tempa implement                 # poll every 60 seconds (drafts a plan first if there's no task yet)
+tempa implement --replan        # force a fresh plan first, then continue implementation
+tempa implement --features 4    # cap at 4 features per session (overrides config)
 ```
 
 ## Flow
@@ -58,20 +58,20 @@ config.json during the session; the harness only marks it `failed` when a sessio
 ## Monitor
 
 ```bash
-py tempa.py status                  # summary of all epic + feature + QA status
-py tempa.py show-folders            # active working folder
+tempa status                  # summary of all epic + feature + QA status
+tempa show-folders            # active working folder
 ```
 
 ## Recovery (if something goes wrong)
 
 ```bash
-py tempa.py implement --reset          # epic on_progress → pending (clears session_id)
-py tempa.py implement --reset-failed   # all failed epics → pending
-py tempa.py implement --reset-qa       # force re-QA for every done epic
-py tempa.py implement --clear      # delete ALL files in qa/ and logs/ (QA reports + session logs)
-py tempa.py implement --clear-plan # clear plan: wipes specs/pbi contents + empties the "epic" array
-py tempa.py clarify --clear        # clear clarifications: deletes files in specs/clarifications (except claude.md)
-py tempa.py clear                  # runs all three clear commands above, behind one confirmation
+tempa implement --reset          # epic on_progress → pending (clears session_id)
+tempa implement --reset-failed   # all failed epics → pending
+tempa implement --reset-qa       # force re-QA for every done epic
+tempa implement --clear      # delete ALL files in qa/ and logs/ (QA reports + session logs)
+tempa implement --clear-plan # clear plan: wipes specs/pbi contents + empties the "epic" array
+tempa clarify --clear        # clear clarifications: deletes files in specs/clarifications (except claude.md)
+tempa clear                  # runs all three clear commands above, behind one confirmation
 ```
 
 > `implement --clear`, `implement --clear-plan`, `clarify --clear` (and the combined
@@ -90,5 +90,5 @@ py tempa.py clear                  # runs all three clear commands above, behind
 Manually verify a single epic (produces a report in `verify/`):
 
 ```bash
-py tempa.py verify EPIC-05
+tempa verify EPIC-05
 ```
