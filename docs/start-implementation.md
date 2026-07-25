@@ -34,8 +34,10 @@ Work-selection priority each time the runner polls (this implements the 1–4 se
 6. Nothing left → **everything is done**, the runner stops (exit 0).
 
 The runner stops automatically when: every epic is done, an epic is `failed`, the
-`max_session_run` limit is reached, or Claude's **usage limit** is hit (exit 2; the epic is
-left as-is so it can be resumed once the limit resets — just run `implement` again).
+`max_session_run` limit is reached, Claude's **usage limit** is hit (exit 2; the epic is
+left as-is so it can be resumed once the limit resets — just run `implement` again), or
+the `claude` CLI's **authentication fails** (exit 3; expired OAuth login or an invalid API
+key — re-authenticate with `claude` + `/login`, then run `implement` again).
 
 ## Epic Status Lifecycle
 
