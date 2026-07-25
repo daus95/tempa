@@ -4,7 +4,7 @@ For EVERY clarification finding/question in these files, check whether the blank
 
 IF a finding's "Your answer:" section is EMPTY:
 - Determine the best answer/resolution based on analysis of the PRD document at ${sources.prd} (use the finding's own "Recommendation:" line as your starting point, if present).
-- WRITE that answer directly into the blank line(s) under that finding's "Your answer:" label.
+- WRITE that answer directly into the blank line(s) under that finding's "Your answer:" label, between the `<!-- clarify:answer-start -->` / `<!-- clarify:answer-end -->` markers if present — keep those markers intact, don't remove or rename them.
 - DO NOT change or overwrite "Your answer:" sections that already contain a human-written answer.
 
 IF ALL findings already have an answer:

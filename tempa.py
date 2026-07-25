@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from clarify_ui import run_answer_ui
+
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1215,13 +1217,15 @@ def _clarification_report_files(folder: Path, since: float) -> list[Path]:
     return out
 
 
-def run_clarify_once() -> None:
+def run_clarify_once(noui: bool = False) -> None:
     """Manual clarification — run ONE evaluation pass, report findings + report file(s),
     then suggest the next step based on severity:
       - critical==0 & major==0 : clarification done → suggest moving on to implement (auto plan)
       - critical==0 (major>0)  : suggest answering manually, or finishing with clarify --finalize
       - critical>0             : suggest reviewing/answering manually then clarify again
-    The user opens the result file, answers manually, then calls clarify again to iterate."""
+    Unless `noui` is set, also opens the clarification-answer web UI on the freshly
+    written report file(s) so the user can answer right away instead of hand-editing
+    the markdown."""
     _init_process_log()
 
     config = load_config()
@@ -1277,6 +1281,10 @@ def run_clarify_once() -> None:
         print("  1. Answer — manually in the file above, or automatically:  py tempa.py clarify --auto-answer", flush=True)
         print("  2. Apply the answers to the PRD/spec:                      py tempa.py clarify --apply", flush=True)
         print("  Then repeat py tempa.py clarify to verify.", flush=True)
+
+    if not noui and report_files:
+        run_answer_ui(report_files)
+
     sys.exit(0)
 
 
@@ -1435,6 +1443,36 @@ def run_clarify_apply() -> None:
     f = config.get("last_clarification_findings", {})
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
+    sys.exit(0)
+
+
+def _resolve_clarification_file(file_arg: str, clarifications_path: str) -> Path:
+    """Resolve the `answer` command's file argument: as given (absolute or relative to
+    cwd), else relative to sources.clarifications, trying both with and without a
+    trailing .md."""
+    candidates = [Path(file_arg)]
+    if clarifications_path:
+        base = Path(clarifications_path)
+        candidates.append(base / file_arg)
+        if not file_arg.lower().endswith(".md"):
+            candidates.append(base / f"{file_arg}.md")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    log(f"ERROR: clarification file not found: {file_arg}")
+    if clarifications_path:
+        log(f"  (looked in current directory and in: {clarifications_path})")
+    sys.exit(1)
+
+
+def run_answer_command(file_arg: str) -> None:
+    """`py tempa.py answer <file>` — reopen the clarification-answer web UI on an
+    existing clarification result file, without re-running clarify."""
+    config = load_config()
+    sources = get_sources(config)
+    clarifications_path = sources.get("clarifications", "")
+    path = _resolve_clarification_file(file_arg, clarifications_path)
+    run_answer_ui([path])
     sys.exit(0)
 
 
@@ -2006,7 +2044,10 @@ USAGE
   py tempa.py --help               Show this help
 
   -- Create Spec & Clarification --
-  py tempa.py clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path
+  py tempa.py clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path,
+                                  then open the clarification-answer web UI on the result (add --noui to skip it)
+  py tempa.py clarify --noui       Same as above, but skip opening the answer web UI
+  py tempa.py answer <file>        Reopen the clarification-answer web UI on an existing clarification result file
   py tempa.py clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
   py tempa.py clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
   py tempa.py clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
@@ -2153,6 +2194,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--apply", action="store_true")
     p.add_argument("--auto-answer", action="store_true")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--noui", action="store_true")
+
+    p = sub.add_parser("answer", parents=[common], add_help=False)
+    p.add_argument("file")
 
     # Deprecated: plan generation is now folded into `implement`. Kept as a subcommand
     # purely to redirect anyone who still types it out of habit.
@@ -2241,7 +2286,7 @@ def _dispatch_clarify(args: argparse.Namespace) -> None:
     elif args.auto_answer:
         run_clarify_answer()
     else:
-        run_clarify_once()
+        run_clarify_once(noui=args.noui)
 
 
 def _dispatch_implement(args: argparse.Namespace) -> None:
@@ -2294,6 +2339,8 @@ if __name__ == "__main__":
         run_test()
     elif cli_args.command == "clarify":
         _dispatch_clarify(cli_args)
+    elif cli_args.command == "answer":
+        run_answer_command(cli_args.file)
     elif cli_args.command == "plan":
         print("Plan is now run automatically by 'py tempa.py implement' (when there's no "
               "epic/feature/QA task yet), or force it with 'py tempa.py implement --replan'.")
