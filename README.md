@@ -139,14 +139,19 @@ not as alternatives to pick from.
 #### A. Answer manually — during the early iterations
 
 ```bash
-py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file,
-                              # then opens a web UI to answer them (add --noui to skip it)
-                              # saving in the UI immediately applies the answers back into the PRD
+py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file
 ```
 
-Prefer editing the markdown file by hand instead? That still works — the web UI is just a
-convenience. Edit the file yourself, then run `py tempa.py clarify --apply` to apply it back
-into the PRD. Re-open the UI anytime on an existing result file with `py tempa.py answer <file>`.
+Once the evaluation finishes, Tempa opens the **clarification-answer web UI** on the result
+file so you can answer right there (add `--noui` to skip it) — saving in the UI immediately
+applies your answers back into the PRD.
+
+Prefer editing the markdown file by hand instead? That still works: edit the result file
+yourself, then run `py tempa.py clarify --apply` to apply it back into the PRD. Re-open the
+UI anytime with `py tempa.py answer` — no file argument needed: it scans
+`sources.clarifications` for every result file and, as long as at least one still has an
+unanswered finding, opens them **all** at once (one tab per file, badged complete/incomplete)
+so you never have to hunt down which file still needs an answer.
 
 After answers are applied (from the UI, or via `--apply`), Tempa asks whether to run another
 clarification round right away — answer `y` to loop straight back into `clarify`, or `N` to

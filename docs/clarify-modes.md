@@ -44,15 +44,23 @@ iteration.
 
 ## Clarification-answer web UI
 
-Opened automatically after a manual `clarify` pass (unless `--noui`), or on demand for any
-existing clarification result file:
+Opened automatically after a manual `clarify` pass (unless `--noui`), or on demand at any
+time:
 
 ```bash
-py tempa.py answer <clarification-file>
+py tempa.py answer
 ```
 
-`<clarification-file>` can be an absolute/relative path, or just a filename inside
-`sources.clarifications` (with or without the `.md` extension).
+`answer` takes no arguments. It scans `sources.clarifications` for every clarification
+result file (everything except `claude.md`):
+
+- If every file already has an answer for every finding, it prints a message saying there's
+  nothing left to answer and exits — no browser tab opens.
+- Otherwise it opens the web UI on **all** of those files at once, one tab per file. Each
+  tab's label is badged **✓ Complete** or **N/M answered**, so you can see at a glance which
+  files still need attention while still being able to review/edit an already-complete file
+  from the same page. (With only one clarification file, the tab bar is skipped and the page
+  looks exactly like the single-file view always has.)
 
 The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers written by the
 `clarify` prompt) and renders the file as a formatted page. For every finding you can pick:
@@ -62,11 +70,12 @@ The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers wri
   overriding the recommendation.
 
 Clicking **Save answers** shows a confirmation summarizing what will change, then writes
-every answer back into the clarification file's `**Your answer:**` section (between
-`<!-- clarify:answer-start -->` / `<!-- clarify:answer-end -->` markers). The tool then
-immediately runs an apply step — the same as `clarify --apply` — writing those answers into
-the PRD/spec, followed by the **Ask to continue** prompt below. **Cancel** closes the page
-without touching the file (and without applying anything). The server only listens on
+every answer — across every open tab/file, not just the one currently visible — back into
+each clarification file's `**Your answer:**` section (between `<!-- clarify:answer-start -->`
+/ `<!-- clarify:answer-end -->` markers). The tool then immediately runs an apply step — the
+same as `clarify --apply` — writing those answers into the PRD/spec for **all** the files
+that were open, followed by the **Ask to continue** prompt below. **Cancel** closes the page
+without touching any file (and without applying anything). The server only listens on
 `127.0.0.1`, for the duration of that one answer session.
 
 ## Auto-answer mode — `py tempa.py clarify --auto-answer`
@@ -113,11 +122,11 @@ Run another clarification round now? [y/N]:
 ```
 
 Shown right after answers are applied to the PRD/spec — whether that apply was triggered by
-saving in the web UI (`clarify` / `answer <file>`) or by running `clarify --apply` directly.
+saving in the web UI (`clarify` / `answer`) or by running `clarify --apply` directly.
 Answering `y`/`yes` immediately starts a fresh `clarify` round (re-evaluate → report → web
 UI); anything else (including just pressing Enter) exits so you can review the result
 yourself first. Looping back from plain `clarify` respects whatever `--noui` you originally
-passed; looping back from `answer <file>` or `clarify --apply` always reopens the web UI.
+passed; looping back from `answer` or `clarify --apply` always reopens the web UI.
 
 Only asked in an interactive terminal — if stdin isn't a TTY (e.g. scripted/CI use), the
 prompt is skipped entirely and the command just exits, same as before this behavior existed.

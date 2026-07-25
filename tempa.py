@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from clarify_ui import run_answer_ui
+from clarify_ui import file_answer_status, run_answer_ui
 
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages
 if hasattr(sys.stdout, "reconfigure"):
@@ -1551,7 +1551,7 @@ def run_clarify_apply() -> None:
         log("ERROR: sources.clarifications not found in config.json")
         sys.exit(1)
     clar_dir = Path(clarifications_path)
-    existing = [p for p in clar_dir.glob("*.md") if p.name.lower() != "claude.md"] if clar_dir.exists() else []
+    existing = _clarification_result_files(clar_dir)
     if not existing:
         log("No clarification results to apply yet. Run first: py tempa.py clarify")
         sys.exit(0)
@@ -1567,35 +1567,45 @@ def run_clarify_apply() -> None:
     sys.exit(0 if success else 1)
 
 
-def _resolve_clarification_file(file_arg: str, clarifications_path: str) -> Path:
-    """Resolve the `answer` command's file argument: as given (absolute or relative to
-    cwd), else relative to sources.clarifications, trying both with and without a
-    trailing .md."""
-    candidates = [Path(file_arg)]
-    if clarifications_path:
-        base = Path(clarifications_path)
-        candidates.append(base / file_arg)
-        if not file_arg.lower().endswith(".md"):
-            candidates.append(base / f"{file_arg}.md")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    log(f"ERROR: clarification file not found: {file_arg}")
-    if clarifications_path:
-        log(f"  (looked in current directory and in: {clarifications_path})")
-    sys.exit(1)
+def _clarification_result_files(clar_dir: Path) -> list[Path]:
+    """All clarification result .md files in `clar_dir`, excluding claude.md (case-
+    insensitive), sorted by name for a stable, predictable tab order."""
+    if not clar_dir.exists():
+        return []
+    return sorted(p for p in clar_dir.glob("*.md") if p.name.lower() != "claude.md")
 
 
-def run_answer_command(file_arg: str) -> None:
-    """`py tempa.py answer <file>` — reopen the clarification-answer web UI on an
-    existing clarification result file, without re-running clarify."""
+def run_answer_command() -> None:
+    """`py tempa.py answer` — reopen the clarification-answer web UI, without re-running
+    clarify. Scans sources.clarifications for every clarification result file and — if at
+    least one has an unanswered finding — opens the UI on ALL of them at once (one tab per
+    file, each tab badged complete/incomplete), so nothing unanswered is missed. If every
+    file is already fully answered, reports that and does nothing."""
     _init_process_log()
 
     config = load_config()
     sources = get_sources(config)
     clarifications_path = sources.get("clarifications", "")
-    path = _resolve_clarification_file(file_arg, clarifications_path)
-    saved = run_answer_ui([path])
+    if not clarifications_path:
+        log("ERROR: sources.clarifications not found in config.json")
+        sys.exit(1)
+
+    clar_dir = Path(clarifications_path)
+    paths = _clarification_result_files(clar_dir)
+    if not paths:
+        log(f"No clarification files found in {clarifications_path}. Run first: py tempa.py clarify")
+        sys.exit(0)
+
+    statuses = [file_answer_status(p) for p in paths]
+    unanswered_files = sum(1 for answered, total in statuses if total > 0 and answered < total)
+    if unanswered_files == 0:
+        log("Every clarification file already has an answer for every finding — nothing left to answer.")
+        sys.exit(0)
+
+    log(f"Found {len(paths)} clarification file(s) in {clarifications_path} "
+        f"({unanswered_files} with unanswered findings); opening them all in the answer UI.")
+
+    saved = run_answer_ui(paths)
     if saved:
         log("Answers saved — applying them to the PRD/spec now...")
         _run_apply_step(load_config())
@@ -2180,7 +2190,9 @@ USAGE
   py tempa.py clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path,
                                   then open the clarification-answer web UI on the result (add --noui to skip it)
   py tempa.py clarify --noui       Same as above, but skip opening the answer web UI
-  py tempa.py answer <file>        Reopen the clarification-answer web UI on an existing clarification result file
+  py tempa.py answer               Scan sources.clarifications for clarification files, and — if any finding is
+                                  still unanswered — reopen the web UI on ALL of them (one tab per file, badged
+                                  complete/incomplete), without re-running clarify
   py tempa.py clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
   py tempa.py clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
   py tempa.py clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
@@ -2329,8 +2341,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", action="store_true")
     p.add_argument("--noui", action="store_true")
 
-    p = sub.add_parser("answer", parents=[common], add_help=False)
-    p.add_argument("file")
+    sub.add_parser("answer", parents=[common], add_help=False)
 
     # Deprecated: plan generation is now folded into `implement`. Kept as a subcommand
     # purely to redirect anyone who still types it out of habit.
@@ -2473,7 +2484,7 @@ if __name__ == "__main__":
     elif cli_args.command == "clarify":
         _dispatch_clarify(cli_args)
     elif cli_args.command == "answer":
-        run_answer_command(cli_args.file)
+        run_answer_command()
     elif cli_args.command == "plan":
         print("Plan is now run automatically by 'py tempa.py implement' (when there's no "
               "epic/feature/QA task yet), or force it with 'py tempa.py implement --replan'.")
