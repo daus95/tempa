@@ -1896,7 +1896,8 @@ def run_init(args: argparse.Namespace) -> None:
     gitignore_path = root_path / ".gitignore"
     specs_entry = f"{workspace['specs']}/"
     if not gitignore_path.exists():
-        gitignore_path.write_text(specs_entry + "\n", encoding="utf-8", newline="\n")
+        with open(gitignore_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(specs_entry + "\n")
         log(f".gitignore created: {gitignore_path}")
     else:
         existing_text = gitignore_path.read_text(encoding="utf-8")
