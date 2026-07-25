@@ -25,9 +25,43 @@ Runs **one evaluation pass**, then stops:
      automatically with `clarify --finalize`.
    - `critical > 0` → recommends reviewing & answering manually in the result file, then
      running `clarify` again.
+4. Unless `--noui` is passed, opens the **clarification-answer web UI** (see below) on the
+   freshly written result file, so you can answer right there instead of hand-editing the
+   markdown. The command blocks until you save or cancel in the browser (or press Ctrl+C).
 
-You can open the result file, **answer the clarifications manually** (editing the PRD/spec
-per your decisions), then call `clarify` again for the next iteration.
+```bash
+py tempa.py clarify --noui   # skip opening the web UI; just write the file and print the summary
+```
+
+You can also open the result file in a text editor and **answer the clarifications
+manually** (editing the PRD/spec per your decisions), then call `clarify` again for the next
+iteration.
+
+## Clarification-answer web UI
+
+Opened automatically after a manual `clarify` pass (unless `--noui`), or on demand for any
+existing clarification result file:
+
+```bash
+py tempa.py answer <clarification-file>
+```
+
+`<clarification-file>` can be an absolute/relative path, or just a filename inside
+`sources.clarifications` (with or without the `.md` extension).
+
+The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers written by the
+`clarify` prompt) and renders the file as a formatted page. For every finding you can pick:
+
+- **Follow the recommendation** — keeps Claude's suggested resolution as your answer.
+- **I'll write my own answer** — enables a text area (5+ rows) to type your own answer,
+  overriding the recommendation.
+
+Clicking **Save answers** shows a confirmation summarizing what will change, then writes
+every answer back into the clarification file's `**Your answer:**` section (between
+`<!-- clarify:answer-start -->` / `<!-- clarify:answer-end -->` markers) and exits the tool
+so you can move on to the next step (typically `clarify --apply` or `clarify --finalize`).
+**Cancel** closes the page without touching the file. The server only listens on
+`127.0.0.1`, for the duration of that one answer session.
 
 ## Auto-answer mode — `py tempa.py clarify --auto-answer`
 

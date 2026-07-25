@@ -139,11 +139,14 @@ not as alternatives to pick from.
 #### A. Answer manually — during the early iterations
 
 ```bash
-py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file
-# → open the resulting file, answer each question yourself
+py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file,
+                              # then opens a web UI to answer them (add --noui to skip it)
 py tempa.py clarify --apply  # apply your answers back into the PRD
 py tempa.py clarify          # re-evaluate, repeat while critical/major findings remain
 ```
+
+Prefer editing the markdown file by hand instead? That still works — the web UI is just a
+convenience. Re-open it anytime with `py tempa.py answer <file>`.
 
 **When:** during the early iterations (usually the first 3–4 rounds).
 **Why:** early on, the system doesn't yet have enough project context to guess your intent
