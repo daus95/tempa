@@ -32,6 +32,7 @@ from __future__ import annotations
 import html as html_lib
 import json
 import re
+import shutil
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -360,19 +361,45 @@ def _render_blocks_html(blocks: list[tuple[str, object]]) -> str:
     return "\n".join(parts)
 
 
-def _clarify_unanswered_list(clar_dir: Path) -> list[dict]:
-    """Every clarification result file (flat, excluding claude.md) that still has at
-    least one unanswered finding, sorted by name."""
-    files: list[dict] = []
+def _file_severity_stats(path: Path) -> dict | None:
+    """Return per-file finding stats: name/path, an {answered,total} pair per severity
+    (critical/major/minor), and the overall answered/total. None if the file has no
+    recognized clarification items."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    items, _ = parse_file(path, text, 0)
+    if not items:
+        return None
+    by_severity = {sev: {"answered": 0, "total": 0} for sev in ("critical", "major", "minor")}
+    for it in items:
+        by_severity[it.severity]["total"] += 1
+        if it.existing_answer:
+            by_severity[it.severity]["answered"] += 1
+    answered = sum(v["answered"] for v in by_severity.values())
+    return {
+        "name": path.name, "path": path.name,
+        "critical": by_severity["critical"], "major": by_severity["major"], "minor": by_severity["minor"],
+        "answered": answered, "total": len(items),
+    }
+
+
+def _clarify_files_overview(clar_dir: Path) -> tuple[list[dict], list[dict]]:
+    """Every clarification result file (flat, excluding claude.md) with recognized
+    findings, split into (unanswered, fully_answered), each sorted by name."""
+    unanswered: list[dict] = []
+    answered: list[dict] = []
     if not clar_dir.exists():
-        return files
+        return unanswered, answered
     for p in sorted(clar_dir.glob("*.md")):
         if p.name.lower() == "claude.md":
             continue
-        answered, total = file_answer_status(p)
-        if total > 0 and answered < total:
-            files.append({"name": p.name, "path": p.name, "answered": answered, "total": total})
-    return files
+        stats = _file_severity_stats(p)
+        if stats is None:
+            continue
+        (answered if stats["answered"] == stats["total"] else unanswered).append(stats)
+    return unanswered, answered
 
 
 def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
@@ -443,10 +470,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, "text/html; charset=utf-8",
                        self.server.page_html.encode("utf-8"))
         elif route == "/api/tree":
+            unanswered, answered = _clarify_files_overview(self.server.clar_dir)
             self._send_json(200, {
                 "ok": True,
                 "spec": {"tree": build_tree(self.server.prd_dir)},
-                "clarify": {"files": _clarify_unanswered_list(self.server.clar_dir)},
+                "clarify": {"unanswered": unanswered, "answered": answered},
             })
         elif route == "/api/spec/file":
             self._handle_spec_file(parse_qs(parsed.query))
@@ -523,6 +551,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/spec/save":
             self._handle_spec_save()
+        elif parsed.path == "/api/spec/upload":
+            self._handle_spec_upload(parse_qs(parsed.query))
+        elif parsed.path == "/api/spec/delete":
+            self._handle_spec_delete()
+        elif parsed.path == "/api/spec/rename":
+            self._handle_spec_rename()
         elif parsed.path == "/api/clarify/save":
             self._handle_clarify_save()
         else:
@@ -568,6 +602,82 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         print(f"[saved] {rel}")
         self._send_json(200, {"ok": True, "path": rel})
 
+    def _handle_spec_upload(self, query: dict) -> None:
+        """Add a file to the Specification (PRD) folder — used by the "Add File" /
+        "Add Folder" buttons. `path` is the destination relative to prd_dir (for a
+        folder upload this includes the folder name and any subfolders); the request
+        body is the raw file bytes. Overwrites an existing file at that path."""
+        rel = (query.get("path", [""])[0])
+        target = _resolve_within(self.server.prd_dir, rel)
+        if target is None:
+            self._send_json(400, {"ok": False, "error": "Invalid path."})
+            return
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        data = self.rfile.read(length) if length else b""
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "wb") as f:
+                f.write(data)
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not write file: {e}"})
+            return
+        print(f"[added] {rel}")
+        self._send_json(200, {"ok": True, "path": rel})
+
+    def _handle_spec_delete(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        rel = payload.get("path", "")
+        target = _resolve_within(self.server.prd_dir, rel)
+        if target is None:
+            self._send_json(400, {"ok": False, "error": "Invalid path."})
+            return
+        if not target.exists():
+            self._send_json(404, {"ok": False, "error": "File or folder no longer exists."})
+            return
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not delete: {e}"})
+            return
+        print(f"[deleted] {rel}")
+        self._send_json(200, {"ok": True, "path": rel})
+
+    def _handle_spec_rename(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        rel = payload.get("path", "")
+        new_name = (payload.get("new_name") or "").strip()
+        target = _resolve_within(self.server.prd_dir, rel)
+        if target is None:
+            self._send_json(400, {"ok": False, "error": "Invalid path."})
+            return
+        if not target.exists():
+            self._send_json(404, {"ok": False, "error": "File or folder no longer exists."})
+            return
+        if not new_name or "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+            self._send_json(400, {"ok": False, "error": "Invalid new name."})
+            return
+        new_target = target.parent / new_name
+        if new_target.exists():
+            self._send_json(409, {"ok": False, "error": f'"{new_name}" already exists.'})
+            return
+        try:
+            target.rename(new_target)
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not rename: {e}"})
+            return
+        new_rel = str(new_target.relative_to(self.server.prd_dir)).replace("\\", "/")
+        print(f"[renamed] {rel} -> {new_rel}")
+        self._send_json(200, {"ok": True, "path": new_rel})
+
     def _handle_clarify_save(self) -> None:
         payload = self._read_json_body()
         if payload is None or not isinstance(payload, dict):
@@ -602,8 +712,8 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     clar_dir = clar_dir.resolve() if clar_dir.exists() else clar_dir
 
     spec_tree = build_tree(prd_dir)
-    clarify_files = _clarify_unanswered_list(clar_dir)
-    page_html = _render_page(prd_dir, spec_tree, clarify_files, initial_view)
+    clarify_unanswered, clarify_answered = _clarify_files_overview(clar_dir)
+    page_html = _render_page(prd_dir, spec_tree, clarify_unanswered, clarify_answered, initial_view)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
     server.prd_dir = prd_dir
@@ -628,15 +738,18 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     return server.any_saved
 
 
-def _render_page(prd_dir: Path, spec_tree: dict, clarify_files: list[dict], initial_view: str) -> str:
+def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
+                  clarify_answered: list[dict], initial_view: str) -> str:
     tree_json = json.dumps(spec_tree, ensure_ascii=False)
-    clarify_json = json.dumps(clarify_files, ensure_ascii=False)
+    unanswered_json = json.dumps(clarify_unanswered, ensure_ascii=False)
+    answered_json = json.dumps(clarify_answered, ensure_ascii=False)
     prd_name = json.dumps(prd_dir.name, ensure_ascii=False)
     view_json = json.dumps(initial_view if initial_view in ("home", "specification", "clarification") else "home")
     return (
         _PAGE_TEMPLATE
         .replace("/*__SPEC_TREE__*/null", tree_json)
-        .replace("/*__CLARIFY_FILES__*/null", clarify_json)
+        .replace("/*__CLARIFY_UNANSWERED__*/null", unanswered_json)
+        .replace("/*__CLARIFY_ANSWERED__*/null", answered_json)
         .replace("/*__PRD_NAME__*/null", prd_name)
         .replace("/*__INITIAL_VIEW__*/null", view_json)
     )
@@ -696,10 +809,22 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .row .badge-count { flex: none; font-size: 11px; font-weight: 700; color: #fff;
     background: var(--major); border-radius: 999px; padding: 1px 7px; }
   .row .file-status { flex: none; font-size: 11px; color: var(--muted); }
+  .row .row-menu-btn { flex: none; border: none; background: transparent; color: var(--muted);
+    padding: 1px 6px; border-radius: 5px; font-size: 15px; line-height: 1; }
+  .row .row-menu-btn:hover { background: var(--border-strong); color: var(--text); }
   .children { display: none; }
   .node.open > .children { display: block; }
   .node.open > .row > .twist { transform: rotate(90deg); }
   .empty-note { padding: 6px 10px 6px 30px; color: var(--muted); font-size: 12.5px; }
+
+  /* ---- row context menu (Specification file/folder rename/delete) ---- */
+  .row-context-menu { position: fixed; z-index: 100; background: var(--panel);
+    border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    padding: 4px; min-width: 130px; }
+  .row-context-menu button { display: block; width: 100%; text-align: left; border: none;
+    background: none; color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; }
+  .row-context-menu button:hover { background: var(--hover); }
+  .row-context-menu button.danger { color: var(--danger); }
 
   /* ---- splitter ---- */
   .splitter { width: 6px; cursor: col-resize; background: transparent; flex: none; }
@@ -797,6 +922,37 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   }
   .item textarea:disabled { opacity: 0.55; resize: none; }
 
+  /* ---- clarification overview (file lists per group) ---- */
+  .clarify-overview-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; }
+  .clarify-overview-pane h3 { font-size: 0.95rem; margin: 0 0 10px; }
+  .clarify-overview-pane .group + .group { margin-top: 28px; }
+  .clarify-overview-pane table { width: 100%; max-width: 860px; border-collapse: collapse; }
+  .clarify-overview-pane th, .clarify-overview-pane td {
+    text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;
+  }
+  .clarify-overview-pane th { color: var(--muted); font-weight: 600; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.03em; }
+  .clarify-overview-pane tbody tr { cursor: pointer; }
+  .clarify-overview-pane tbody tr:hover td { background: var(--hover); }
+  .clarify-overview-pane .count-ok { color: var(--ok); }
+  .clarify-overview-pane .count-pending { color: var(--major); font-weight: 600; }
+  .clarify-overview-pane .status-complete { color: var(--ok); font-weight: 600; }
+  .clarify-overview-pane .status-pending { color: var(--major); font-weight: 600; }
+
+  /* ---- specification overview (file count + add file/folder) ---- */
+  .spec-overview-pane { display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; gap: 10px; padding: 40px; }
+  .spec-overview-summary { font-size: 1.1rem; font-weight: 600; color: var(--text); }
+  .spec-overview-hint { color: var(--muted); font-size: 0.95rem; }
+  .spec-overview-actions { display: flex; gap: 22px; margin-top: 18px; flex-wrap: wrap;
+    justify-content: center; }
+  .big-action { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 22px 30px; min-width: 140px; border: 1px solid var(--border-strong);
+    border-radius: 12px; background: var(--panel); color: var(--text); }
+  .big-action:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  .big-action-icon { font-size: 38px; line-height: 1; }
+  .big-action-label { font-size: 0.9rem; font-weight: 600; }
+
   /* ---- toast ---- */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: #1f2937; color: #fff; padding: 9px 18px; border-radius: 8px; font-size: 13px;
@@ -836,9 +992,41 @@ _PAGE_TEMPLATE = r"""<!doctype html>
         <div id="specViewer" class="viewer markdown-body"></div>
         <textarea id="specEditor" class="editor hidden" spellcheck="false"></textarea>
       </div>
+      <div id="specOverviewPane" class="pane spec-overview-pane hidden">
+        <div class="spec-overview-summary" id="specFileCount"></div>
+        <div class="spec-overview-hint">Pick a file from Specification on the left to view it.</div>
+        <div class="spec-overview-actions">
+          <button type="button" class="big-action" id="addFileBtn">
+            <span class="big-action-icon">📄</span>
+            <span class="big-action-label">Add File</span>
+          </button>
+          <button type="button" class="big-action" id="addFolderBtn">
+            <span class="big-action-icon">📁</span>
+            <span class="big-action-label">Add Folder</span>
+          </button>
+        </div>
+        <input type="file" id="addFileInput" class="hidden" multiple>
+        <input type="file" id="addFolderInput" class="hidden" multiple webkitdirectory directory>
+      </div>
       <div id="clarifyPane" class="pane clarify-pane hidden">
         <div class="clarify-summary" id="clarifySummary"></div>
         <div id="clarifyBody"></div>
+      </div>
+      <div id="clarifyOverviewPane" class="pane clarify-overview-pane hidden">
+        <div class="group">
+          <h3>Unanswered</h3>
+          <table>
+            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th></tr></thead>
+            <tbody id="clarifyUnansweredTbody"></tbody>
+          </table>
+        </div>
+        <div class="group">
+          <h3>Fully answered</h3>
+          <table>
+            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th></tr></thead>
+            <tbody id="clarifyAnsweredTbody"></tbody>
+          </table>
+        </div>
       </div>
       <div id="implPane" class="pane impl-pane hidden">
         <div>
@@ -846,16 +1034,20 @@ _PAGE_TEMPLATE = r"""<!doctype html>
           <div>Implementation view is coming soon.</div>
         </div>
       </div>
-      <div id="placeholderPane" class="pane placeholder-pane hidden">Select an item from the left.</div>
     </div>
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="row-context-menu hidden" id="rowContextMenu">
+  <button type="button" id="rowMenuRename">Rename</button>
+  <button type="button" id="rowMenuDelete" class="danger">Delete</button>
+</div>
 
 <script>
 "use strict";
 const INITIAL_SPEC_TREE = /*__SPEC_TREE__*/null;
-const INITIAL_CLARIFY_FILES = /*__CLARIFY_FILES__*/null;
+const INITIAL_CLARIFY_UNANSWERED = /*__CLARIFY_UNANSWERED__*/null;
+const INITIAL_CLARIFY_ANSWERED = /*__CLARIFY_ANSWERED__*/null;
 const PRD_NAME = /*__PRD_NAME__*/null;
 const INITIAL_VIEW = /*__INITIAL_VIEW__*/null;
 
@@ -998,13 +1190,17 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   filepathEl = $("filepath"), specSeg = $("specSeg"),
   viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"),
   clarifySummary = $("clarifySummary"), clarifyBody = $("clarifyBody"),
-  placeholderPane = $("placeholderPane");
+  clarifyUnansweredTbody = $("clarifyUnansweredTbody"), clarifyAnsweredTbody = $("clarifyAnsweredTbody"),
+  specFileCountEl = $("specFileCount"),
+  addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
+  addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput");
 
-const PANES = ["home", "spec", "clarify", "impl", "placeholder"];
+const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl"];
 
 const state = {
   specTree: INITIAL_SPEC_TREE,
-  clarifyFiles: INITIAL_CLARIFY_FILES || [],
+  clarifyUnanswered: INITIAL_CLARIFY_UNANSWERED || [],
+  clarifyAnswered: INITIAL_CLARIFY_ANSWERED || [],
   expandedTop: { specification: INITIAL_VIEW === "specification", clarification: INITIAL_VIEW === "clarification" },
   expandedSpecDirs: new Set([""]),
   activeTop: INITIAL_VIEW,
@@ -1014,8 +1210,10 @@ const state = {
   isText: false,
   specMode: "view",
   specDirty: false,
+  specShowingOverview: true,      // true = Specification pane shows the file-count/add-file overview
   selectedClarifyPath: null,
   clarifyDirty: false,
+  clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
 };
 
 // ---------------------------------------------------------------------------
@@ -1094,11 +1292,13 @@ async function selectTop(key) {
   if (key === "home") showPane("home");
   else if (key === "implementation") showPane("impl");
   else if (key === "specification") {
-    showPane(state.selectedSpecPath ? "spec" : "placeholder");
-    if (!state.selectedSpecPath) placeholderPane.textContent = "Pick a file from Specification on the left to view it.";
+    state.specShowingOverview = true;
+    renderSpecOverview();
+    showPane("specOverview");
   } else if (key === "clarification") {
-    showPane(state.selectedClarifyPath ? "clarify" : "placeholder");
-    if (!state.selectedClarifyPath) placeholderPane.textContent = "Pick a clarification file on the left to answer it.";
+    state.clarifyShowingOverview = true;
+    renderClarifyOverview();
+    showPane("clarifyOverview");
   }
   renderSidebar();
 }
@@ -1118,7 +1318,7 @@ function renderSpecSection() {
   const wrap = document.createElement("div");
   wrap.className = "node" + (state.expandedTop.specification ? " open" : "");
   const row = document.createElement("div");
-  row.className = "row top" + (state.activeTop === "specification" && !state.selectedSpecPath ? " selected" : "");
+  row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "");
   row.innerHTML = `<span class="twist">▶</span><span class="icon">📁</span><span class="label">Specification</span>`;
   row.addEventListener("click", () => selectTop("specification"));
   wrap.appendChild(row);
@@ -1147,7 +1347,7 @@ function renderSpecNode(node, depth) {
   const row = document.createElement("div");
   row.className = "row";
   row.style.paddingLeft = (6 + depth * 15) + "px";
-  if (!isDir && node.path === state.selectedSpecPath) row.classList.add("selected");
+  if (!isDir && !state.specShowingOverview && node.path === state.selectedSpecPath) row.classList.add("selected");
 
   const twist = document.createElement("span");
   twist.className = "twist" + (isDir ? "" : " hidden");
@@ -1163,6 +1363,17 @@ function renderSpecNode(node, depth) {
   label.className = "label";
   label.textContent = node.name;
   row.appendChild(label);
+
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "row-menu-btn";
+  menuBtn.title = "More";
+  menuBtn.textContent = "⋯";
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openRowContextMenu(menuBtn, node);
+  });
+  row.appendChild(menuBtn);
   wrap.appendChild(row);
 
   if (isDir) {
@@ -1185,8 +1396,8 @@ function renderClarifySection() {
   const wrap = document.createElement("div");
   wrap.className = "node" + (state.expandedTop.clarification ? " open" : "");
   const row = document.createElement("div");
-  row.className = "row top" + (state.activeTop === "clarification" && !state.selectedClarifyPath ? " selected" : "");
-  const count = state.clarifyFiles.length;
+  row.className = "row top" + (state.activeTop === "clarification" && state.clarifyShowingOverview ? " selected" : "");
+  const count = state.clarifyUnanswered.length;
   row.innerHTML = `<span class="twist">▶</span><span class="icon">❓</span><span class="label">Clarification</span>` +
     (count ? `<span class="badge-count">${count}</span>` : "");
   row.addEventListener("click", () => selectTop("clarification"));
@@ -1194,13 +1405,13 @@ function renderClarifySection() {
 
   const children = document.createElement("div");
   children.className = "children";
-  if (!state.clarifyFiles.length) {
+  if (!state.clarifyUnanswered.length) {
     const note = document.createElement("div");
     note.className = "empty-note";
     note.textContent = "Nothing unanswered — all clarification findings are answered.";
     children.appendChild(note);
   } else {
-    for (const file of state.clarifyFiles) children.appendChild(renderClarifyFileRow(file));
+    for (const file of state.clarifyUnanswered) children.appendChild(renderClarifyFileRow(file));
   }
   wrap.appendChild(children);
   return wrap;
@@ -1210,7 +1421,7 @@ function renderClarifyFileRow(file) {
   const wrap = document.createElement("div");
   wrap.className = "node";
   const row = document.createElement("div");
-  row.className = "row" + (file.path === state.selectedClarifyPath ? " selected" : "");
+  row.className = "row" + (!state.clarifyShowingOverview && file.path === state.selectedClarifyPath ? " selected" : "");
   row.style.paddingLeft = "21px";
   row.innerHTML = `<span class="twist hidden"></span><span class="icon">📝</span>` +
     `<span class="label">${escapeHtml(file.name)}</span>` +
@@ -1218,6 +1429,48 @@ function renderClarifyFileRow(file) {
   row.addEventListener("click", () => openClarifyFile(file));
   wrap.appendChild(row);
   return wrap;
+}
+
+// ---------------------------------------------------------------------------
+// Clarification overview (right panel shown when "Clarification" itself is selected)
+// ---------------------------------------------------------------------------
+function severityCell(counts) {
+  if (!counts || !counts.total) return "–";
+  const cls = counts.answered === counts.total ? "count-ok" : "count-pending";
+  return `<span class="${cls}">${counts.answered}/${counts.total}</span>`;
+}
+
+function statusCell(file) {
+  return file.answered === file.total
+    ? '<span class="status-complete">✅ Complete</span>'
+    : `<span class="status-pending">🔶 ${file.answered}/${file.total}</span>`;
+}
+
+function renderClarifyOverviewRows(tbody, files, emptyMessage) {
+  tbody.innerHTML = "";
+  if (!files.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="5" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const file of files) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(file.name)}</td>` +
+      `<td>${severityCell(file.critical)}</td>` +
+      `<td>${severityCell(file.major)}</td>` +
+      `<td>${severityCell(file.minor)}</td>` +
+      `<td>${statusCell(file)}</td>`;
+    tr.addEventListener("click", () => openClarifyFile(file));
+    tbody.appendChild(tr);
+  }
+}
+
+function renderClarifyOverview() {
+  renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
+    "No unanswered files.");
+  renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
+    "No fully answered files yet.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,6 +1488,7 @@ async function openSpecFile(node) {
     state.isMarkdown = data.markdown;
     state.isText = data.text;
     state.specDirty = false;
+    state.specShowingOverview = false;
     specEditor.value = data.content || "";
     if (!data.text) {
       specViewer.innerHTML = "";
@@ -1306,6 +1560,151 @@ viewBtn.addEventListener("click", () => setSpecMode("view"));
 editBtn.addEventListener("click", () => setSpecMode("edit"));
 
 // ---------------------------------------------------------------------------
+// Specification overview (right panel shown when "Specification" itself is selected)
+// ---------------------------------------------------------------------------
+function countSpecFiles(node) {
+  if (!node) return 0;
+  if (node.type === "file") return 1;
+  return (node.children || []).reduce((sum, c) => sum + countSpecFiles(c), 0);
+}
+
+function renderSpecOverview() {
+  const count = countSpecFiles(state.specTree);
+  specFileCountEl.textContent = count === 1 ? "1 specification file" : `${count} specification files`;
+}
+
+async function refreshSpecTree() {
+  try {
+    const res = await fetch("/api/tree");
+    const data = await res.json();
+    if (data.ok) {
+      state.specTree = data.spec.tree;
+      renderSidebar();
+      if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
+    }
+  } catch (e) { /* keep stale tree on network error */ }
+}
+
+async function uploadToSpec(entries) {
+  if (!entries.length) return;
+  const label = entries.length === 1 ? "1 file" : `${entries.length} files`;
+  if (!window.confirm(`Add ${label} to Specification (${PRD_NAME})? Existing files with the same name will be overwritten.`)) return;
+  let okCount = 0, failCount = 0;
+  for (const { file, relPath } of entries) {
+    try {
+      const buf = await file.arrayBuffer();
+      const res = await fetch("/api/spec/upload?path=" + encodeURIComponent(relPath), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: buf,
+      });
+      const data = await res.json();
+      if (data.ok) okCount++; else failCount++;
+    } catch (e) { failCount++; }
+  }
+  toast(failCount ? `Added ${okCount} file(s), ${failCount} failed.` : `Added ${okCount} file(s).`, failCount > 0);
+  await refreshSpecTree();
+}
+
+addFileBtn.addEventListener("click", () => { addFileInput.value = ""; addFileInput.click(); });
+addFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; addFolderInput.click(); });
+
+addFileInput.addEventListener("change", () => {
+  const entries = Array.from(addFileInput.files).map((f) => ({ file: f, relPath: f.name }));
+  uploadToSpec(entries);
+});
+addFolderInput.addEventListener("change", () => {
+  const entries = Array.from(addFolderInput.files).map((f) => ({ file: f, relPath: f.webkitRelativePath || f.name }));
+  uploadToSpec(entries);
+});
+
+// ---------------------------------------------------------------------------
+// Specification row context menu (rename / delete a file or folder)
+// ---------------------------------------------------------------------------
+const rowContextMenu = $("rowContextMenu"), rowMenuRename = $("rowMenuRename"), rowMenuDelete = $("rowMenuDelete");
+let contextMenuNode = null;
+
+function openRowContextMenu(anchorEl, node) {
+  contextMenuNode = node;
+  const rect = anchorEl.getBoundingClientRect();
+  rowContextMenu.classList.remove("hidden");
+  const menuWidth = rowContextMenu.offsetWidth || 130;
+  rowContextMenu.style.top = rect.bottom + 4 + "px";
+  rowContextMenu.style.left = Math.min(rect.left, window.innerWidth - menuWidth - 8) + "px";
+}
+
+function closeRowContextMenu() {
+  rowContextMenu.classList.add("hidden");
+  contextMenuNode = null;
+}
+
+document.addEventListener("click", (e) => {
+  if (!rowContextMenu.classList.contains("hidden") && !rowContextMenu.contains(e.target)) closeRowContextMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeRowContextMenu();
+});
+
+rowMenuRename.addEventListener("click", async () => {
+  const node = contextMenuNode;
+  closeRowContextMenu();
+  if (!node) return;
+  const newName = window.prompt(`Rename "${node.name}" to:`, node.name);
+  if (!newName || newName === node.name) return;
+  if (newName.includes("/") || newName.includes("\\")) {
+    toast("Name cannot contain a path separator.", true);
+    return;
+  }
+  try {
+    const res = await fetch("/api/spec/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: node.path, new_name: newName }),
+    });
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Rename failed.", true); return; }
+    // Renaming the exact file currently open keeps it open under its new path; renaming
+    // a folder that merely contains the open file is not tracked (rare edge case) — a
+    // later Save would just fail gracefully with "File no longer exists".
+    if (state.selectedSpecPath === node.path) state.selectedSpecPath = data.path;
+    toast(`Renamed to "${newName}".`);
+    await refreshSpecTree();
+  } catch (e) {
+    toast("Network error while renaming.", true);
+  }
+});
+
+rowMenuDelete.addEventListener("click", async () => {
+  const node = contextMenuNode;
+  closeRowContextMenu();
+  if (!node) return;
+  const kind = node.type === "dir" ? "folder" : "file";
+  if (!window.confirm(`Delete the ${kind} "${node.name}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch("/api/spec/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: node.path }),
+    });
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Delete failed.", true); return; }
+    const affectsOpenFile = state.selectedSpecPath === node.path ||
+      (node.type === "dir" && state.selectedSpecPath && state.selectedSpecPath.startsWith(node.path + "/"));
+    if (affectsOpenFile) {
+      state.selectedSpecPath = null;
+      state.currentKind = null;
+      state.specDirty = false;
+      state.specShowingOverview = true;
+      showPane("specOverview");
+    }
+    toast(`Deleted "${node.name}".`);
+    await refreshSpecTree();
+  } catch (e) {
+    toast("Network error while deleting.", true);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Clarification: open / answer / save
 // ---------------------------------------------------------------------------
 function onClarifyModeChange(radio) {
@@ -1339,6 +1738,7 @@ async function openClarifyFile(file) {
     state.currentKind = "clarify";
     state.selectedClarifyPath = data.path;
     state.clarifyDirty = false;
+    state.clarifyShowingOverview = false;
     clarifySummary.textContent = data.summary || "";
     clarifyBody.innerHTML = data.html || "";
     wireClarifyBody();
@@ -1395,8 +1795,10 @@ async function refreshClarifyList() {
     const res = await fetch("/api/tree");
     const data = await res.json();
     if (data.ok) {
-      state.clarifyFiles = data.clarify.files || [];
+      state.clarifyUnanswered = data.clarify.unanswered || [];
+      state.clarifyAnswered = data.clarify.answered || [];
       renderSidebar();
+      if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
     }
   } catch (e) { /* keep stale list on network error */ }
 }
@@ -1426,8 +1828,10 @@ $("refreshBtn").addEventListener("click", async () => {
     const data = await res.json();
     if (data.ok) {
       state.specTree = data.spec.tree;
-      state.clarifyFiles = data.clarify.files || [];
+      state.clarifyUnanswered = data.clarify.unanswered || [];
+      state.clarifyAnswered = data.clarify.answered || [];
       renderSidebar();
+      if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
       toast("Rescanned.");
     }
   } catch (e) { toast("Could not refresh.", true); }
@@ -1466,11 +1870,11 @@ function toast(msg, isErr) {
 // ---------------------------------------------------------------------------
 renderSidebar();
 if (INITIAL_VIEW === "specification") {
-  showPane("placeholder");
-  placeholderPane.textContent = "Pick a file from Specification on the left to view it.";
+  renderSpecOverview();
+  showPane("specOverview");
 } else if (INITIAL_VIEW === "clarification") {
-  showPane("placeholder");
-  placeholderPane.textContent = "Pick a clarification file on the left to answer it.";
+  renderClarifyOverview();
+  showPane("clarifyOverview");
 } else {
   showPane("home");
 }
