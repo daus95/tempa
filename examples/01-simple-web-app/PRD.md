@@ -1,8 +1,8 @@
-# PRD — Mortgage (KPR) Installment Simulator (Web, Client-Side)
+# PRD — Mortgage Installment Simulator (Web, Client-Side)
 
 ## 1. Purpose
 
-Help prospective homebuyers simulate their monthly mortgage (KPR) installment based on
+Help prospective homebuyers simulate their monthly mortgage installment based on
 property price, down payment, interest rate, and loan term — complete with an amortization
 table and a simple visualization — so they can compare a few scenarios before applying to
 a bank.
@@ -98,9 +98,9 @@ Formulas:
 
 ## 7. Acceptance Criteria (Examples)
 
-1. Input: Property Price 500,000,000, Down Payment 20%, interest 8%/year, term 10 years,
-   Flat method → Loan Principal = 400,000,000, principal installment/month = 3,333,333
-   (rounded), fixed interest installment/month = 2,666,667 (rounded).
+1. Input: Property Price 300,000, Down Payment 20%, interest 8%/year, term 10 years,
+   Flat method → Loan Principal = 240,000, principal installment/month = 2,000, fixed
+   interest installment/month = 1,600.
 2. Switching the method to Annuity with the same inputs produces a fixed monthly
    installment (same amount every month), with the interest portion decreasing and the
    principal portion increasing over time.
