@@ -148,7 +148,10 @@ applies your answers back into the PRD.
 
 Prefer editing the markdown file by hand instead? That still works: edit the result file
 yourself, then run `py tempa.py clarify --apply` to apply it back into the PRD. Re-open the
-UI anytime on an existing result file with `py tempa.py answer <file>`.
+UI anytime with `py tempa.py answer` — no file argument needed: it scans
+`sources.clarifications` for every result file and, as long as at least one still has an
+unanswered finding, opens them **all** at once (one tab per file, badged complete/incomplete)
+so you never have to hunt down which file still needs an answer.
 
 After answers are applied (from the UI, or via `--apply`), Tempa asks whether to run another
 clarification round right away — answer `y` to loop straight back into `clarify`, or `N` to

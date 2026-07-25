@@ -137,6 +137,20 @@ def parse_file(path: Path, text: str, file_index: int) -> tuple[list[Clarificati
     return items, blocks
 
 
+def file_answer_status(path: Path) -> tuple[int, int]:
+    """Return (answered, total) recognized clarification findings in `path`. (0, 0) if the
+    file can't be read or has no recognized findings. Used to mark a clarification file as
+    complete/incomplete without a caller having to duplicate the parsing logic."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return (0, 0)
+    items, _ = parse_file(path, text, 0)
+    if not items:
+        return (0, 0)
+    return (sum(1 for it in items if it.existing_answer), len(items))
+
+
 # --- tiny markdown -> HTML (bold/code/italic/headings/bullet lists only) ---
 
 def _md_inline(s: str) -> str:
@@ -269,6 +283,23 @@ header.top {
 header.top h1 { font-size: 1.25rem; margin: 0 0 4px; }
 header.top .summary { color: var(--muted); font-size: 0.9rem; }
 main { max-width: 860px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px); }
+nav.tabs {
+  display: flex; gap: 8px; flex-wrap: wrap; max-width: 860px; margin: 0 auto 18px;
+  padding: 0 clamp(16px, 4vw, 40px);
+}
+.tab-btn {
+  font: inherit; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card); color: var(--fg); cursor: pointer; display: flex;
+  align-items: center; gap: 7px; white-space: nowrap;
+}
+.tab-btn.active { border-color: var(--accent); background: rgba(37, 99, 235, 0.12); }
+.tab-badge {
+  font-size: 0.7rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; color: #fff;
+}
+.tab-badge.complete { background: #16a34a; }
+.tab-badge.incomplete { background: var(--major); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 .doc-text { color: var(--fg); margin: 8px 0 20px; }
 .doc-text p { margin: 0.6em 0; }
 .item {
@@ -319,6 +350,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   <h1>__TEMPA_TITLE__</h1>
   <div class="summary">__TEMPA_SUMMARY__</div>
 </header>
+__TEMPA_TABS__
 <main>
 __TEMPA_BODY__
 </main>
@@ -337,6 +369,18 @@ function onModeChange(radio) {
 }
 document.querySelectorAll('.item input[type=radio]').forEach(function (r) {
   r.addEventListener('change', function () { onModeChange(r); });
+});
+
+document.querySelectorAll('.tab-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(function (b) {
+      b.classList.toggle('active', b === btn);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (p) {
+      p.classList.toggle('active', p.dataset.tabPanel === tab);
+    });
+  });
 });
 
 function collect() {
@@ -394,7 +438,14 @@ document.getElementById('cancel-btn').addEventListener('click', function () {
 """
 
 
-def _render_page(file_blocks: list[tuple[Path, list[tuple[str, object]]]], all_items: list[ClarificationItem]) -> str:
+def _render_page(
+    file_blocks: list[tuple[Path, list[tuple[str, object]], int, int]],
+    all_items: list[ClarificationItem],
+) -> str:
+    """`file_blocks` is (path, blocks, answered_count, total_count) per file. When there's
+    more than one file, renders a tab per file (labeled with a complete/incomplete badge) and
+    wraps each file's content in a hideable panel; a single file renders exactly as before
+    (no tab bar)."""
     counts = {"critical": 0, "major": 0, "minor": 0}
     for it in all_items:
         counts[it.severity] += 1
@@ -402,24 +453,47 @@ def _render_page(file_blocks: list[tuple[Path, list[tuple[str, object]]]], all_i
         f"{len(all_items)} finding(s) — {counts['critical']} critical · "
         f"{counts['major']} major · {counts['minor']} minor"
     )
-    title = ", ".join(p.name for p, _ in file_blocks)
+    title = ", ".join(p.name for p, _, _, _ in file_blocks)
 
-    body_parts: list[str] = []
     multi = len(file_blocks) > 1
-    for path, blocks in file_blocks:
+    if multi:
+        complete_files = sum(1 for _, _, answered, total in file_blocks if total > 0 and answered == total)
+        summary += f" — {complete_files}/{len(file_blocks)} file(s) fully answered"
+
+    tab_buttons: list[str] = []
+    body_parts: list[str] = []
+    for idx, (path, blocks, answered, total) in enumerate(file_blocks):
         if multi:
-            body_parts.append(f'<h2 class="file-heading">{html_lib.escape(path.name)}</h2>')
+            complete = total > 0 and answered == total
+            status_class = "complete" if complete else "incomplete"
+            status_label = "✓ Complete" if complete else f"{answered}/{total} answered"
+            active_class = " active" if idx == 0 else ""
+            tab_buttons.append(
+                f'<button type="button" class="tab-btn{active_class}" data-tab="{idx}">'
+                f'{html_lib.escape(path.name)} '
+                f'<span class="tab-badge {status_class}">{status_label}</span>'
+                f'</button>'
+            )
+
+        panel_parts: list[str] = []
         for kind, payload in blocks:
             if kind == "text":
                 rendered = render_markdown(payload)  # type: ignore[arg-type]
                 if rendered:
-                    body_parts.append(f'<div class="doc-text">{rendered}</div>')
+                    panel_parts.append(f'<div class="doc-text">{rendered}</div>')
             else:
-                body_parts.append(_render_item_html(payload))  # type: ignore[arg-type]
+                panel_parts.append(_render_item_html(payload))  # type: ignore[arg-type]
+
+        panel_class = "tab-panel active" if idx == 0 else "tab-panel"
+        panel_open = f'<div class="{panel_class}" data-tab-panel="{idx}">' if multi else "<div>"
+        body_parts.append(panel_open + "\n".join(panel_parts) + "</div>")
+
+    tabs_html = f'<nav class="tabs">{"".join(tab_buttons)}</nav>' if multi else ""
 
     html_out = PAGE_TEMPLATE
     html_out = html_out.replace("__TEMPA_TITLE__", html_lib.escape(title) if title else "Clarification answers")
     html_out = html_out.replace("__TEMPA_SUMMARY__", html_lib.escape(summary))
+    html_out = html_out.replace("__TEMPA_TABS__", tabs_html)
     html_out = html_out.replace("__TEMPA_BODY__", "\n".join(body_parts))
     return html_out
 
@@ -502,7 +576,7 @@ def run_answer_ui(paths: list[Path]) -> bool:
     the caller uses this to decide whether to run `clarify --apply` next."""
     all_items: list[ClarificationItem] = []
     files_text: dict[Path, str] = {}
-    file_blocks: list[tuple[Path, list[tuple[str, object]]]] = []
+    file_blocks: list[tuple[Path, list[tuple[str, object]], int, int]] = []
 
     for idx, path in enumerate(paths):
         try:
@@ -513,7 +587,8 @@ def run_answer_ui(paths: list[Path]) -> bool:
         files_text[path] = text
         items, blocks = parse_file(path, text, idx)
         all_items.extend(items)
-        file_blocks.append((path, blocks))
+        answered = sum(1 for it in items if it.existing_answer)
+        file_blocks.append((path, blocks, answered, len(items)))
 
     if not all_items:
         print("No recognized clarification items found -- nothing to show in the answer UI.")
@@ -539,7 +614,7 @@ def run_answer_ui(paths: list[Path]) -> bool:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nInterrupted -- no changes were made.")
-        print(f"Re-open this file's answer UI anytime with: py tempa.py answer {paths[0]}")
+        print("Re-open the answer UI anytime with: py tempa.py answer")
         server.result = None
     finally:
         server.server_close()
