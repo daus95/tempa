@@ -28,13 +28,18 @@ Runs **one evaluation pass**, then stops:
 4. Unless `--noui` is passed, opens the **clarification-answer web UI** (see below) on the
    freshly written result file, so you can answer right there instead of hand-editing the
    markdown. The command blocks until you save or cancel in the browser (or press Ctrl+C).
+   Saving in the UI immediately runs an apply step (see **Apply mode** below) — no separate
+   `clarify --apply` needed after using the UI.
+5. After that apply step finishes, asks whether to run another clarification round right
+   away (see **Ask to continue** below).
 
 ```bash
 py tempa.py clarify --noui   # skip opening the web UI; just write the file and print the summary
 ```
 
 You can also open the result file in a text editor and **answer the clarifications
-manually** (editing the PRD/spec per your decisions), then call `clarify` again for the next
+manually** (editing the PRD/spec per your decisions), then run `clarify --apply` to apply
+those answers into the PRD/spec, or call `clarify` again to re-evaluate for the next
 iteration.
 
 ## Clarification-answer web UI
@@ -58,9 +63,10 @@ The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers wri
 
 Clicking **Save answers** shows a confirmation summarizing what will change, then writes
 every answer back into the clarification file's `**Your answer:**` section (between
-`<!-- clarify:answer-start -->` / `<!-- clarify:answer-end -->` markers) and exits the tool
-so you can move on to the next step (typically `clarify --apply` or `clarify --finalize`).
-**Cancel** closes the page without touching the file. The server only listens on
+`<!-- clarify:answer-start -->` / `<!-- clarify:answer-end -->` markers). The tool then
+immediately runs an apply step — the same as `clarify --apply` — writing those answers into
+the PRD/spec, followed by the **Ask to continue** prompt below. **Cancel** closes the page
+without touching the file (and without applying anything). The server only listens on
 `127.0.0.1`, for the duration of that one answer session.
 
 ## Auto-answer mode — `py tempa.py clarify --auto-answer`
@@ -96,6 +102,28 @@ to run `clarify` first.
 
 Difference from `--finalize`: `--apply` doesn't re-evaluate — it only applies existing
 answers. `--finalize` combines evaluate + apply in a loop.
+
+Once the apply step succeeds, `clarify --apply` also shows the **Ask to continue** prompt
+below (same as the web UI path).
+
+## Ask to continue — after any apply step
+
+```
+Run another clarification round now? [y/N]:
+```
+
+Shown right after answers are applied to the PRD/spec — whether that apply was triggered by
+saving in the web UI (`clarify` / `answer <file>`) or by running `clarify --apply` directly.
+Answering `y`/`yes` immediately starts a fresh `clarify` round (re-evaluate → report → web
+UI); anything else (including just pressing Enter) exits so you can review the result
+yourself first. Looping back from plain `clarify` respects whatever `--noui` you originally
+passed; looping back from `answer <file>` or `clarify --apply` always reopens the web UI.
+
+Only asked in an interactive terminal — if stdin isn't a TTY (e.g. scripted/CI use), the
+prompt is skipped entirely and the command just exits, same as before this behavior existed.
+
+Not shown by `--finalize`: that mode already loops evaluate → apply automatically by rule
+until `critical`/`major` findings are gone, so there's nothing to ask.
 
 ## Finalize mode (automatic clarification) — `py tempa.py clarify --finalize`
 

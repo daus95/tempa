@@ -141,12 +141,17 @@ not as alternatives to pick from.
 ```bash
 py tempa.py clarify          # evaluate: system writes questions + recommended answers to a file,
                               # then opens a web UI to answer them (add --noui to skip it)
-py tempa.py clarify --apply  # apply your answers back into the PRD
-py tempa.py clarify          # re-evaluate, repeat while critical/major findings remain
+                              # saving in the UI immediately applies the answers back into the PRD
 ```
 
 Prefer editing the markdown file by hand instead? That still works — the web UI is just a
-convenience. Re-open it anytime with `py tempa.py answer <file>`.
+convenience. Edit the file yourself, then run `py tempa.py clarify --apply` to apply it back
+into the PRD. Re-open the UI anytime on an existing result file with `py tempa.py answer <file>`.
+
+After answers are applied (from the UI, or via `--apply`), Tempa asks whether to run another
+clarification round right away — answer `y` to loop straight back into `clarify`, or `N` to
+stop and review manually. (Only asked in an interactive terminal — non-interactive runs just
+exit.)
 
 **When:** during the early iterations (usually the first 3–4 rounds).
 **Why:** early on, the system doesn't yet have enough project context to guess your intent
