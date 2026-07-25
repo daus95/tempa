@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -11,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from clarify_ui import file_answer_status, run_answer_ui
+from dashboard_ui import file_answer_status, run_dashboard
 
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages
 if hasattr(sys.stdout, "reconfigure"):
@@ -345,6 +346,14 @@ def resolve_specs_dir(config: dict) -> Path:
         return Path(root) / specs_rel
     specs_path = Path(specs_rel)
     return specs_path if specs_path.is_absolute() else WORKING_DIR / specs_rel
+
+
+def _resolve_prd_dir(config: dict) -> Path:
+    """Return the absolute path of the PRD folder (sources.prd), falling back to
+    <specs>/prd when sources.prd isn't configured. Shared by every entry point that
+    opens the dashboard's Specification section."""
+    prd_dir_str = get_sources(config).get("prd", "")
+    return Path(prd_dir_str) if prd_dir_str else resolve_specs_dir(config) / "prd"
 
 
 def _format_stream_line(data: dict) -> str | None:
@@ -1373,14 +1382,9 @@ def run_clarify_once(noui: bool = False) -> None:
         print("  Then repeat tempa clarify to verify.", flush=True)
 
     if not noui and report_files:
-        saved = run_answer_ui(report_files)
+        saved = run_dashboard(_resolve_prd_dir(config), clar_dir, initial_view="clarification")
         if saved:
-            log("Answers saved — applying them to the PRD/spec now...")
-            _run_apply_step(load_config())
-            if _ask_continue_clarification():
-                log("Starting another clarification round...")
-                run_clarify_once(noui=noui)
-                return
+            log("Answers saved. Run `tempa clarify --apply` when you're ready to apply them to the PRD/spec.")
 
     sys.exit(0)
 
@@ -1512,6 +1516,23 @@ def run_clarify_finalize() -> None:
     sys.exit(1)
 
 
+def _record_clarify_applied_state(config: dict, clar_dir: Path) -> None:
+    """Stamp every current clarification result file's content hash into
+    config["clarify_applied_hashes"] right after a successful apply — the dashboard
+    compares each file's live hash against this to know whether its currently-recorded
+    answers have already been applied to the PRD/spec, or have changed (or never been
+    applied) since. Applying doesn't touch the clarification files themselves (only the
+    PRD/spec + config), so this is the only record of "applied" state there is."""
+    hashes = {}
+    for p in _clarification_result_files(clar_dir):
+        try:
+            hashes[p.name] = hashlib.sha256(p.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+        except OSError:
+            continue
+    config["clarify_applied_hashes"] = hashes
+    save_config(config)
+
+
 def _run_apply_step(config: dict) -> bool:
     """Run one apply-clarification session (writes answers/resolutions into the PRD/spec
     documents) and log the outcome. Returns True on success, False on failure. Exits the
@@ -1536,6 +1557,7 @@ def _run_apply_step(config: dict) -> bool:
     f = config.get("last_clarification_findings", {})
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
+    _record_clarify_applied_state(config, Path(get_sources(config).get("clarifications", "")))
     return True
 
 
@@ -1591,11 +1613,11 @@ def _clarification_result_files(clar_dir: Path) -> list[Path]:
 
 
 def run_answer_command() -> None:
-    """`tempa answer` — reopen the clarification-answer web UI, without re-running
+    """`tempa answer` — open the dashboard's Clarification section, without re-running
     clarify. Scans sources.clarifications for every clarification result file and — if at
-    least one has an unanswered finding — opens the UI on ALL of them at once (one tab per
-    file, each tab badged complete/incomplete), so nothing unanswered is missed. If every
-    file is already fully answered, reports that and does nothing."""
+    least one has an unanswered finding — opens the dashboard listing all such files in
+    the left panel, so nothing unanswered is missed. If every file is already fully
+    answered, reports that and does nothing."""
     _init_process_log()
 
     config = load_config()
@@ -1618,16 +1640,11 @@ def run_answer_command() -> None:
         sys.exit(0)
 
     log(f"Found {len(paths)} clarification file(s) in {clarifications_path} "
-        f"({unanswered_files} with unanswered findings); opening them all in the answer UI.")
+        f"({unanswered_files} with unanswered findings); opening the dashboard.")
 
-    saved = run_answer_ui(paths)
+    saved = run_dashboard(_resolve_prd_dir(config), clar_dir, initial_view="clarification")
     if saved:
-        log("Answers saved — applying them to the PRD/spec now...")
-        _run_apply_step(load_config())
-        if _ask_continue_clarification():
-            log("Starting another clarification round...")
-            run_clarify_once(noui=False)
-            return
+        log("Answers saved. Run `tempa clarify --apply` when you're ready to apply them to the PRD/spec.")
     sys.exit(0)
 
 
@@ -2203,11 +2220,11 @@ USAGE
 
   -- Create Spec & Clarification --
   tempa clarify              Evaluate PRD clarification once (manual): write findings to file, show counts + file path,
-                                  then open the clarification-answer web UI on the result (add --noui to skip it)
-  tempa clarify --noui       Same as above, but skip opening the answer web UI
+                                  then open the dashboard on the Clarification section (add --noui to skip it)
+  tempa clarify --noui       Same as above, but skip opening the dashboard
   tempa answer               Scan sources.clarifications for clarification files, and — if any finding is
-                                  still unanswered — reopen the web UI on ALL of them (one tab per file, badged
-                                  complete/incomplete), without re-running clarify
+                                  still unanswered — open the dashboard's Clarification section listing every
+                                  such file in the left panel, without re-running clarify
   tempa clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
   tempa clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
   tempa clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
@@ -2227,8 +2244,10 @@ USAGE
   tempa implement --clear    Delete ALL files in the qa/ and logs/ folders (asks for confirmation; --yes to skip)
 
   -- Monitoring & Utilities --
-  tempa spec --show          Open a Windows-Explorer-style web UI for the PRD folder (sources.prd): browse the
-                                  file/subfolder tree, view or edit any markdown file, and save changes back to disk (Ctrl+C to stop)
+  tempa dashboard            Open the web dashboard (Home / Specification / Clarification / Implementation
+                                  in a Windows-Explorer-style left panel, content on the right; Ctrl+C to stop)
+  tempa spec --show          Open the dashboard directly on the Specification section: browse the PRD
+                                  file/subfolder tree, view or edit any markdown file, and save changes back to disk
   tempa verify <epic>        Verify whether the epic specification has been implemented
   tempa clear                Run implement --clear + implement --clear-plan + clarify --clear together,
                                   behind a single confirmation (asks for confirmation; --yes to skip)
@@ -2321,13 +2340,19 @@ def print_status() -> None:
             print(f"   {feat_icon} {feat['id']} — {feat['name']}")
 
 
+def _resolve_clar_dir(config: dict) -> Path:
+    """Return the absolute path of the clarifications folder (sources.clarifications),
+    falling back to <specs>/clarifications when it isn't configured."""
+    clar_dir_str = get_sources(config).get("clarifications", "")
+    return Path(clar_dir_str) if clar_dir_str else resolve_specs_dir(config) / "clarifications"
+
+
 def run_spec_show() -> None:
-    """Open the spec explorer web UI for the PRD folder (sources.prd): a tree of files
-    and subfolders on the left, a markdown view/edit pane on the right. Blocks until
-    the user stops the server (Ctrl+C)."""
+    """`tempa spec --show` — open the dashboard directly on the Specification section:
+    a tree of PRD files/subfolders on the left, a markdown view/edit pane on the right.
+    Blocks until the user stops the server (Ctrl+C)."""
     config = load_config()
-    prd_dir_str = get_sources(config).get("prd", "")
-    prd_dir = Path(prd_dir_str) if prd_dir_str else resolve_specs_dir(config) / "prd"
+    prd_dir = _resolve_prd_dir(config)
     if not prd_dir.exists():
         log(f"PRD folder not found: {prd_dir}")
         log("Create it (or point sources.prd at the right folder in config.json / "
@@ -2336,12 +2361,13 @@ def run_spec_show() -> None:
     if not prd_dir.is_dir():
         log(f"PRD path is not a folder: {prd_dir}")
         sys.exit(1)
-    try:
-        import spec_ui
-    except ImportError as e:
-        log(f"Could not load the spec UI module (spec_ui.py): {e}")
-        sys.exit(1)
-    spec_ui.run_spec_ui(prd_dir)
+    run_dashboard(prd_dir, _resolve_clar_dir(config), initial_view="specification")
+
+
+def run_dashboard_command() -> None:
+    """`tempa dashboard` — open the web dashboard on the Home view."""
+    config = load_config()
+    run_dashboard(_resolve_prd_dir(config), _resolve_clar_dir(config), initial_view="home")
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -2372,6 +2398,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("show-models", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
+
+    sub.add_parser("dashboard", parents=[common], add_help=False)
 
     p = sub.add_parser("spec", parents=[common], add_help=False)
     p.add_argument("--show", action="store_true")
@@ -2524,6 +2552,8 @@ if __name__ == "__main__":
         print_models()
     elif cli_args.command == "test":
         run_test()
+    elif cli_args.command == "dashboard":
+        run_dashboard_command()
     elif cli_args.command == "spec":
         if not cli_args.show:
             print("Usage: tempa spec --show")
