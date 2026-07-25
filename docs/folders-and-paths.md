@@ -28,10 +28,10 @@ absolute path is repeated throughout the config.
 | `archive` | archive of old specs no longer in use | `archive` |
 
 ```bash
-py tempa.py show-folders            # check the active layout + resolved absolute paths
+tempa show-folders            # check the active layout + resolved absolute paths
 
 # override a sub-folder name (optional), config-only — doesn't create folders on disk:
-py tempa.py set-folders --root C:\repo\<your-repo> --specs new-specs --archive old-specs
+tempa set-folders --root C:\repo\<your-repo> --specs new-specs --archive old-specs
 ```
 
 - `init <abs>` — sets `workspace.root` **and** creates the folders on disk (safe to re-run;

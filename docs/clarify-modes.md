@@ -4,10 +4,10 @@ Full reference for every `clarify` mode: manual (default), `--auto-answer`, `--a
 `--finalize`. See [README.md](../README.md) — Step 2 (Answer Clarifications) — for the
 recommended iterative flow.
 
-## Manual mode (default) — `py tempa.py clarify`
+## Manual mode (default) — `tempa clarify`
 
 ```bash
-py tempa.py clarify
+tempa clarify
 ```
 
 Runs **one evaluation pass**, then stops:
@@ -34,7 +34,7 @@ Runs **one evaluation pass**, then stops:
    away (see **Ask to continue** below).
 
 ```bash
-py tempa.py clarify --noui   # skip opening the web UI; just write the file and print the summary
+tempa clarify --noui   # skip opening the web UI; just write the file and print the summary
 ```
 
 You can also open the result file in a text editor and **answer the clarifications
@@ -48,7 +48,7 @@ Opened automatically after a manual `clarify` pass (unless `--noui`), or on dema
 time:
 
 ```bash
-py tempa.py answer
+tempa answer
 ```
 
 `answer` takes no arguments. It scans `sources.clarifications` for every clarification
@@ -78,10 +78,10 @@ that were open, followed by the **Ask to continue** prompt below. **Cancel** clo
 without touching any file (and without applying anything). The server only listens on
 `127.0.0.1`, for the duration of that one answer session.
 
-## Auto-answer mode — `py tempa.py clarify --auto-answer`
+## Auto-answer mode — `tempa clarify --auto-answer`
 
 ```bash
-py tempa.py clarify --auto-answer
+tempa clarify --auto-answer
 ```
 
 Automatically answers clarification findings that are **still unanswered** (one pass,
@@ -96,10 +96,10 @@ Automatically answers clarification findings that are **still unanswered** (one 
 
 Useful as a middle ground: let Claude answer first, then you review/correct.
 
-## Apply mode — `py tempa.py clarify --apply`
+## Apply mode — `tempa clarify --apply`
 
 ```bash
-py tempa.py clarify --apply
+tempa clarify --apply
 ```
 
 Applies the answers/resolutions **already recorded** in the clarification file into the
@@ -134,10 +134,10 @@ prompt is skipped entirely and the command just exits, same as before this behav
 Not shown by `--finalize`: that mode already loops evaluate → apply automatically by rule
 until `critical`/`major` findings are gone, so there's nothing to ask.
 
-## Finalize mode (automatic clarification) — `py tempa.py clarify --finalize`
+## Finalize mode (automatic clarification) — `tempa clarify --finalize`
 
 ```bash
-py tempa.py clarify --finalize
+tempa clarify --finalize
 ```
 
 Performs **automatic evaluation and answering** in a loop (up to `max_clarification_run`
