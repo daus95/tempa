@@ -1358,7 +1358,10 @@ def run_clarify_once(noui: bool = False) -> None:
         print("  Then repeat py tempa.py clarify to verify.", flush=True)
 
     if not noui and report_files:
-        run_answer_ui(report_files)
+        saved = run_answer_ui(report_files)
+        if saved:
+            log("Answers saved — applying them to the PRD/spec now...")
+            _run_apply_step(load_config())
 
     sys.exit(0)
 
@@ -1490,6 +1493,33 @@ def run_clarify_finalize() -> None:
     sys.exit(1)
 
 
+def _run_apply_step(config: dict) -> bool:
+    """Run one apply-clarification session (writes answers/resolutions into the PRD/spec
+    documents) and log the outcome. Returns True on success, False on failure. Exits the
+    process directly on an auth error or usage-limit hit, matching every other clarify
+    subcommand's behavior."""
+    prompt = build_apply_clarification_prompt(config)
+    if not run_apply_clarification_session(prompt, 1, get_model(config, "clarify")):
+        if _state.auth_error_hit:
+            sys.exit(3)
+        if _state.usage_limit_hit:
+            log("Apply stopped — Claude usage limit reached.")
+            sys.exit(2)
+        log("Apply clarification failed.")
+        return False
+    if _state.auth_error_hit:
+        sys.exit(3)
+    if _state.usage_limit_hit:
+        log("Apply stopped — Claude usage limit reached.")
+        sys.exit(2)
+
+    config = load_config()
+    f = config.get("last_clarification_findings", {})
+    log(f"Apply clarification done. Remaining findings: "
+        f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
+    return True
+
+
 def run_clarify_apply() -> None:
     """Apply the answers/resolutions recorded in the clarification files to the PRD/spec
     documents (one session, WITHOUT re-evaluating). Prerequisite: clarification results
@@ -1511,26 +1541,7 @@ def run_clarify_apply() -> None:
     _banner(f"Clarify (apply) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
-    prompt = build_apply_clarification_prompt(config)
-    if not run_apply_clarification_session(prompt, 1, get_model(config, "clarify")):
-        if _state.auth_error_hit:
-            sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Apply stopped — Claude usage limit reached.")
-            sys.exit(2)
-        log("Apply clarification failed.")
-        sys.exit(1)
-    if _state.auth_error_hit:
-        sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Apply stopped — Claude usage limit reached.")
-        sys.exit(2)
-
-    config = load_config()
-    f = config.get("last_clarification_findings", {})
-    log(f"Apply clarification done. Remaining findings: "
-        f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
-    sys.exit(0)
+    sys.exit(0 if _run_apply_step(config) else 1)
 
 
 def _resolve_clarification_file(file_arg: str, clarifications_path: str) -> Path:
@@ -1555,11 +1566,16 @@ def _resolve_clarification_file(file_arg: str, clarifications_path: str) -> Path
 def run_answer_command(file_arg: str) -> None:
     """`py tempa.py answer <file>` — reopen the clarification-answer web UI on an
     existing clarification result file, without re-running clarify."""
+    _init_process_log()
+
     config = load_config()
     sources = get_sources(config)
     clarifications_path = sources.get("clarifications", "")
     path = _resolve_clarification_file(file_arg, clarifications_path)
-    run_answer_ui([path])
+    saved = run_answer_ui([path])
+    if saved:
+        log("Answers saved — applying them to the PRD/spec now...")
+        _run_apply_step(load_config())
     sys.exit(0)
 
 

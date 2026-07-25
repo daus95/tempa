@@ -6,7 +6,7 @@ Write the specification](../README.md#step-1--write-the-specification) in the ma
 
 | # | Scenario | Complexity | DB/API Access |
 |---|----------|------------|----------------|
-| [01-simple-web-app](01-simple-web-app/PRD.md) | Mortgage (KPR) Installment Simulator (client-side) | Medium | No — no backend/API, state lives in the browser only |
+| [01-simple-web-app](01-simple-web-app/PRD.md) | Mortgage Installment Simulator (client-side) | Medium | No — no backend/API, state lives in the browser only |
 | [02-web-app-with-db](02-web-app-with-db/PRD.md) | Retail Store POS & Inventory System | Advanced | Yes — web app with a backend + relational database (ERD included) |
 
 ## How to use these examples

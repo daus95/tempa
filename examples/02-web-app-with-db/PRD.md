@@ -195,8 +195,8 @@ erDiagram
    creates one `StockMovement` record with `type = "in"`.
 3. Completing a sale of 3 units of a product that only has 2 units in stock is rejected
    before the sale is created (no partial stock deduction).
-4. Completing a valid sale of 2 units at unit price 10,000 with no discount, paid amount
-   25,000 → `total_amount = 20,000`, `change_amount = 5,000`, product `stock_qty` decreases
+4. Completing a valid sale of 2 units at unit price 25.00 with no discount, paid amount
+   60.00 → `total_amount = 50.00`, `change_amount = 10.00`, product `stock_qty` decreases
    by 2, and one `StockMovement` with `type = "out"` is created per sale item.
 5. A Cashier-role user attempting to access the Products management endpoint/page receives
    a 403/forbidden response, both via direct API call and via the UI route.

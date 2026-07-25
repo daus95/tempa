@@ -494,10 +494,12 @@ class _AnswerHandler(BaseHTTPRequestHandler):
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
 
-def run_answer_ui(paths: list[Path]) -> None:
+def run_answer_ui(paths: list[Path]) -> bool:
     """Parse the given clarification file(s), serve an interactive answer page on
     127.0.0.1, open it in the default browser, and block until the user saves or
-    cancels (or interrupts with Ctrl+C). Writes answers back into the same file(s)."""
+    cancels (or interrupts with Ctrl+C). Writes answers back into the same file(s).
+    Returns True iff the user saved and at least one file was actually updated —
+    the caller uses this to decide whether to run `clarify --apply` next."""
     all_items: list[ClarificationItem] = []
     files_text: dict[Path, str] = {}
     file_blocks: list[tuple[Path, list[tuple[str, object]]]] = []
@@ -518,7 +520,7 @@ def run_answer_ui(paths: list[Path]) -> None:
         print('(Looking for "<!-- clarify:item id=... severity=... -->" markers. If this file')
         print(" predates the answer UI, or was hand-edited without them, re-run")
         print(" `py tempa.py clarify` to regenerate it, or answer/apply it manually.)")
-        return
+        return False
 
     items_by_key = {item.key: item for item in all_items}
     page_html = _render_page(file_blocks, all_items)
@@ -549,7 +551,9 @@ def run_answer_ui(paths: list[Path]) -> None:
             print("[OK] Answers recorded:")
             for p in changed:
                 print(f"  {p}")
-        else:
-            print("No answers were recorded (nothing matched).")
+            return True
+        print("No answers were recorded (nothing matched).")
+        return False
     elif action == "cancel":
         print("Cancelled -- no changes were made.")
+    return False
