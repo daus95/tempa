@@ -29,10 +29,14 @@ absolute paths.
 
 from __future__ import annotations
 
+import hashlib
 import html as html_lib
 import json
 import re
 import shutil
+import subprocess
+import sys
+import threading
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -382,24 +386,132 @@ def _file_severity_stats(path: Path) -> dict | None:
         "name": path.name, "path": path.name,
         "critical": by_severity["critical"], "major": by_severity["major"], "minor": by_severity["minor"],
         "answered": answered, "total": len(items),
+        "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
+
+
+def _load_clarify_applied_hashes() -> dict:
+    """config.json's "clarify_applied_hashes" — {filename: content-hash-at-last-apply},
+    stamped by tempa.py's _record_clarify_applied_state() right after a successful
+    `tempa clarify --apply`. Read directly from config.json (rather than importing
+    tempa.py, which imports this module) so the two stay decoupled; config.json always
+    lives next to this file, same as tempa.py."""
+    config_path = Path(__file__).resolve().parent / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    hashes = config.get("clarify_applied_hashes")
+    return hashes if isinstance(hashes, dict) else {}
 
 
 def _clarify_files_overview(clar_dir: Path) -> tuple[list[dict], list[dict]]:
     """Every clarification result file (flat, excluding claude.md) with recognized
-    findings, split into (unanswered, fully_answered), each sorted by name."""
+    findings, split into (unanswered, fully_answered), each sorted by name. Fully
+    answered files also get an "applied" bool: whether their current content (i.e.
+    current answers) matches what was last applied to the PRD/spec, per
+    config.json's clarify_applied_hashes — so the dashboard knows whether an
+    "Apply Answer(s)" action is actually needed or would be a no-op."""
     unanswered: list[dict] = []
     answered: list[dict] = []
     if not clar_dir.exists():
         return unanswered, answered
+    applied_hashes = _load_clarify_applied_hashes()
     for p in sorted(clar_dir.glob("*.md")):
         if p.name.lower() == "claude.md":
             continue
         stats = _file_severity_stats(p)
         if stats is None:
             continue
-        (answered if stats["answered"] == stats["total"] else unanswered).append(stats)
+        if stats["answered"] == stats["total"]:
+            stats["applied"] = applied_hashes.get(stats["name"]) == stats["content_hash"]
+            answered.append(stats)
+        else:
+            unanswered.append(stats)
     return unanswered, answered
+
+
+# ---------------------------------------------------------------------------
+# Clarification run (Start Clarification / Finalized Clarification buttons) —
+# spawns `tempa clarify` / `tempa clarify --finalize` as a subprocess and lets the
+# dashboard poll its console output for the collapsible log panel.
+# ---------------------------------------------------------------------------
+
+# Matches the self-overwriting `\r[HH:MM:SS] [...] [rows]` progress line tempa.py
+# prints once a second while a Claude session is running (see _display_progress in
+# tempa.py). Kept out of the appended `lines` history entirely (see `progress` below)
+# — tempa.py can go minutes between any other console output, so if this were folded
+# into `lines` in place, the dashboard's index-based polling would fetch it once and
+# then never notice it kept changing, making a live run look frozen.
+_PROGRESS_LINE_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\]\s*$")
+
+
+def _new_clarify_run_state() -> dict:
+    return {
+        "lock": threading.Lock(),
+        "running": False,
+        "mode": None,
+        "lines": [],
+        "progress": None,
+        "returncode": None,
+    }
+
+
+_CLARIFY_RUN_ARGS = {"run": ["--noui"], "finalize": ["--finalize"], "apply": ["--apply"]}
+
+
+def _start_clarify_run(server, mode: str) -> bool:
+    """Start `tempa clarify` (mode "run"), `tempa clarify --finalize` (mode "finalize"),
+    or `tempa clarify --apply` (mode "apply") as a background subprocess, appending its
+    console output to server.clarify_run["lines"] as it streams in. Returns False without
+    starting anything if a run is already in progress (defense in depth alongside the
+    dashboard disabling the buttons client-side)."""
+    run = server.clarify_run
+    with run["lock"]:
+        if run["running"]:
+            return False
+        run["running"] = True
+        run["mode"] = mode
+        run["lines"] = []
+        run["progress"] = None
+        run["returncode"] = None
+
+    def worker() -> None:
+        tempa_py = Path(__file__).resolve().parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "clarify", *_CLARIFY_RUN_ARGS[mode]]
+        returncode = -1
+        try:
+            process = subprocess.Popen(
+                cmd,
+                # `tempa clarify --apply` asks (via input()) whether to run another
+                # clarification round right away, but only if stdin is a tty — DEVNULL
+                # guarantees it never is, so a dashboard-triggered apply can't block
+                # forever waiting for a keypress no one can give it.
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                with run["lock"]:
+                    if _PROGRESS_LINE_RE.match(line):
+                        run["progress"] = line
+                    else:
+                        run["lines"].append(line)
+            process.wait()
+            returncode = process.returncode
+        except OSError as e:
+            with run["lock"]:
+                run["lines"].append(f"[error] Could not start clarify process: {e}")
+        with run["lock"]:
+            run["running"] = False
+            run["progress"] = None
+            run["returncode"] = returncode
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
 
 
 def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
@@ -480,6 +592,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_spec_file(parse_qs(parsed.query))
         elif route == "/api/clarify/file":
             self._handle_clarify_file(parse_qs(parsed.query))
+        elif route == "/api/clarify/run":
+            self._handle_clarify_run_status(parse_qs(parsed.query))
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -546,6 +660,21 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "answered": answered, "total": len(items),
         })
 
+    def _handle_clarify_run_status(self, query: dict) -> None:
+        try:
+            since = int((query.get("since", ["0"])[0]))
+        except ValueError:
+            since = 0
+        run = self.server.clarify_run
+        with run["lock"]:
+            lines = list(run["lines"][max(since, 0):])
+            total = len(run["lines"])
+            self._send_json(200, {
+                "ok": True, "running": run["running"], "mode": run["mode"],
+                "returncode": run["returncode"], "lines": lines, "next": total,
+                "progress": run["progress"],
+            })
+
     # -- POST ---------------------------------------------------------------
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -559,6 +688,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_spec_rename()
         elif parsed.path == "/api/clarify/save":
             self._handle_clarify_save()
+        elif parsed.path == "/api/clarify/run":
+            self._handle_clarify_run_start()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -701,6 +832,20 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         print(f"[saved] {rel} ({answered}/{total} answered)")
         self._send_json(200, {"ok": True, "path": rel, "answered": answered, "total": total})
 
+    def _handle_clarify_run_start(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        mode = payload.get("mode")
+        if mode not in ("run", "finalize", "apply"):
+            self._send_json(400, {"ok": False, "error": "Invalid mode."})
+            return
+        if not _start_clarify_run(self.server, mode):
+            self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
+            return
+        self._send_json(200, {"ok": True})
+
 
 def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> bool:
     """Serve the dashboard on a random 127.0.0.1 port, open it in the default
@@ -720,6 +865,7 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     server.clar_dir = clar_dir
     server.page_html = page_html
     server.any_saved = False
+    server.clarify_run = _new_clarify_run_state()
 
     port = server.server_address[1]
     url = f"http://127.0.0.1:{port}/"
@@ -939,6 +1085,44 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .clarify-overview-pane .status-complete { color: var(--ok); font-weight: 600; }
   .clarify-overview-pane .status-pending { color: var(--major); font-weight: 600; }
 
+  /* ---- clarification run (Start / Finalized buttons + log panel) ---- */
+  .clarify-run-actions { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .clarify-run-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+    font-weight: 600; background: var(--accent); color: #fff; border-color: var(--accent); }
+  .clarify-run-btn:hover:not(:disabled) { opacity: 0.9; border-color: var(--accent); }
+  .clarify-run-btn:disabled { opacity: 0.5; cursor: default; }
+  .clarify-run-btn.secondary { background: var(--panel); color: var(--text); border-color: var(--border-strong); }
+  .clarify-run-btn.secondary:hover:not(:disabled) { opacity: 1; border-color: var(--accent); }
+  .clarify-apply-btn { padding: 3px 10px; font-size: 0.78rem; font-weight: 600;
+    background: var(--accent); color: #fff; border-color: var(--accent); }
+  .clarify-apply-btn:hover:not(:disabled) { opacity: 0.9; }
+  .clarify-apply-btn:disabled { opacity: 0.5; cursor: default; }
+  .clarify-applied-badge { color: var(--ok); font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+  .clarify-log { max-width: 860px; margin-bottom: 24px; border: 1px solid var(--border-strong);
+    border-radius: 8px; background: var(--panel); }
+  .clarify-log summary { cursor: pointer; padding: 9px 14px; font-weight: 600; font-size: 0.88rem;
+    list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
+  .clarify-log summary::-webkit-details-marker { display: none; }
+  .clarify-log summary::before { content: "▶"; font-size: 0.65rem; color: var(--muted);
+    display: inline-block; transition: transform .15s; }
+  .clarify-log[open] summary::before { transform: rotate(90deg); }
+  .clarify-log-status { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+  .clarify-log-body { max-height: 320px; overflow-y: auto; padding: 2px 14px 12px;
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; }
+  .clarify-log-line { padding: 4px 0; display: flex; gap: 8px; align-items: baseline;
+    border-bottom: 1px dashed var(--border); }
+  .clarify-log-line:last-child { border-bottom: none; }
+  .clarify-log-time { color: var(--muted); flex: none; font-size: 0.75rem; }
+  .clarify-log-icon { flex: none; }
+  .clarify-log-msg { white-space: pre-wrap; word-break: break-word; }
+  .clarify-log-line.banner .clarify-log-msg { font-weight: 700; }
+  .clarify-log-line.ok .clarify-log-msg { color: var(--ok); }
+  .clarify-log-line.warn .clarify-log-msg { color: var(--major); }
+  .clarify-log-line.err .clarify-log-msg { color: var(--danger); }
+  .clarify-log-line.progress .clarify-log-msg { color: var(--muted); font-style: italic; }
+  .clarify-log-empty { color: var(--muted); font-size: 0.85rem; padding: 8px 0; }
+
   /* ---- specification overview (file count + add file/folder) ---- */
   .spec-overview-pane { display: flex; flex-direction: column; align-items: center;
     justify-content: center; text-align: center; gap: 10px; padding: 40px; }
@@ -1013,6 +1197,21 @@ _PAGE_TEMPLATE = r"""<!doctype html>
         <div id="clarifyBody"></div>
       </div>
       <div id="clarifyOverviewPane" class="pane clarify-overview-pane hidden">
+        <div class="clarify-run-actions">
+          <button type="button" class="clarify-run-btn" id="startClarifyBtn">
+            <span>▶️</span><span>Start Clarification</span>
+          </button>
+          <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn">
+            <span>🏁</span><span>Finalized Clarification</span>
+          </button>
+          <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
+            <span>📤</span><span>Apply Answers</span>
+          </button>
+        </div>
+        <details class="clarify-log hidden" id="clarifyLogPanel">
+          <summary>Clarification log <span class="clarify-log-status" id="clarifyLogStatus"></span></summary>
+          <div class="clarify-log-body" id="clarifyLogBody"></div>
+        </details>
         <div class="group">
           <h3>Unanswered</h3>
           <table>
@@ -1023,7 +1222,7 @@ _PAGE_TEMPLATE = r"""<!doctype html>
         <div class="group">
           <h3>Fully answered</h3>
           <table>
-            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th></tr></thead>
+            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th><th>Applied</th></tr></thead>
             <tbody id="clarifyAnsweredTbody"></tbody>
           </table>
         </div>
@@ -1193,7 +1392,11 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   clarifyUnansweredTbody = $("clarifyUnansweredTbody"), clarifyAnsweredTbody = $("clarifyAnsweredTbody"),
   specFileCountEl = $("specFileCount"),
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
-  addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput");
+  addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
+  startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  applyAnswersBtn = $("applyAnswersBtn"),
+  clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
+  clarifyLogStatus = $("clarifyLogStatus");
 
 const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl"];
 
@@ -1214,6 +1417,7 @@ const state = {
   selectedClarifyPath: null,
   clarifyDirty: false,
   clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
+  clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -1445,11 +1649,18 @@ function statusCell(file) {
     : `<span class="status-pending">🔶 ${file.answered}/${file.total}</span>`;
 }
 
-function renderClarifyOverviewRows(tbody, files, emptyMessage) {
+function appliedCell(file) {
+  return file.applied
+    ? '<span class="clarify-applied-badge">✅ Applied</span>'
+    : '<button type="button" class="clarify-apply-btn">Apply Answer</button>';
+}
+
+function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
   tbody.innerHTML = "";
+  const colspan = showApplied ? 6 : 5;
   if (!files.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="5" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
+    tr.innerHTML = `<td colspan="${colspan}" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -1459,18 +1670,194 @@ function renderClarifyOverviewRows(tbody, files, emptyMessage) {
       `<td>${severityCell(file.critical)}</td>` +
       `<td>${severityCell(file.major)}</td>` +
       `<td>${severityCell(file.minor)}</td>` +
-      `<td>${statusCell(file)}</td>`;
+      `<td>${statusCell(file)}</td>` +
+      (showApplied ? `<td>${appliedCell(file)}</td>` : "");
     tr.addEventListener("click", () => openClarifyFile(file));
+    if (showApplied && !file.applied) {
+      // This file's own row also offers a one-off Apply — same underlying `tempa
+      // clarify --apply` as the top Apply Answers button (it always applies every
+      // answered file's current answers, there's no way to scope it to just this one).
+      const applyBtn = tr.querySelector(".clarify-apply-btn");
+      applyBtn.disabled = state.clarifyRun.running;
+      applyBtn.addEventListener("click", (e) => { e.stopPropagation(); startClarifyRun("apply"); });
+    }
     tbody.appendChild(tr);
   }
 }
 
 function renderClarifyOverview() {
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
-    "No unanswered files.");
+    "No unanswered files.", false);
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
-    "No fully answered files yet.");
+    "No fully answered files yet.", true);
+  setClarifyRunButtonsDisabled(state.clarifyRun.running);
 }
+
+// ---------------------------------------------------------------------------
+// Clarification run (Start Clarification / Finalized Clarification / Apply Answers
+// + log panel)
+// ---------------------------------------------------------------------------
+function setClarifyRunButtonsDisabled(disabled) {
+  startClarifyBtn.disabled = disabled;
+  finalizeClarifyBtn.disabled = disabled;
+  applyAnswersBtn.disabled = disabled || !state.clarifyAnswered.some((f) => !f.applied);
+  // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
+  // already stamps them with the disabled state current at render time — but a run can
+  // start/stop without the table re-rendering, so also sync any already-in-the-DOM ones.
+  clarifyAnsweredTbody.querySelectorAll(".clarify-apply-btn").forEach((btn) => { btn.disabled = disabled; });
+}
+
+function clarifyRunStatusLabel(mode) {
+  if (mode === "finalize") return "Finalizing…";
+  if (mode === "apply") return "Applying…";
+  return "Running…";
+}
+
+// Turns one raw console line from `tempa clarify` into a {cls, icon, time, msg} for
+// user-friendly rendering — banners, [OK]/[!] markers, and the once-a-second
+// progress tick each get their own look instead of showing as raw log text.
+function formatClarifyLogLine(text) {
+  if (/^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\]\s*$/.test(text)) {
+    const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$/);
+    return { cls: "progress", icon: "⏳", time: m ? m[1] : "", msg: m ? m[2] : text };
+  }
+  const trimmed = text.trim();
+  if (/^==.+==$/.test(trimmed)) {
+    return { cls: "banner", icon: "📣", time: "", msg: trimmed.replace(/^=+\s*|\s*=+$/g, "") };
+  }
+  let time = "", msg = text;
+  const tsMatch = text.match(/^\[\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\]\s?(.*)$/);
+  if (tsMatch) { time = tsMatch[1]; msg = tsMatch[2]; }
+  if (/^\[OK\]/i.test(msg)) return { cls: "ok", icon: "✅", time, msg: msg.replace(/^\[OK\]\s*/i, "") };
+  if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "✅", time, msg };
+  if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "❌", time, msg };
+  if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "⚠️", time, msg: msg.replace(/^\[!\]\s*/, "") };
+  if (/usage limit reached|reached the .* limit/i.test(msg)) return { cls: "warn", icon: "⚠️", time, msg };
+  return { cls: "plain", icon: "•", time, msg };
+}
+
+function appendClarifyLogRow(text) {
+  const f = formatClarifyLogLine(text);
+  const row = document.createElement("div");
+  row.className = "clarify-log-line " + f.cls;
+  row.innerHTML =
+    (f.time ? `<span class="clarify-log-time">${escapeHtml(f.time)}</span>` : "") +
+    `<span class="clarify-log-icon">${f.icon}</span>` +
+    `<span class="clarify-log-msg">${escapeHtml(f.msg)}</span>`;
+  return row;
+}
+
+function renderClarifyLog() {
+  clarifyLogBody.innerHTML = "";
+  if (!state.clarifyRun.lines.length && !state.clarifyRun.progress) {
+    clarifyLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
+    return;
+  }
+  for (const text of state.clarifyRun.lines) clarifyLogBody.appendChild(appendClarifyLogRow(text));
+  // The live progress tick is rendered separately from `lines` (not appended to it) and
+  // re-rendered fresh on every poll, so its elapsed time visibly keeps ticking instead of
+  // freezing at whatever value happened to be present the first time it was fetched.
+  if (state.clarifyRun.progress) clarifyLogBody.appendChild(appendClarifyLogRow(state.clarifyRun.progress));
+  clarifyLogBody.scrollTop = clarifyLogBody.scrollHeight;
+}
+
+function stopClarifyPolling() {
+  if (state.clarifyRun.pollTimer) {
+    clearInterval(state.clarifyRun.pollTimer);
+    state.clarifyRun.pollTimer = null;
+  }
+}
+
+function returncodeMessage(code, mode) {
+  const label = mode === "apply" ? "Apply" : mode === "finalize" ? "Finalize" : "Clarification";
+  if (code === 0) return `${label} run finished.`;
+  if (code === 2) return `${label} stopped — Claude usage limit reached.`;
+  if (code === 3) return `${label} stopped — authentication error.`;
+  return `${label} run exited with an error (code ${code}).`;
+}
+
+async function pollClarifyRun() {
+  try {
+    const res = await fetch("/api/clarify/run?since=" + state.clarifyRun.nextIndex);
+    const data = await res.json();
+    if (!data.ok) return;
+    if (data.lines.length) {
+      state.clarifyRun.lines.push(...data.lines);
+      state.clarifyRun.nextIndex = data.next;
+    }
+    // Always re-render, even with no new finalized lines: `progress` (the live
+    // elapsed-time tick) changes every second on its own and isn't part of `lines`.
+    state.clarifyRun.progress = data.progress;
+    renderClarifyLog();
+    state.clarifyRun.running = data.running;
+    clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
+    setClarifyRunButtonsDisabled(data.running);
+    if (!data.running) {
+      stopClarifyPolling();
+      if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
+      refreshClarifyList();
+    }
+  } catch (e) { /* transient network hiccup — next tick retries */ }
+}
+
+function startClarifyPolling() {
+  stopClarifyPolling();
+  state.clarifyRun.pollTimer = setInterval(pollClarifyRun, 1000);
+  pollClarifyRun();
+}
+
+async function startClarifyRun(mode) {
+  if (state.clarifyRun.running) return;
+  setClarifyRunButtonsDisabled(true);
+  clarifyLogPanel.classList.remove("hidden");
+  clarifyLogPanel.open = true;
+  state.clarifyRun.lines = [];
+  state.clarifyRun.progress = null;
+  state.clarifyRun.nextIndex = 0;
+  state.clarifyRun.mode = mode;
+  clarifyLogStatus.textContent = clarifyRunStatusLabel(mode);
+  renderClarifyLog();
+  try {
+    const res = await fetch("/api/clarify/run", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      toast(data.error || "Could not start clarification run.", true);
+      clarifyLogStatus.textContent = "";
+      setClarifyRunButtonsDisabled(false);
+      return;
+    }
+    state.clarifyRun.running = true;
+    startClarifyPolling();
+  } catch (e) {
+    toast("Network error starting clarification run.", true);
+    clarifyLogStatus.textContent = "";
+    setClarifyRunButtonsDisabled(false);
+  }
+}
+
+async function checkClarifyRunOnLoad() {
+  try {
+    const res = await fetch("/api/clarify/run?since=0");
+    const data = await res.json();
+    if (!data.ok || (!data.running && !data.lines.length)) return;
+    state.clarifyRun.lines = data.lines;
+    state.clarifyRun.nextIndex = data.next;
+    state.clarifyRun.mode = data.mode;
+    state.clarifyRun.progress = data.progress;
+    clarifyLogPanel.classList.remove("hidden");
+    renderClarifyLog();
+    clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
+    setClarifyRunButtonsDisabled(data.running);
+    if (data.running) { clarifyLogPanel.open = true; startClarifyPolling(); }
+  } catch (e) { /* ignore — buttons stay enabled */ }
+}
+
+startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
+finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
+applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
 
 // ---------------------------------------------------------------------------
 // Specification: open / mode / save
@@ -1877,6 +2264,7 @@ if (INITIAL_VIEW === "specification") {
 } else {
   showPane("home");
 }
+checkClarifyRunOnLoad();
 </script>
 </body>
 </html>

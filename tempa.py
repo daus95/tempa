@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -1515,6 +1516,23 @@ def run_clarify_finalize() -> None:
     sys.exit(1)
 
 
+def _record_clarify_applied_state(config: dict, clar_dir: Path) -> None:
+    """Stamp every current clarification result file's content hash into
+    config["clarify_applied_hashes"] right after a successful apply — the dashboard
+    compares each file's live hash against this to know whether its currently-recorded
+    answers have already been applied to the PRD/spec, or have changed (or never been
+    applied) since. Applying doesn't touch the clarification files themselves (only the
+    PRD/spec + config), so this is the only record of "applied" state there is."""
+    hashes = {}
+    for p in _clarification_result_files(clar_dir):
+        try:
+            hashes[p.name] = hashlib.sha256(p.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+        except OSError:
+            continue
+    config["clarify_applied_hashes"] = hashes
+    save_config(config)
+
+
 def _run_apply_step(config: dict) -> bool:
     """Run one apply-clarification session (writes answers/resolutions into the PRD/spec
     documents) and log the outcome. Returns True on success, False on failure. Exits the
@@ -1539,6 +1557,7 @@ def _run_apply_step(config: dict) -> bool:
     f = config.get("last_clarification_findings", {})
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
+    _record_clarify_applied_state(config, Path(get_sources(config).get("clarifications", "")))
     return True
 
 
