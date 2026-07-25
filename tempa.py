@@ -95,6 +95,8 @@ class _RunnerState:
         self.stop_event = threading.Event()
         self.all_done = False
         self.usage_limit_hit = False
+        self.auth_error_hit = False
+        self.auth_error_message = ""
 
 
 _state = _RunnerState()
@@ -191,6 +193,60 @@ def _handle_usage_limit(text: str, process: subprocess.Popen, label: str) -> boo
         return False
     _state.usage_limit_hit = True
     log(f"[{label}] Claude usage limit reached — stopping the agent runner.")
+    _state.stop_event.set()
+    try:
+        process.terminate()
+    except Exception:
+        pass
+    return True
+
+
+# Markers emitted by the claude CLI (merged stdout/stderr) when the API rejects a request
+# due to bad/expired credentials — expired OAuth login, revoked/invalid API key — as
+# opposed to a usage limit or a generic bug. Raw text like:
+#   API Error: 401 {"type":"error","error":{"type":"authentication_error", ...}}
+AUTH_ERROR_MARKERS = (
+    "authentication_error",
+    "oauth access token has expired",
+    "re-authenticate to continue",
+    "invalid api key",
+    "invalid x-api-key",
+    "invalid bearer token",
+)
+
+
+def _is_auth_error_text(text: str) -> bool:
+    """True if the given CLI output text indicates an authentication/credential failure
+    (expired OAuth login, bad API key) rather than a usage limit or a generic bug."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in AUTH_ERROR_MARKERS)
+
+
+def _friendly_auth_error_message(text: str) -> str:
+    """Translate a raw 401/authentication_error line from the claude CLI into a plain-
+    language explanation, so the user doesn't have to parse a raw JSON error to know
+    what happened and what to do about it."""
+    lowered = text.lower()
+    if "invalid api key" in lowered or "invalid x-api-key" in lowered or "invalid bearer token" in lowered:
+        cause = "the API key configured for the `claude` CLI is invalid or has been revoked"
+        fix = "check your ANTHROPIC_API_KEY (or however the key is configured) and try again"
+    else:
+        cause = "your `claude` CLI login session (OAuth token) has expired"
+        fix = "run `claude` in a terminal, then run `/login` inside it to re-authenticate, and try this command again"
+    return f"Authentication to the Claude API failed — {cause}. Fix: {fix}."
+
+
+def _handle_auth_error(text: str, process: subprocess.Popen, label: str) -> bool:
+    """If text indicates an authentication failure, flag a global stop (every subsequent
+    session would fail the same way until the user re-authenticates), terminate the
+    running claude process, and return True. Otherwise return False."""
+    if not _is_auth_error_text(text):
+        return False
+    _state.auth_error_hit = True
+    _state.auth_error_message = _friendly_auth_error_message(text)
+    log(f"[{label}] {_state.auth_error_message}")
     _state.stop_event.set()
     try:
         process.terminate()
@@ -544,6 +600,10 @@ def _stream_claude_process(
                 log_file.write(raw_line)
                 log_file.flush()
                 break
+            if _handle_auth_error(raw_line, process, label):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
             if line.startswith("{"):
                 try:
                     data = json.loads(line)
@@ -637,6 +697,9 @@ def _run_claude_session(
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
     """Log SUCCEEDED / usage-limit-stopped / FAILED (with a one-time log tail) for a
     finished claude session. Returns True iff exit_code == 0 and no usage limit was hit."""
+    if _state.auth_error_hit:
+        log(f"{label} stopped — authentication failed (see message above).")
+        return False
     if _state.usage_limit_hit:
         log(f"{label} stopped — Claude usage limit reached.{usage_limit_note}")
         return False
@@ -715,9 +778,9 @@ def run_session(
     )
 
     with _state.lock:
-        # A usage-limit stop is not a real epic failure: leave status untouched so the
-        # epic can be resumed once the limit resets.
-        if exit_code != 0 and not _state.usage_limit_hit:
+        # A usage-limit or auth-error stop is not a real epic failure: leave status
+        # untouched so the epic can be resumed once the limit resets / auth is fixed.
+        if exit_code != 0 and not _state.usage_limit_hit and not _state.auth_error_hit:
             # Only mark failed — "done"/"pending" is set by the AI session itself
             config = load_config()
             config["epic"][index]["status"] = "failed"
@@ -997,7 +1060,9 @@ def run_test() -> None:
     if test_file.exists():
         test_file.unlink()
 
-    if _state.usage_limit_hit:
+    if _state.auth_error_hit:
+        log(f"TEST stopped — authentication failed (see message above; log: {log_path.name})")
+    elif _state.usage_limit_hit:
         log(f"TEST stopped — Claude usage limit reached (see log: {log_path.name})")
     elif exit_code != 0:
         log(f"TEST FAILED — claude exited with code {exit_code} (see log: {log_path.name})")
@@ -1094,6 +1159,8 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             log("No task (epic/feature/QA) to work on — running plan automatically "
                 "before implementation.")
         if not _plan_epics_run(config):
+            if _state.auth_error_hit:
+                sys.exit(3)
             if _state.usage_limit_hit:
                 log("Plan stopped — Claude usage limit reached.")
                 sys.exit(2)
@@ -1129,6 +1196,10 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
 
         _state.stop_event.wait(timeout=POLL_INTERVAL_SEC)
 
+    if _state.auth_error_hit:
+        log("Agent runner stopped — authentication failed (see message above). "
+            "Re-authenticate the `claude` CLI, then run this command again.")
+        sys.exit(3)
     if _state.usage_limit_hit:
         log("Agent runner stopped — Claude usage limit reached. "
             "Run it again once the limit resets.")
@@ -1239,11 +1310,15 @@ def run_clarify_once() -> None:
     start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
     prompt = build_clarification_prompt(config)
     if not run_clarification_session(prompt, 1, get_model(config, "clarify")):
+        if _state.auth_error_hit:
+            sys.exit(3)
         if _state.usage_limit_hit:
             log("Clarify stopped — Claude usage limit reached.")
             sys.exit(2)
         log("Clarification evaluation failed.")
         sys.exit(1)
+    if _state.auth_error_hit:
+        sys.exit(3)
     if _state.usage_limit_hit:
         log("Clarify stopped — Claude usage limit reached.")
         sys.exit(2)
@@ -1308,11 +1383,15 @@ def run_clarify_answer() -> None:
     start_ts = time.time() - 1
     prompt = build_auto_answer_prompt(config)
     if not run_clarification_session(prompt, 1, get_model(config, "clarify")):
+        if _state.auth_error_hit:
+            sys.exit(3)
         if _state.usage_limit_hit:
             log("Auto-answer stopped — Claude usage limit reached.")
             sys.exit(2)
         log("Auto-answer failed.")
         sys.exit(1)
+    if _state.auth_error_hit:
+        sys.exit(3)
     if _state.usage_limit_hit:
         log("Auto-answer stopped — Claude usage limit reached.")
         sys.exit(2)
@@ -1360,6 +1439,8 @@ def run_clarify_finalize() -> None:
         prompt = build_clarification_prompt(config)
 
         success = run_clarification_session(prompt, run_number, get_model(config, "clarify"))
+        if _state.auth_error_hit:
+            sys.exit(3)
         if _state.usage_limit_hit:
             log("Clarify (finalize) stopped — Claude usage limit reached.")
             sys.exit(2)
@@ -1386,6 +1467,8 @@ def run_clarify_finalize() -> None:
         config = load_config()
         apply_prompt = build_apply_clarification_prompt(config)
         apply_success = run_apply_clarification_session(apply_prompt, run_number, get_model(config, "clarify"))
+        if _state.auth_error_hit:
+            sys.exit(3)
         if _state.usage_limit_hit:
             log("Clarify (finalize) stopped — Claude usage limit reached.")
             sys.exit(2)
@@ -1422,11 +1505,15 @@ def run_clarify_apply() -> None:
 
     prompt = build_apply_clarification_prompt(config)
     if not run_apply_clarification_session(prompt, 1, get_model(config, "clarify")):
+        if _state.auth_error_hit:
+            sys.exit(3)
         if _state.usage_limit_hit:
             log("Apply stopped — Claude usage limit reached.")
             sys.exit(2)
         log("Apply clarification failed.")
         sys.exit(1)
+    if _state.auth_error_hit:
+        sys.exit(3)
     if _state.usage_limit_hit:
         log("Apply stopped — Claude usage limit reached.")
         sys.exit(2)
@@ -1590,7 +1677,7 @@ def _plan_epics_run(config: dict) -> bool:
     log("Laying out new epics/features/tasks from the PRD (only what's not yet implemented)...")
     gen_prompt = build_plan_epics_prompt(config)
     if not _run_oneshot_session(gen_prompt, "PLAN-EPICS", "plan_epics_generate", get_model(config, "plan")):
-        if not _state.usage_limit_hit:
+        if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Generate epic failed — stopping.")
         return False
 
@@ -1599,7 +1686,7 @@ def _plan_epics_run(config: dict) -> bool:
     config = load_config()
     review_prompt = build_review_epics_prompt(config)
     if not _run_oneshot_session(review_prompt, "REVIEW-EPICS", "plan_epics_review", get_model(config, "plan")):
-        if not _state.usage_limit_hit:
+        if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Review epic failed — stopping.")
         return False
 
@@ -1736,6 +1823,8 @@ def run_verify(epic: str) -> None:
         on_json_event=_on_json_event,
     )
 
+    if _state.auth_error_hit:
+        sys.exit(3)
     if _state.usage_limit_hit:
         log(f"Verification stopped — Claude usage limit reached.")
         sys.exit(2)
