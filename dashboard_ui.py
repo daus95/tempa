@@ -1035,7 +1035,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
-        if mode == "finalize" and not _clarify_finalize_status()["ready"]:
+        unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+        findings = _live_clarification_findings(unanswered + answered)
+        if mode == "finalize" and not _clarify_finalize_status(findings)["ready"]:
             # Server-side gate, not just a disabled button client-side — mirrors the
             # implement gate below. `tempa clarify --finalize` itself has no awareness
             # of this precondition and would happily run regardless.
