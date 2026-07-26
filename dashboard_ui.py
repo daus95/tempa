@@ -418,12 +418,52 @@ def _workspace_initialized() -> bool:
     return bool(_load_dashboard_config().get("workspace", {}).get("root"))
 
 
-def _last_clarification_findings() -> dict:
-    """config.json's "last_clarification_findings" — written by the Claude session
-    itself at the end of `clarify`/`clarify --apply`/`clarify --finalize`, not by any
-    Python code here. {critical, major, minor} counts, defaulting each to 0."""
-    f = _load_dashboard_config().get("last_clarification_findings") or {}
-    return {"critical": f.get("critical", 0), "major": f.get("major", 0), "minor": f.get("minor", 0)}
+def _live_clarification_findings(files: list[dict]) -> dict:
+    """True critical/major/minor counts, computed directly from the severity tags
+    currently present across the given clarification files (as returned by
+    _clarify_files_overview) — NOT config.json's "last_clarification_findings",
+    which is the Claude session's own self-reported opinion of what's "still
+    critical" and can say 0 right after an apply even though the finding's
+    <!-- clarify:item ... severity="critical" --> tag is still sitting right there
+    in the file, answered but not removed (applying edits the PRD, never the
+    clarification file itself — see _record_clarify_applied_state's docstring
+    below). A finding counts here whether or not it's been answered: being
+    answered means a resolution was proposed, not that the file stopped listing it
+    as a finding."""
+    totals = {"critical": 0, "major": 0, "minor": 0}
+    for f in files:
+        for sev in totals:
+            totals[sev] += f[sev]["total"]
+    return totals
+
+
+def _clarify_finalize_status(findings: dict) -> dict:
+    """Whether "Finalized Clarification" is currently allowed to run.
+
+    Requires all of:
+      - at least one clarification action has ever completed ("hasRun")
+      - that most recent action was a fresh evaluate pass, not a bare apply
+        ("lastAction" == "evaluate") — answering criticals and applying them isn't
+        enough on its own, since applying doesn't independently re-verify against
+        the live PRD the way a fresh evaluate does, and doesn't touch the
+        clarification files' severity tags either
+      - the clarification files currently show zero critical findings (`findings`,
+        from _live_clarification_findings — the actual tag count, not a
+        self-reported opinion)
+
+    config.json's "last_clarification_action" is stamped by tempa.py right after each
+    `clarify` (evaluate) / `clarify --apply` (apply) / `clarify --finalize` (both,
+    alternating) run — see run_clarify_once(), _run_apply_step(), and
+    run_clarify_finalize() there."""
+    last_action = _load_dashboard_config().get("last_clarification_action")
+    fresh_evaluate = last_action == "evaluate"
+    ready = fresh_evaluate and findings["critical"] == 0
+    return {
+        "hasRun": last_action is not None,
+        "lastAction": last_action,
+        "critical": findings["critical"],
+        "ready": ready,
+    }
 
 
 def _epic_sessions() -> list:
@@ -706,12 +746,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                        self.server.page_html.encode("utf-8"))
         elif route == "/api/tree":
             unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+            findings = _live_clarification_findings(unanswered + answered)
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized()},
                 "spec": {"tree": build_tree(self.server.prd_dir)},
                 "clarify": {"unanswered": unanswered, "answered": answered,
-                            "findings": _last_clarification_findings()},
+                            "findings": findings,
+                            "finalize": _clarify_finalize_status(findings)},
             })
         elif route == "/api/spec/file":
             self._handle_spec_file(parse_qs(parsed.query))
@@ -993,6 +1035,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
+        unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+        findings = _live_clarification_findings(unanswered + answered)
+        if mode == "finalize" and not _clarify_finalize_status(findings)["ready"]:
+            # Server-side gate, not just a disabled button client-side — mirrors the
+            # implement gate below. `tempa clarify --finalize` itself has no awareness
+            # of this precondition and would happily run regardless.
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot finalize yet — run Start Clarification once more and confirm "
+                         "it shows zero critical findings first.",
+            })
+            return
         if not _start_clarify_run(self.server, mode):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
             return
@@ -1002,7 +1056,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # Server-side gate, not just a disabled button client-side — tempa.py's
         # `implement` itself has no awareness of clarification findings and will
         # happily start regardless, so this is the only thing actually enforcing it.
-        findings = _last_clarification_findings()
+        unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+        findings = _live_clarification_findings(unanswered + answered)
         if findings["critical"] or findings["major"]:
             self._send_json(409, {
                 "ok": False,
@@ -1092,7 +1147,9 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     prd_name = json.dumps(prd_dir.name, ensure_ascii=False)
     view_json = json.dumps(initial_view if initial_view in ("home", "specification", "clarification") else "home")
     workspace_initialized_json = json.dumps(_workspace_initialized())
-    clarify_findings_json = json.dumps(_last_clarification_findings(), ensure_ascii=False)
+    live_findings = _live_clarification_findings(clarify_unanswered + clarify_answered)
+    clarify_findings_json = json.dumps(live_findings, ensure_ascii=False)
+    clarify_finalize_json = json.dumps(_clarify_finalize_status(live_findings), ensure_ascii=False)
     return (
         _PAGE_TEMPLATE
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -1102,6 +1159,7 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__INITIAL_VIEW__*/null", view_json)
         .replace("/*__WORKSPACE_INITIALIZED__*/null", workspace_initialized_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
+        .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
     )
 
 
@@ -1371,6 +1429,18 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .clarify-log-line.progress .clarify-log-msg { color: var(--muted); font-style: italic; }
   .clarify-log-empty { color: var(--muted); font-size: 0.85rem; padding: 8px 0; }
 
+  /* ---- readiness gate panels (Finalize Clarification / Start Implementation) ---- */
+  .gate-panel { max-width: 860px; margin-bottom: 18px; border: 1px solid var(--border-strong);
+    border-radius: 8px; background: var(--panel); padding: 14px 16px; }
+  .gate-panel h3 { margin: 0 0 10px; font-size: 0.88rem; }
+  .gate-checklist { list-style: none; margin: 0; padding: 0; display: flex;
+    flex-direction: column; gap: 6px; }
+  .gate-checklist + .clarify-run-btn { margin-top: 14px; }
+  .gate-item { display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem; }
+  .gate-item .icon { flex: none; }
+  .gate-item.ok { color: var(--ok); }
+  .gate-item.pending { color: var(--muted); }
+
   /* ---- specification overview (file count + add file/folder) ---- */
   .spec-overview-pane { display: flex; flex-direction: column; align-items: center;
     justify-content: center; text-align: center; gap: 10px; padding: 40px; }
@@ -1508,11 +1578,15 @@ _PAGE_TEMPLATE = r"""<!doctype html>
           <button type="button" class="clarify-run-btn" id="startClarifyBtn">
             <span>▶️</span><span>Start Clarification</span>
           </button>
-          <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn">
-            <span>🏁</span><span>Finalized Clarification</span>
-          </button>
           <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
             <span>📤</span><span>Apply Answers</span>
+          </button>
+        </div>
+        <div class="gate-panel" id="finalizeGate">
+          <h3>Finalize readiness</h3>
+          <ul class="gate-checklist" id="finalizeGateList"></ul>
+          <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
+            <span>🏁</span><span>Finalized Clarification</span>
           </button>
         </div>
         <details class="clarify-log hidden" id="clarifyLogPanel">
@@ -1544,6 +1618,10 @@ _PAGE_TEMPLATE = r"""<!doctype html>
           </button>
           <span class="impl-header-status" id="implHeaderStatus"></span>
         </div>
+        <div class="gate-panel" id="implGate">
+          <h3>Implementation readiness</h3>
+          <ul class="gate-checklist" id="implGateList"></ul>
+        </div>
         <div class="impl-tabs">
           <button type="button" class="impl-tab active" id="implTabStatusBtn">Status</button>
           <button type="button" class="impl-tab" id="implTabLogBtn">Log</button>
@@ -1573,6 +1651,7 @@ const PRD_NAME = /*__PRD_NAME__*/null;
 const INITIAL_VIEW = /*__INITIAL_VIEW__*/null;
 const INITIAL_WORKSPACE_INITIALIZED = /*__WORKSPACE_INITIALIZED__*/null;
 const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
+const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -1718,7 +1797,7 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
-  applyAnswersBtn = $("applyAnswersBtn"),
+  applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
@@ -1728,7 +1807,7 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
-  implHeaderStatus = $("implHeaderStatus"),
+  implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
   implTabStatusBtn = $("implTabStatusBtn"), implTabLogBtn = $("implTabLogBtn"),
   implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
   implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody");
@@ -1755,6 +1834,7 @@ const state = {
   clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
   workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
+  clarifyFinalize: INITIAL_CLARIFY_FINALIZE || { hasRun: false, lastAction: null, critical: 0, ready: false },
   epics: [],
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
@@ -1867,15 +1947,16 @@ function renderHomeWorkflow() {
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
   homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
-  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
+  const criticalCount = state.clarifyFindings.critical;
   homeStep2Status.textContent = step2Locked
     ? "Upload a specification first (step 1)."
     : totalFindings === 0
       ? "No clarification results yet — click Start Clarification to begin."
-      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered.`;
+      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).`;
 
   const findings = state.clarifyFindings;
   const findingsClean = findings.critical === 0 && findings.major === 0;
@@ -1885,7 +1966,7 @@ function renderHomeWorkflow() {
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
     : findingsClean
-      ? "Ready to start implementation."
+      ? "No critical or major findings remain — ready to start implementation."
       : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
 }
 
@@ -2116,10 +2197,39 @@ function renderClarifyOverview() {
 // Clarification run (Start Clarification / Finalized Clarification / Apply Answers
 // + log panel)
 // ---------------------------------------------------------------------------
+// Shared renderer for the readiness checklists (Finalize Clarification / Start
+// Implementation): items is [{ok, label}], rendered as a ✅/⬜ list into listEl.
+function renderGateChecklist(listEl, items) {
+  listEl.innerHTML = items.map((it) =>
+    `<li class="gate-item ${it.ok ? "ok" : "pending"}">` +
+      `<span class="icon">${it.ok ? "✅" : "⬜"}</span><span>${escapeHtml(it.label)}</span></li>`
+  ).join("");
+}
+
+// The 3 preconditions gating "Finalized Clarification" — see _clarify_finalize_status()
+// in dashboard_ui.py for the server-side source of truth this mirrors:
+//   1. clarification has been run at least once
+//   2. the most recent result comes from a fresh evaluate (Start Clarification), not
+//      just an apply — answering + applying criticals isn't enough on its own
+//   3. that evaluate's findings show 0 critical
+function renderFinalizeGate(runDisabled) {
+  const st = state.clarifyFinalize;
+  renderGateChecklist(finalizeGateList, [
+    { ok: st.hasRun, label: "Clarification has been run at least once" },
+    { ok: st.lastAction === "evaluate",
+      label: "Most recent result comes from Start Clarification, not just Apply Answers" },
+    { ok: st.critical === 0,
+      label: st.critical === 0
+        ? "Most recent evaluation shows 0 critical findings"
+        : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
+  ]);
+  finalizeClarifyBtn.disabled = runDisabled || !st.ready;
+}
+
 function setClarifyRunButtonsDisabled(disabled) {
   startClarifyBtn.disabled = disabled;
-  finalizeClarifyBtn.disabled = disabled;
   applyAnswersBtn.disabled = disabled || !state.clarifyAnswered.some((f) => !f.applied);
+  renderFinalizeGate(disabled);
   // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
   // already stamps them with the disabled state current at render time — but a run can
   // start/stop without the table re-rendering, so also sync any already-in-the-DOM ones.
@@ -2340,12 +2450,30 @@ function renderImplementLog() {
   implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
+// The 2 preconditions gating "Start Implementation": no critical and no major
+// clarification findings remain (server-enforced too — see _handle_implement_run_start
+// in dashboard_ui.py).
+function renderImplementGate() {
+  const findings = state.clarifyFindings;
+  renderGateChecklist(implGateList, [
+    { ok: findings.critical === 0,
+      label: findings.critical === 0
+        ? "No critical findings remain"
+        : `${findings.critical} critical finding(s) remain` },
+    { ok: findings.major === 0,
+      label: findings.major === 0
+        ? "No major findings remain"
+        : `${findings.major} major finding(s) remain` },
+  ]);
+}
+
 function updateImplementControls() {
   const findings = state.clarifyFindings;
   const clean = findings.critical === 0 && findings.major === 0;
   startImplementBtn.disabled = state.implementRun.running || !clean;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
+  renderImplementGate();
 }
 
 function stopImplementPolling() {
@@ -2549,6 +2677,7 @@ async function refreshSpecTree() {
       state.specTree = data.spec.tree;
       state.workspaceInitialized = !!data.workspace.initialized;
       state.clarifyFindings = data.clarify.findings;
+      state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
@@ -2770,6 +2899,7 @@ async function refreshClarifyList() {
       state.clarifyAnswered = data.clarify.answered || [];
       state.workspaceInitialized = !!data.workspace.initialized;
       state.clarifyFindings = data.clarify.findings;
+      state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
@@ -2806,6 +2936,7 @@ $("refreshBtn").addEventListener("click", async () => {
       state.clarifyAnswered = data.clarify.answered || [];
       state.workspaceInitialized = !!data.workspace.initialized;
       state.clarifyFindings = data.clarify.findings;
+      state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();

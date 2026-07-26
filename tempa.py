@@ -1356,6 +1356,12 @@ def run_clarify_once(noui: bool = False) -> None:
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
+    # Stamps *how* the current last_clarification_findings was produced — an
+    # evaluate pass here, vs an apply pass in _run_apply_step() — so the dashboard's
+    # finalize gate can tell "criticals were answered and applied" apart from "a
+    # fresh evaluation independently confirmed 0 criticals remain".
+    config["last_clarification_action"] = "evaluate"
+    save_config(config)
     report_files = _clarification_report_files(clar_dir, start_ts)
 
     _banner(f"CLARIFICATION EVALUATION RESULT — critical={critical} major={major} minor={minor}")
@@ -1487,6 +1493,8 @@ def run_clarify_finalize() -> None:
         critical = findings.get("critical", 0)
         major = findings.get("major", 0)
         minor = findings.get("minor", 0)
+        config["last_clarification_action"] = "evaluate"
+        save_config(config)
 
         log(f"Round #{run_number} findings: critical={critical}, major={major}, minor={minor}")
 
@@ -1509,6 +1517,10 @@ def run_clarify_finalize() -> None:
         if not apply_success:
             log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
             sys.exit(1)
+
+        config = load_config()
+        config["last_clarification_action"] = "apply"
+        save_config(config)
 
         log(f"Resolutions applied. Running re-evaluation...")
 
@@ -1557,6 +1569,7 @@ def _run_apply_step(config: dict) -> bool:
     f = config.get("last_clarification_findings", {})
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
+    config["last_clarification_action"] = "apply"
     _record_clarify_applied_state(config, Path(get_sources(config).get("clarifications", "")))
     return True
 
