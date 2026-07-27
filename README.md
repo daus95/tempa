@@ -175,6 +175,15 @@ console output; **Stop Implementation** is available while it's running.
 (your specification files are never touched) — useful for restarting the clarification or
 implementation loop from scratch. This cannot be undone.
 
+The **✕** next to the working-folder path (top of Home) appears once **Clear All** has been
+run — it closes the link to the current project (clears `workspace.root` in `config.json`;
+no files are deleted, same as `tempa close-folder` on the CLI) so you can point Tempa at a
+different project next.
+
+> The folder picker, "open in explorer", and the **✕** icon are Windows-only conveniences.
+> On macOS/Linux, set the working folder with `tempa init <path>` (CLI) first, then use the
+> dashboard normally for the rest of the workflow.
+
 ---
 
 ## Workflow (End-to-End)

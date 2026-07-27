@@ -29,14 +29,17 @@ absolute paths.
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import html as html_lib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -311,14 +314,17 @@ def _render_item_html(item: ClarificationItem) -> str:
     has_recommendation = bool(item.recommendation)
     default_own = bool(item.existing_answer) or not has_recommendation
 
+    # Unanswered items with a recommendation start with NEITHER radio checked, so the
+    # user has to actively pick one — pre-selecting "recommendation" here meant a user
+    # who wanted the default outcome never fired a `change` event, leaving clarifyDirty
+    # false and the Save button stuck disabled (see followAllBtn for the bulk version).
     recommendation_radio = ""
     if has_recommendation:
-        checked = "" if default_own else "checked"
         recommendation_radio = (
-            f'<label><input type="radio" name="mode-{key}" value="recommendation" {checked}> '
+            f'<label><input type="radio" name="mode-{key}" value="recommendation"> '
             f"Follow the recommendation</label>"
         )
-    own_checked = "checked" if default_own or not has_recommendation else ""
+    own_checked = "checked" if default_own else ""
     own_radio = (
         f'<label><input type="radio" name="mode-{key}" value="own" {own_checked}> '
         f"I'll write my own answer</label>"
@@ -418,6 +424,110 @@ def _workspace_initialized() -> bool:
     return bool(_load_dashboard_config().get("workspace", {}).get("root"))
 
 
+def _workspace_root() -> str:
+    """config.json's workspace.root, or "" if not set yet."""
+    return _load_dashboard_config().get("workspace", {}).get("root", "") or ""
+
+
+def _workspace_can_close() -> bool:
+    """Whether the Home page's "close working folder" icon should be shown/allowed —
+    only once the harness's own state has already been cleared via `tempa clear`
+    ("epic" array emptied, last_auto_answer reset to 0), mirroring the same
+    precondition tempa.py's run_close_folder() enforces server-side."""
+    config = _load_dashboard_config()
+    return not (config.get("epic") or []) and not config.get("last_auto_answer", 0)
+
+
+def _resolve_source_dir(source_key: str, specs_fallback: str) -> Path:
+    """Re-derive one `sources` folder (e.g. "prd", "clarifications") straight from
+    config.json, mirroring tempa.py's resolve_source_path/resolve_specs_dir without
+    importing tempa.py (see _load_dashboard_config). Used to refresh server.prd_dir /
+    server.clar_dir right after workspace.root is set via the Home page, so the
+    dashboard reflects the new location without a restart."""
+    config = _load_dashboard_config()
+    root = config.get("workspace", {}).get("root", "") or ""
+    raw = config.get("sources", {}).get(source_key, "")
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() or not root else Path(root) / raw
+    specs_rel = config.get("workspace", {}).get("specs") or "specs"
+    base = Path(root) / specs_rel if root else Path(__file__).resolve().parent.parent / specs_rel
+    return base / specs_fallback
+
+
+def _pick_folder_dialog() -> str | None:
+    """Open a native Windows folder-picker dialog and return the selected absolute
+    path, or None if the user cancelled. Shelled out to PowerShell (WinForms'
+    FolderBrowserDialog needs an STA apartment) rather than opened in-process, since
+    ThreadingHTTPServer handles each request on its own worker thread and GUI toolkits
+    aren't safe to drive from there."""
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms | Out-Null; "
+        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+        "$f.Description = 'Select Working Folder'; "
+        "$f.ShowNewFolderButton = $true; "
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Sta", "-Command", script],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace", timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    path = (result.stdout or "").strip()
+    return path or None
+
+
+def _find_explorer_window(folder_name: str) -> int | None:
+    """Find a visible Explorer file-browser window (class "CabinetWClass") whose
+    title starts with `folder_name` — Explorer titles a folder window "<name>" on
+    Windows 10 but "<name> - File Explorer" on Windows 11, so match by prefix rather
+    than equality. Returns the last matching HWND found (most Z-order relevant in
+    practice), or None."""
+    user32 = ctypes.windll.user32
+    matches: list[int] = []
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        cls_buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls_buf, 256)
+        if cls_buf.value != "CabinetWClass":
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        title_buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, title_buf, length + 1)
+        if title_buf.value.startswith(folder_name):
+            matches.append(hwnd)
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return matches[-1] if matches else None
+
+
+def _bring_window_to_front(hwnd: int) -> None:
+    """Force `hwnd` to the foreground. A background process's plain SetForegroundWindow
+    call is normally ignored by Windows' foreground-lock (the window just flashes in
+    the taskbar instead) — tapping ALT is the standard workaround: it resets the lock
+    system-wide, letting the very next SetForegroundWindow call through. The
+    topmost-flash + BringWindowToTop calls are the usual companions to that trick,
+    for the cases where SetForegroundWindow alone still gets ignored."""
+    user32 = ctypes.windll.user32
+    VK_MENU, KEYEVENTF_KEYUP, SW_RESTORE = 0x12, 0x0002, 9
+    HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+    SWP_NOSIZE, SWP_NOMOVE = 0x0001, 0x0002
+    user32.keybd_event(VK_MENU, 0, 0, 0)
+    user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE)
+    user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+
+
 def _live_clarification_findings(files: list[dict]) -> dict:
     """True critical/major/minor counts, computed directly from the severity tags
     currently present across the given clarification files (as returned by
@@ -511,7 +621,7 @@ def _clarify_files_overview(clar_dir: Path) -> tuple[list[dict], list[dict]]:
 # — tempa.py can go minutes between any other console output, so if this were folded
 # into `lines` in place, the dashboard's index-based polling would fetch it once and
 # then never notice it kept changing, making a live run look frozen.
-_PROGRESS_LINE_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\]\s*$")
+_PROGRESS_LINE_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\](\s*\[[^\]]*\])*\s*$")
 
 
 def _new_clarify_run_state() -> dict:
@@ -749,7 +859,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             findings = _live_clarification_findings(unanswered + answered)
             self._send_json(200, {
                 "ok": True,
-                "workspace": {"initialized": _workspace_initialized()},
+                "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
+                               "canClose": _workspace_can_close()},
                 "spec": {"tree": build_tree(self.server.prd_dir)},
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
@@ -884,6 +995,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_implement_run_stop()
         elif parsed.path == "/api/clear":
             self._handle_clear_all()
+        elif parsed.path == "/api/workspace/init":
+            self._handle_workspace_init()
+        elif parsed.path == "/api/workspace/open":
+            self._handle_workspace_open()
+        elif parsed.path == "/api/workspace/close":
+            self._handle_workspace_close()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -1100,6 +1217,94 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "output": output})
 
+    def _handle_workspace_init(self) -> None:
+        """"Select Working Folder" on the Home page: open a native folder picker, then
+        run `tempa.py init <folder>` (same as the CLI) to stamp workspace.root into
+        config.json and scaffold the default working folders under it."""
+        root = _pick_folder_dialog()
+        if root is None:
+            self._send_json(200, {"ok": False, "cancelled": True})
+            return
+        tempa_py = Path(__file__).resolve().parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "init", root]
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._send_json(500, {"ok": False, "error": f"Could not initialize: {e}"})
+            return
+        output = result.stdout or ""
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "error": output.strip() or f"Init failed (exit code {result.returncode})."})
+            return
+        # Re-derive prd_dir/clar_dir now that workspace.root is set, so the dashboard
+        # reflects the new location immediately instead of requiring a restart.
+        self.server.prd_dir = _resolve_source_dir("prd", "prd")
+        self.server.clar_dir = _resolve_source_dir("clarifications", "clarifications")
+        print(f"[workspace] root set to {root}")
+        self._send_json(200, {"ok": True, "root": root, "output": output})
+
+    def _handle_workspace_open(self) -> None:
+        """Open workspace.root in Windows Explorer — used by the path label on the
+        Home page's working-folder panel. Also tries to bring the resulting window to
+        the foreground: since this request is served by a background HTTP server
+        process rather than the user's active foreground app, Explorer's window would
+        otherwise open silently behind the browser (see _bring_window_to_front)."""
+        root = _workspace_root()
+        if not root or not Path(root).is_dir():
+            self._send_json(404, {"ok": False, "error": "Working folder not found on disk."})
+            return
+        try:
+            os.startfile(root)  # noqa: S606 - local-only dashboard, opens the user's own configured folder
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not open folder: {e}"})
+            return
+        folder_name = Path(root).name or root
+        for _ in range(20):
+            time.sleep(0.15)
+            hwnd = _find_explorer_window(folder_name)
+            if hwnd:
+                _bring_window_to_front(hwnd)
+                break
+        self._send_json(200, {"ok": True})
+
+    def _handle_workspace_close(self) -> None:
+        """Clear workspace.root — the "✕" icon next to the working-folder path,
+        shown only once _workspace_can_close() is true. Shells out to
+        `tempa.py close-folder` (same subprocess pattern as init/clear) so the
+        precondition check and config.json write stay in one place."""
+        if not _workspace_can_close():
+            self._send_json(409, {
+                "ok": False,
+                "error": "Run Clear All first — the working folder can only be closed "
+                         "once the epic array is empty and last_auto_answer is 0.",
+            })
+            return
+        tempa_py = Path(__file__).resolve().parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "close-folder"]
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._send_json(500, {"ok": False, "error": f"Could not close working folder: {e}"})
+            return
+        output = result.stdout or ""
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "error": output.strip() or f"Close failed (exit code {result.returncode})."})
+            return
+        self.server.prd_dir = _resolve_source_dir("prd", "prd")
+        self.server.clar_dir = _resolve_source_dir("clarifications", "clarifications")
+        print("[workspace] root cleared")
+        self._send_json(200, {"ok": True})
+
 
 def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> bool:
     """Serve the dashboard on a random 127.0.0.1 port, open it in the default
@@ -1147,6 +1352,8 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     prd_name = json.dumps(prd_dir.name, ensure_ascii=False)
     view_json = json.dumps(initial_view if initial_view in ("home", "specification", "clarification") else "home")
     workspace_initialized_json = json.dumps(_workspace_initialized())
+    workspace_root_json = json.dumps(_workspace_root())
+    workspace_can_close_json = json.dumps(_workspace_can_close())
     live_findings = _live_clarification_findings(clarify_unanswered + clarify_answered)
     clarify_findings_json = json.dumps(live_findings, ensure_ascii=False)
     clarify_finalize_json = json.dumps(_clarify_finalize_status(live_findings), ensure_ascii=False)
@@ -1158,6 +1365,8 @@ def _render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__PRD_NAME__*/null", prd_name)
         .replace("/*__INITIAL_VIEW__*/null", view_json)
         .replace("/*__WORKSPACE_INITIALIZED__*/null", workspace_initialized_json)
+        .replace("/*__WORKSPACE_ROOT__*/null", workspace_root_json)
+        .replace("/*__WORKSPACE_CAN_CLOSE__*/null", workspace_can_close_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
     )
@@ -1209,6 +1418,8 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .row:hover { background: var(--hover); }
   .row.selected { background: var(--sel); color: var(--sel-text); }
   .row.top { font-weight: 600; }
+  .row.disabled { color: var(--muted); cursor: default; opacity: 0.55; }
+  .row.disabled:hover { background: none; }
   .row .twist { width: 14px; text-align: center; color: var(--muted); flex: none;
     font-size: 10px; transition: transform .12s ease; }
   .row .twist.hidden { visibility: hidden; }
@@ -1272,9 +1483,19 @@ _PAGE_TEMPLATE = r"""<!doctype html>
     color: var(--border-strong); text-align: center; margin-bottom: 28px; }
   .home-init-prompt { display: flex; flex-direction: column; align-items: center; gap: 10px;
     padding: 60px 20px; color: var(--muted); text-align: center; }
-  .home-init-icon { font-size: 48px; }
   .home-init-text { max-width: 480px; line-height: 1.6; }
   .home-init-text code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  .home-workspace-panel { display: flex; align-items: center; gap: 10px; max-width: 720px;
+    margin: 0 auto 18px; padding: 12px 18px; border: 1px solid var(--border-strong);
+    border-radius: 10px; background: var(--panel); }
+  .home-workspace-icon { font-size: 1.2rem; flex: none; }
+  .home-workspace-label { color: var(--muted); font-weight: 600; font-size: 0.85rem; flex: none; }
+  .home-workspace-path { color: var(--accent); cursor: pointer; font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.85rem; overflow-wrap: anywhere; flex: 1 1 auto; }
+  .home-workspace-path:hover { text-decoration: underline; }
+  .home-workspace-close { flex: none; border: none; background: transparent; color: var(--muted);
+    font-size: 1rem; line-height: 1; cursor: pointer; padding: 3px 8px; border-radius: 6px; }
+  .home-workspace-close:hover { background: var(--danger); color: #fff; }
   .home-steps { display: flex; flex-direction: column; gap: 18px; max-width: 720px; margin: 0 auto; }
   .home-step { border: 1px solid var(--border-strong); border-radius: 10px; padding: 18px 22px;
     background: var(--panel); }
@@ -1441,6 +1662,12 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .gate-item.ok { color: var(--ok); }
   .gate-item.pending { color: var(--muted); }
 
+  .ready-banner { max-width: 860px; margin-bottom: 18px; border: 1px solid var(--ok);
+    border-radius: 8px; background: var(--accent-soft); padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .ready-banner-text { color: var(--text); font-size: 0.88rem; }
+  .ready-banner-text strong { color: var(--ok); }
+
   /* ---- specification overview (file count + add file/folder) ---- */
   .spec-overview-pane { display: flex; flex-direction: column; align-items: center;
     justify-content: center; text-align: center; gap: 10px; padding: 40px; }
@@ -1461,6 +1688,23 @@ _PAGE_TEMPLATE = r"""<!doctype html>
     opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 50; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .toast.err { background: var(--danger); }
+
+  /* ---- modal (confirm / prompt) ---- */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 200; }
+  .modal-box { width: 420px; max-width: calc(100vw - 40px); background: var(--panel);
+    border: 1px solid var(--border-strong); border-radius: 12px; padding: 22px 24px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
+  .modal-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px; }
+  .modal-message { color: var(--text); font-size: 0.92rem; line-height: 1.6; }
+  .modal-input { width: 100%; margin-top: 14px; padding: 8px 10px; font-size: 0.92rem;
+    border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg);
+    color: var(--text); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  .modal-actions button { padding: 7px 16px; font-size: 0.9rem; border-radius: 6px;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); }
+  .modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .modal-actions button.primary.danger { background: var(--danger); border-color: var(--danger); }
 </style>
 </head>
 <body>
@@ -1481,19 +1725,28 @@ _PAGE_TEMPLATE = r"""<!doctype html>
         <button id="viewBtn" class="active">View</button>
         <button id="editBtn">Edit</button>
       </div>
+      <button id="followAllBtn" class="hidden">Follow all recommendations</button>
       <button id="saveBtn" class="primary hidden" disabled>Save</button>
     </div>
     <div class="content">
       <div id="homePane" class="pane home-pane">
         <div class="home-brand">TEMPA</div>
         <div id="homeNotInit" class="home-init-prompt hidden">
-          <div class="home-init-icon">📁</div>
           <div class="home-init-text">
-            No application repository folder has been set yet.<br>
-            Run <code>tempa init &lt;path&gt;</code> first to set the project root folder.
+            No application repository folder has been set yet.
           </div>
+          <button type="button" class="big-action" id="homeSelectFolderBtn">
+            <span class="big-action-icon">📂</span>
+            <span class="big-action-label">Select Working Folder</span>
+          </button>
         </div>
         <div id="homeSteps" class="home-steps hidden">
+          <div class="home-workspace-panel" id="homeWorkspacePanel">
+            <span class="home-workspace-icon">📁</span>
+            <span class="home-workspace-label">Working Folder:</span>
+            <span class="home-workspace-path" id="homeWorkspacePath" title="Open in Explorer"></span>
+            <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder">✕</button>
+          </div>
           <div class="home-step" id="homeStep1">
             <div class="home-step-header">
               <span class="home-step-num">1</span>
@@ -1589,6 +1842,15 @@ _PAGE_TEMPLATE = r"""<!doctype html>
             <span>🏁</span><span>Finalized Clarification</span>
           </button>
         </div>
+        <div class="ready-banner hidden" id="implementReadyBanner">
+          <div class="ready-banner-text">
+            <strong>✅ Ready for implementation.</strong> No critical or major findings remain —
+            minor findings will be resolved during implementation.
+          </div>
+          <button type="button" class="clarify-run-btn" id="clarifyStartImplementBtn">
+            <span>🚀</span><span>Start Implementation</span>
+          </button>
+        </div>
         <details class="clarify-log hidden" id="clarifyLogPanel">
           <summary>Clarification log <span class="clarify-log-status" id="clarifyLogStatus"></span></summary>
           <div class="clarify-log-body" id="clarifyLogBody"></div>
@@ -1641,6 +1903,17 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   <button type="button" id="rowMenuRename">Rename</button>
   <button type="button" id="rowMenuDelete" class="danger">Delete</button>
 </div>
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-message" id="modalMessage"></div>
+    <input type="text" class="modal-input hidden" id="modalInput">
+    <div class="modal-actions">
+      <button type="button" id="modalCancelBtn">Cancel</button>
+      <button type="button" class="primary" id="modalOkBtn">OK</button>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -1650,6 +1923,8 @@ const INITIAL_CLARIFY_ANSWERED = /*__CLARIFY_ANSWERED__*/null;
 const PRD_NAME = /*__PRD_NAME__*/null;
 const INITIAL_VIEW = /*__INITIAL_VIEW__*/null;
 const INITIAL_WORKSPACE_INITIALIZED = /*__WORKSPACE_INITIALIZED__*/null;
+const INITIAL_WORKSPACE_ROOT = /*__WORKSPACE_ROOT__*/null;
+const INITIAL_WORKSPACE_CAN_CLOSE = /*__WORKSPACE_CAN_CLOSE__*/null;
 const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
 const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
 
@@ -1790,7 +2065,7 @@ function renderMarkdown(src) {
 const $ = (id) => document.getElementById(id);
 const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEditor"),
   toolbarEl = $("toolbar"), filepathEl = $("filepath"), specSeg = $("specSeg"),
-  viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"),
+  viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"), followAllBtn = $("followAllBtn"),
   clarifySummary = $("clarifySummary"), clarifyBody = $("clarifyBody"),
   clarifyUnansweredTbody = $("clarifyUnansweredTbody"), clarifyAnsweredTbody = $("clarifyAnsweredTbody"),
   specFileCountEl = $("specFileCount"),
@@ -1798,9 +2073,12 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
+  implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
+  homeSelectFolderBtn = $("homeSelectFolderBtn"), homeWorkspacePath = $("homeWorkspacePath"),
+  homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),
   homeStep1 = $("homeStep1"), homeStep2 = $("homeStep2"), homeStep3 = $("homeStep3"),
   homeStep1Status = $("homeStep1Status"), homeStep2Status = $("homeStep2Status"), homeStep3Status = $("homeStep3Status"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
@@ -1810,7 +2088,9 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
   implTabStatusBtn = $("implTabStatusBtn"), implTabLogBtn = $("implTabLogBtn"),
   implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
-  implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody");
+  implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody"),
+  modalOverlay = $("modalOverlay"), modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
+  modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn");
 
 const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl"];
 
@@ -1833,12 +2113,68 @@ const state = {
   clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
   clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
   workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
+  workspaceRoot: INITIAL_WORKSPACE_ROOT || "",
+  workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE || { hasRun: false, lastAction: null, critical: 0, ready: false },
   epics: [],
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
+
+// ---------------------------------------------------------------------------
+// Modal (confirm / prompt) — replaces window.confirm/window.prompt everywhere,
+// since those render as an ugly, browser-chrome-branded "<host> says" dialog.
+// ---------------------------------------------------------------------------
+let modalResolve = null, modalIsPrompt = false;
+
+function closeModal(result) {
+  modalOverlay.classList.add("hidden");
+  const resolve = modalResolve;
+  modalResolve = null;
+  if (resolve) resolve(result);
+}
+
+function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false, value = "" }) {
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+    modalIsPrompt = prompt;
+    modalTitle.textContent = title;
+    modalMessage.innerHTML = "";
+    String(message).split("\n").forEach((line, i) => {
+      if (i > 0) modalMessage.appendChild(document.createElement("br"));
+      modalMessage.appendChild(document.createTextNode(line));
+    });
+    modalOkBtn.textContent = okLabel;
+    modalOkBtn.classList.toggle("danger", danger);
+    modalInput.classList.toggle("hidden", !prompt);
+    modalInput.value = prompt ? value : "";
+    modalOverlay.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      if (prompt) { modalInput.focus(); modalInput.select(); } else modalOkBtn.focus();
+    });
+  });
+}
+
+// confirmModal resolves true/false; promptModal resolves the entered string, or null on cancel.
+function confirmModal(message, opts) {
+  return showModal({ message, prompt: false, ...opts });
+}
+function promptModal(message, value, opts) {
+  return showModal({ message, prompt: true, value: value || "", ...opts }).then((v) => (v === false ? null : v));
+}
+
+modalCancelBtn.addEventListener("click", () => closeModal(modalIsPrompt ? null : false));
+modalOkBtn.addEventListener("click", () => closeModal(modalIsPrompt ? modalInput.value : true));
+modalOverlay.addEventListener("click", (e) => {
+  if (e.target === modalOverlay) closeModal(modalIsPrompt ? null : false);
+});
+modalInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); closeModal(modalInput.value); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !modalOverlay.classList.contains("hidden")) closeModal(modalIsPrompt ? null : false);
+});
 
 // ---------------------------------------------------------------------------
 // Pane switching
@@ -1855,6 +2191,7 @@ function updateToolbar() {
   toolbarEl.classList.toggle("hidden", kind === null);
   if (kind === null) return;
   specSeg.classList.toggle("hidden", kind !== "spec");
+  followAllBtn.classList.toggle("hidden", kind !== "clarify");
   saveBtn.classList.remove("hidden");
   if (kind === "spec") {
     saveBtn.disabled = !state.specDirty || !state.isText;
@@ -1883,8 +2220,8 @@ function confirmDiscardIfDirty() {
               : state.currentKind === "clarify" ? state.clarifyDirty : false;
   if (!dirty) return Promise.resolve(true);
   const label = state.currentKind === "spec" ? state.selectedSpecPath : state.selectedClarifyPath;
-  return Promise.resolve(window.confirm(
-    "You have unsaved changes in \"" + label + "\".\nDiscard them and continue?"));
+  return confirmModal(`You have unsaved changes in "${label}".\nDiscard them and continue?`,
+    { title: "Unsaved changes", okLabel: "Discard" });
 }
 
 // ---------------------------------------------------------------------------
@@ -1902,7 +2239,7 @@ function renderSidebar() {
   treeEl.appendChild(renderLeafSection("home", "🏠", "Home"));
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
-  treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation"));
+  treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
 }
 
 async function selectTop(key) {
@@ -1938,6 +2275,9 @@ function renderHomeWorkflow() {
   homeSteps.classList.toggle("hidden", !state.workspaceInitialized);
   if (!state.workspaceInitialized) return;
 
+  homeWorkspacePath.textContent = state.workspaceRoot;
+  homeWorkspaceCloseBtn.classList.toggle("hidden", !state.workspaceCanClose);
+
   const specCount = countSpecFiles(state.specTree);
   const step1Done = specCount > 0;
   homeStep1Status.textContent = step1Done
@@ -1970,6 +2310,51 @@ function renderHomeWorkflow() {
       : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
 }
 
+homeSelectFolderBtn.addEventListener("click", async () => {
+  homeSelectFolderBtn.disabled = true;
+  try {
+    const res = await fetch("/api/workspace/init", { method: "POST" });
+    const data = await res.json();
+    if (data.cancelled) return;
+    if (!data.ok) { toast(data.error || "Could not set the working folder.", true); return; }
+    toast("Working folder set: " + data.root);
+    await refreshSpecTree();
+  } catch (e) {
+    toast("Could not set the working folder.", true);
+  } finally {
+    homeSelectFolderBtn.disabled = false;
+  }
+});
+
+homeWorkspacePath.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/workspace/open", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) toast(data.error || "Could not open the folder.", true);
+  } catch (e) { toast("Could not open the folder.", true); }
+});
+
+homeWorkspaceCloseBtn.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const ok = await confirmModal(
+    `Close working folder "${state.workspaceRoot}"? This only clears the folder link in ` +
+    "config.json — no files are deleted. The Home page will go back to Select Working Folder.",
+    { title: "Close Working Folder", okLabel: "Close", danger: true });
+  if (!ok) return;
+  homeWorkspaceCloseBtn.disabled = true;
+  try {
+    const res = await fetch("/api/workspace/close", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Could not close the working folder.", true); return; }
+    toast("Working folder closed.");
+    await refreshSpecTree();
+  } catch (e) {
+    toast("Network error while closing the working folder.", true);
+  } finally {
+    homeWorkspaceCloseBtn.disabled = false;
+  }
+});
+
 homeAddFileBtn.addEventListener("click", () => { addFileInput.value = ""; addFileInput.click(); });
 homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; addFolderInput.click(); });
 
@@ -1987,9 +2372,11 @@ homeStartImplementBtn.addEventListener("click", async () => {
 });
 
 homeClearAllBtn.addEventListener("click", async () => {
-  if (!window.confirm(
+  const ok = await confirmModal(
     "Are you sure you want to delete ALL data (plan, QA, log, and clarification results)?\n" +
-    "Specification files will NOT be deleted.\n\nThis action CANNOT be undone.")) return;
+    "Specification files will NOT be deleted.\n\nThis action CANNOT be undone.",
+    { title: "Clear All Data", okLabel: "Clear All", danger: true });
+  if (!ok) return;
   homeClearAllBtn.disabled = true;
   try {
     const res = await fetch("/api/clear", { method: "POST" });
@@ -2006,24 +2393,32 @@ homeClearAllBtn.addEventListener("click", async () => {
   }
 });
 
-function renderLeafSection(key, icon, label) {
+function renderLeafSection(key, icon, label, disabled) {
   const wrap = document.createElement("div");
   wrap.className = "node";
   const row = document.createElement("div");
-  row.className = "row top" + (state.activeTop === key ? " selected" : "");
+  row.className = "row top" + (state.activeTop === key ? " selected" : "") + (disabled ? " disabled" : "");
   row.innerHTML = `<span class="twist hidden"></span><span class="icon">${icon}</span><span class="label">${label}</span>`;
-  row.addEventListener("click", () => selectTop(key));
+  row.addEventListener("click", () => {
+    if (disabled) { toast("Select a working folder first.", true); return; }
+    selectTop(key);
+  });
   wrap.appendChild(row);
   return wrap;
 }
 
 function renderSpecSection() {
+  const disabled = !state.workspaceInitialized;
   const wrap = document.createElement("div");
   wrap.className = "node" + (state.expandedTop.specification ? " open" : "");
   const row = document.createElement("div");
-  row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "");
+  row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "") +
+    (disabled ? " disabled" : "");
   row.innerHTML = `<span class="twist">▶</span><span class="icon">📁</span><span class="label">Specification</span>`;
-  row.addEventListener("click", () => selectTop("specification"));
+  row.addEventListener("click", () => {
+    if (disabled) { toast("Select a working folder first.", true); return; }
+    selectTop("specification");
+  });
   wrap.appendChild(row);
 
   const children = document.createElement("div");
@@ -2096,14 +2491,19 @@ function renderSpecNode(node, depth) {
 }
 
 function renderClarifySection() {
+  const disabled = !state.workspaceInitialized;
   const wrap = document.createElement("div");
   wrap.className = "node" + (state.expandedTop.clarification ? " open" : "");
   const row = document.createElement("div");
-  row.className = "row top" + (state.activeTop === "clarification" && state.clarifyShowingOverview ? " selected" : "");
+  row.className = "row top" + (state.activeTop === "clarification" && state.clarifyShowingOverview ? " selected" : "") +
+    (disabled ? " disabled" : "");
   const count = state.clarifyUnanswered.length;
   row.innerHTML = `<span class="twist">▶</span><span class="icon">❓</span><span class="label">Clarification</span>` +
     (count ? `<span class="badge-count">${count}</span>` : "");
-  row.addEventListener("click", () => selectTop("clarification"));
+  row.addEventListener("click", () => {
+    if (disabled) { toast("Select a working folder first.", true); return; }
+    selectTop("clarification");
+  });
   wrap.appendChild(row);
 
   const children = document.createElement("div");
@@ -2191,7 +2591,22 @@ function renderClarifyOverview() {
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
     "No fully answered files yet.", true);
   setClarifyRunButtonsDisabled(state.clarifyRun.running);
+  renderImplementReadyBanner();
 }
+
+// Mirrors the same "no critical/major findings left" gate as the Home page's step 3
+// (see renderHomeWorkflow) — shown on the Clarification overview so the user doesn't
+// have to go back to Home to notice they can move on to implementation.
+function renderImplementReadyBanner() {
+  const findings = state.clarifyFindings;
+  const ready = findings.critical === 0 && findings.major === 0;
+  implementReadyBanner.classList.toggle("hidden", !ready);
+}
+
+clarifyStartImplementBtn.addEventListener("click", async () => {
+  await selectTop("implementation");
+  startImplementRun();
+});
 
 // ---------------------------------------------------------------------------
 // Clarification run (Start Clarification / Finalized Clarification / Apply Answers
@@ -2246,7 +2661,7 @@ function clarifyRunStatusLabel(mode) {
 // user-friendly rendering — banners, [OK]/[!] markers, and the once-a-second
 // progress tick each get their own look instead of showing as raw log text.
 function formatClarifyLogLine(text) {
-  if (/^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\]\s*$/.test(text)) {
+  if (/^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\](\s*\[[^\]]*\])*\s*$/.test(text)) {
     const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$/);
     return { cls: "progress", icon: "⏳", time: m ? m[1] : "", msg: m ? m[2] : text };
   }
@@ -2326,8 +2741,20 @@ async function pollClarifyRun() {
       stopClarifyPolling();
       if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
       refreshClarifyList();
+      // CLI parity: `tempa clarify --apply` asks "Run another clarification round now?"
+      // via input() right after a successful apply, but only when stdin is a real TTY —
+      // the dashboard's subprocess always runs with stdin=DEVNULL, so that prompt never
+      // fires there. Ask the same question here instead, as a modal, since the web UI
+      // has no terminal to type y/N into.
+      if (data.mode === "apply" && data.returncode === 0) askContinueClarification();
     }
   } catch (e) { /* transient network hiccup — next tick retries */ }
+}
+
+async function askContinueClarification() {
+  const ok = await confirmModal("Run another clarification round now?",
+    { title: "Continue Clarification", okLabel: "Continue" });
+  if (ok) startClarifyRun("run");
 }
 
 function startClarifyPolling() {
@@ -2553,7 +2980,9 @@ async function startImplementRun() {
 
 async function stopImplementRun() {
   if (!state.implementRun.running) return;
-  if (!window.confirm("Stop the implementation process that is currently running?")) return;
+  const ok = await confirmModal("Stop the implementation process that is currently running?",
+    { title: "Stop Implementation", okLabel: "Stop", danger: true });
+  if (!ok) return;
   stopImplementBtn.disabled = true;
   try {
     const res = await fetch("/api/implement/stop", { method: "POST" });
@@ -2676,6 +3105,8 @@ async function refreshSpecTree() {
     if (data.ok) {
       state.specTree = data.spec.tree;
       state.workspaceInitialized = !!data.workspace.initialized;
+      state.workspaceRoot = data.workspace.root || "";
+      state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();
@@ -2688,7 +3119,10 @@ async function refreshSpecTree() {
 async function uploadToSpec(entries) {
   if (!entries.length) return;
   const label = entries.length === 1 ? "1 file" : `${entries.length} files`;
-  if (!window.confirm(`Add ${label} to Specification (${PRD_NAME})? Existing files with the same name will be overwritten.`)) return;
+  const ok = await confirmModal(
+    `Add ${label} to Specification (${PRD_NAME})? Existing files with the same name will be overwritten.`,
+    { title: "Add to Specification", okLabel: "Add" });
+  if (!ok) return;
   let okCount = 0, failCount = 0;
   for (const { file, relPath } of entries) {
     try {
@@ -2749,7 +3183,7 @@ rowMenuRename.addEventListener("click", async () => {
   const node = contextMenuNode;
   closeRowContextMenu();
   if (!node) return;
-  const newName = window.prompt(`Rename "${node.name}" to:`, node.name);
+  const newName = await promptModal(`Rename "${node.name}" to:`, node.name, { title: "Rename", okLabel: "Rename" });
   if (!newName || newName === node.name) return;
   if (newName.includes("/") || newName.includes("\\")) {
     toast("Name cannot contain a path separator.", true);
@@ -2779,7 +3213,9 @@ rowMenuDelete.addEventListener("click", async () => {
   closeRowContextMenu();
   if (!node) return;
   const kind = node.type === "dir" ? "folder" : "file";
-  if (!window.confirm(`Delete the ${kind} "${node.name}"? This cannot be undone.`)) return;
+  const ok = await confirmModal(`Delete the ${kind} "${node.name}"? This cannot be undone.`,
+    { title: "Delete", okLabel: "Delete", danger: true });
+  if (!ok) return;
   try {
     const res = await fetch("/api/spec/delete", {
       method: "POST",
@@ -2823,6 +3259,29 @@ function wireClarifyBody() {
     t.addEventListener("input", markClarifyDirty);
   });
 }
+
+// Bulk-selects "Follow the recommendation" for every item that has no radio picked
+// yet (i.e. hasn't been answered in this session) — leaves items the user already
+// answered, or already chose a mode for, untouched.
+function followAllRecommendations() {
+  let count = 0;
+  clarifyBody.querySelectorAll(".item").forEach((sec) => {
+    if (sec.querySelector('input[type=radio]:checked')) return;
+    const recRadio = sec.querySelector('input[value="recommendation"]');
+    if (!recRadio) return;
+    recRadio.checked = true;
+    onClarifyModeChange(recRadio);
+    count++;
+  });
+  if (count) {
+    markClarifyDirty();
+    toast(`Set "Follow the recommendation" for ${count} finding(s).`);
+  } else {
+    toast("No unanswered findings to fill in.");
+  }
+}
+
+followAllBtn.addEventListener("click", followAllRecommendations);
 
 function markClarifyDirty() {
   if (!state.clarifyDirty) { state.clarifyDirty = true; updateToolbar(); }
@@ -2898,6 +3357,8 @@ async function refreshClarifyList() {
       state.clarifyUnanswered = data.clarify.unanswered || [];
       state.clarifyAnswered = data.clarify.answered || [];
       state.workspaceInitialized = !!data.workspace.initialized;
+      state.workspaceRoot = data.workspace.root || "";
+      state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();
@@ -2935,6 +3396,8 @@ $("refreshBtn").addEventListener("click", async () => {
       state.clarifyUnanswered = data.clarify.unanswered || [];
       state.clarifyAnswered = data.clarify.answered || [];
       state.workspaceInitialized = !!data.workspace.initialized;
+      state.workspaceRoot = data.workspace.root || "";
+      state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       renderSidebar();

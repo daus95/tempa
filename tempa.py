@@ -1725,6 +1725,19 @@ def _do_clear_clarify(clar_dir: Path) -> int:
     return len(to_delete)
 
 
+def _reset_clarify_config_state(config: dict) -> None:
+    """Clear every config.json field that tracks a clarification run's outcome
+    (caller still has to save_config). Used by `tempa clear` right after it deletes
+    the clarification files themselves — without this, "last_clarification_action" /
+    "clarify_applied_hashes" would still describe a run that no longer has any files
+    to point at, and the dashboard's Finalize gate would misread that leftover state
+    as "a clarification action already completed" even though nothing has run yet."""
+    config.pop("last_clarification_action", None)
+    config.pop("last_clarification_findings", None)
+    config.pop("clarify_applied_hashes", None)
+    config["last_auto_answer"] = 0
+
+
 def run_clarify_clear() -> None:
     """Clear clarifications: delete everything in the sources.clarifications folder EXCEPT
     a file named claude.md (case-insensitive). Asks for interactive confirmation; skip with
@@ -1907,8 +1920,16 @@ def run_clear_all() -> None:
     epic_count = len((config.get("epic") or []))
     keep = {"claude.md"}
     clar_to_delete = [c for c in clar_dir.iterdir() if c.name.lower() not in keep] if clar_dir.exists() else []
+    # Stale leftovers from a past clarify run can outlive the files they describe
+    # (e.g. a previous `clear` already deleted everything on disk but predates
+    # _reset_clarify_config_state) — treat that as "still something to clear" too,
+    # or this early-exit would leave them behind forever.
+    stale_clarify_state = (
+        any(k in config for k in ("last_clarification_action", "last_clarification_findings", "clarify_applied_hashes"))
+        or config.get("last_auto_answer", 0) != 0
+    )
 
-    if not qa_files and not log_files and not plan_files and epic_count == 0 and not clar_to_delete:
+    if not qa_files and not log_files and not plan_files and epic_count == 0 and not clar_to_delete and not stale_clarify_state:
         log("Nothing to clear — qa/, logs/, specs/pbi, and specs/clarifications are already empty.")
         sys.exit(0)
 
@@ -1922,6 +1943,7 @@ def run_clear_all() -> None:
     qa_count, logs_count = _do_clear_implement()
     plan_file_count = _do_clear_plan(config, pbi_dir)
     clarify_count = _do_clear_clarify(clar_dir)
+    _reset_clarify_config_state(config)
     save_config(config)
 
     log(f"Clear done — implement: {qa_count} qa file(s) + {logs_count} log file(s) deleted; "
@@ -2050,6 +2072,29 @@ def set_working_folders(args: argparse.Namespace) -> None:
 
     log("Working folders saved to config.json (key \"workspace\").")
     print_workspace(config)
+
+
+def run_close_folder() -> None:
+    """Clear workspace.root in config.json (the Home page's "close working folder"
+    icon) — lets Tempa be pointed at a different project without touching the current
+    project's own files, since nothing on disk is deleted here, only config.json.
+
+    Only allowed once the harness's own state has already been cleared (`tempa clear`:
+    "epic" array emptied, last_auto_answer reset to 0) — otherwise closing the folder
+    would silently orphan in-progress epic/session tracking that still refers to it.
+    """
+    config = load_config()
+    epic = config.get("epic") or []
+    if epic or config.get("last_auto_answer", 0):
+        log("ERROR: Run `tempa clear` first — the working folder can only be closed "
+            "once the \"epic\" array is empty and last_auto_answer is 0.")
+        sys.exit(1)
+
+    workspace = get_workspace(config)
+    workspace["root"] = ""
+    config["workspace"] = workspace
+    save_config(config)
+    log("Working folder closed — workspace.root cleared in config.json.")
 
 
 def run_init(args: argparse.Namespace) -> None:
@@ -2225,6 +2270,7 @@ USAGE
   tempa set-folders --root <abs> [--docs r] [--adr r] [--specs r] [--apps r] [--infra r] [--archive r]
                                   Only set the default working folders (without creating them on disk)
   tempa show-folders         Show the active working folders (+ resolved absolute paths)
+  tempa close-folder         Clear workspace.root (requires epic=[] and last_auto_answer=0 first)
   tempa set-model [--clarify m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-4.8, sonnet-5, ...)
   tempa show-models          Show the AI model per stage
@@ -2403,6 +2449,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("show-folders", parents=[common], add_help=False)
 
+    sub.add_parser("close-folder", parents=[common], add_help=False)
+
     p = sub.add_parser("set-model", parents=[common], add_help=False)
     p.add_argument("--clarify")
     p.add_argument("--plan")
@@ -2559,6 +2607,8 @@ if __name__ == "__main__":
         set_working_folders(cli_args)
     elif cli_args.command == "show-folders":
         print_workspace()
+    elif cli_args.command == "close-folder":
+        run_close_folder()
     elif cli_args.command == "set-model":
         set_models(cli_args)
     elif cli_args.command == "show-models":
