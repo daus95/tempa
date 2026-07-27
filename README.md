@@ -11,14 +11,16 @@ implementing it, and running QA — all without needing to be watched.
 All state is stored in [`config.json`](config.json). All prompt templates are stored as
 `.md` files in the [`prompt/`](prompt/) folder so they're easy to read and edit.
 
-> Every interaction is a CLI command: `tempa <command>`.
+> Once set up, use Tempa either through its local **Dashboard** (a web UI) or through the
+> **CLI** (`tempa <command>`) — see [Using the Dashboard](#using-the-dashboard) or
+> [Using the CLI](#using-the-cli) below.
 
 ---
 
 ## Setup (One-Time Only)
 
-> Done once per machine/project. Once this is done, the recurring work happens in the
-> [Workflow (End-to-End)](#workflow-end-to-end) section below.
+> Done once per machine. Once this is done, jump to [Using the Dashboard](#using-the-dashboard)
+> or [Using the CLI](#using-the-cli).
 
 ### Step 1 — Prerequisites
 
@@ -73,7 +75,70 @@ tempa test            # verifies the Claude CLI can Write/Read/Delete a file
 
 ---
 
-### Step 3 — Initial Setup
+## Using the Dashboard
+
+A local web UI — no command memorization needed. Start it with:
+
+```bash
+tempa dashboard
+```
+
+This opens a browser tab with a sidebar (**Home** / **Specification** / **Clarification** /
+**Implementation**) and drives you through the same workflow as the CLI (below), one button
+at a time. **Specification**, **Clarification**, and **Implementation** stay locked (greyed
+out) until a working folder is set.
+
+The **Home** page walks through everything in order:
+
+1. **Select Working Folder** — if no project is set yet, click this to pick your project
+   folder from a native folder picker. Same effect as `tempa init <path>` on the CLI. Once
+   set, the folder's path is shown at the top of Home — click the path to open it in your
+   file explorer.
+2. **Upload Specification** — **Add File** / **Add Folder** to add your PRD into `specs/prd`.
+3. **Clarification** — **Start Clarification** (evaluate) or **Finalized Clarification**
+   (loop until clean); the panel shows how many findings are still unanswered.
+4. **Start Implementation** — enabled once no critical/major clarification findings remain.
+
+Two extra controls on Home, once there's state to reset:
+
+- **Clear All** — deletes plan/QA/log/clarification results (specification files are kept) to
+  start the clarify → implement loop over. This action cannot be undone.
+- **✕** next to the working-folder path — appears only once everything above has been
+  cleared. Closes the link to the current project (clears `workspace.root` in `config.json`;
+  no files are deleted) so you can point Tempa at a different project next.
+
+> The folder picker, "open in explorer", and window-focus behavior are Windows-only
+> conveniences. On macOS/Linux, set the working folder with `tempa init <path>` (CLI) first,
+> then use the dashboard normally for the rest of the workflow.
+
+---
+
+## Using the CLI
+
+> Every interaction here is a typed command: `tempa <command>`.
+
+```
+┌───────────────────────────┐
+│  0. Initial Setup          │  (once per project)
+└─────────────┬──────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  1. Write Specification    │
+└─────────────┬──────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  2. Answer Clarifications  │  (loop: evaluate → answer → apply, until clean)
+└─────────────┬──────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  3. Run Implementation     │  (loop per epic: feature → QA → fixes)
+└───────────────────────────┘
+```
+
+### Step 0 — Initial Setup
 
 Point Tempa at the project you want to work on with `init`, passing the (absolute) path
 to your project folder:
@@ -95,28 +160,6 @@ What you need to know at this point: **put your new specification in the `specs`
 (default: `specs/prd`) inside that project. Full details on the working-folder structure and
 AI model configuration are in [docs/folders-and-paths.md](docs/folders-and-paths.md) and
 [docs/ai-models.md](docs/ai-models.md) — not required reading to get started.
-
----
-
-## Workflow (End-to-End)
-
-> Prerequisite: the **Setup (One-Time Only)** section above has been done.
-
-```
-┌───────────────────────────┐
-│  1. Write Specification    │
-└─────────────┬──────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│  2. Answer Clarifications  │  (loop: evaluate → answer → apply, until clean)
-└─────────────┬──────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│  3. Run Implementation     │  (loop per epic: feature → QA → fixes)
-└───────────────────────────┘
-```
 
 ### Step 1 — Write the specification
 
@@ -218,7 +261,7 @@ recovering from problems, manual verification): see
 
 ## Further Reference
 
-> Not required reading to get started — see Setup Step 3 & Workflow above first.
+> Not required reading to get started — see Using the Dashboard / Using the CLI above first.
 
 - **Folder & Path Structure** — what a working folder is, `workspace.*`, `sources.*`:
   [docs/folders-and-paths.md](docs/folders-and-paths.md)
