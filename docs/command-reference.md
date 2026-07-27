@@ -7,8 +7,11 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `init <abs>` | Init project: sets `workspace.root` + creates working folders on disk (safe to re-run) |
 | `set-folders --root <abs> [...]` | Sets the working folder in config only (root absolute; the rest relative) |
 | `show-folders` | Shows the active working folder + resolved absolute paths |
+| `close-folder` | Clears `workspace.root` (requires `epic` empty + `last_auto_answer` 0, i.e. `tempa clear` run first) |
 | `set-model [--clarify m] [--plan m] [--implement m]` | Sets the AI model per stage (alias/id) |
 | `show-models` | Shows the AI model per stage |
+| `dashboard` | Opens the web dashboard (Home / Specification / Clarification / Implementation) |
+| `spec --show` | Opens the dashboard directly on the Specification section |
 | `clarify` | Clarify the PRD — one manual evaluation pass (human-in-the-loop), then opens the clarification-answer web UI on the result (unless `--noui`); saving in the UI auto-applies the answers, then asks whether to run another round |
 | `clarify --noui` | Same as `clarify`, but skip opening the answer web UI |
 | `answer` | Scans `sources.clarifications` for clarification files and, if any finding is still unanswered, reopens the clarification-answer web UI on ALL of them (one tab per file, badged complete/incomplete); saving auto-applies the answers, then asks whether to run another round |
