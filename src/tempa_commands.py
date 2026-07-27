@@ -335,8 +335,8 @@ def set_models(args: argparse.Namespace) -> None:
     Usage:
       tempa set-model [--clarify <model>] [--plan <model>] [--implement <model>]
 
-    <model> accepts a friendly alias (opus-4.8, sonnet-5, haiku-4.5, fable-5) or a full
-    model id (e.g. claude-opus-4-8). Stages omitted keep their current/default value.
+    <model> accepts a friendly alias (opus-5, sonnet-5, haiku-4.5, fable-5) or a full
+    model id (e.g. claude-opus-5). Stages omitted keep their current/default value.
     """
     config = load_config()
     models = get_models(config)

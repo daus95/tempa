@@ -64,7 +64,7 @@ USAGE
   tempa show-folders         Show the active working folders (+ resolved absolute paths)
   tempa close-folder         Clear workspace.root (requires epic=[] and last_auto_answer=0 first)
   tempa set-model [--clarify m] [--plan m] [--implement m]
-                                  Set the AI model per stage (alias: opus-4.8, sonnet-5, ...)
+                                  Set the AI model per stage (alias: opus-5, sonnet-5, ...)
   tempa show-models          Show the AI model per stage
   tempa test                 Permission test (verifies the claude CLI runs)
   tempa --help               Show this help
@@ -126,7 +126,7 @@ CONFIG OPTIONS (config.json)
   sources.apps                    Monorepo root, ALL services; each service's src & tests live inside it
                                       (default: workspace.apps)
   sources.clarifications          Clarification results folder (default: workspace.specs/clarifications)
-  models.clarify                  AI model for clarify (default: claude-opus-4-8)
+  models.clarify                  AI model for clarify (default: claude-opus-5)
   models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
 
