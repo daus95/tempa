@@ -8,7 +8,7 @@ the folder structure Tempa uses for the project you're working on.
 A **working folder** is the root folder of the project you're working on (not Tempa's
 installation folder) along with its standard sub-folder structure — where Tempa reads
 specifications, documentation, code, and writes output (plans, QA reports, etc). Set
-**once** via `init` (see Setup Step 3 in the README), stored in `config.json` under the
+**once** via `init` (see Workflow Step 1 in the README), stored in `config.json` under the
 `workspace` key.
 
 Tempa only needs to know **one absolute path**: `workspace.root`. Every other sub-folder
