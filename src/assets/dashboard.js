@@ -173,9 +173,13 @@ const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEdit
   implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
   implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody"),
   modalOverlay = $("modalOverlay"), modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
-  modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn");
+  modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
+  settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
+  settingsModelImplement = $("settingsModelImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
+  settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
+  settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus");
 
-const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl"];
+const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl", "settings"];
 
 const state = {
   specTree: INITIAL_SPEC_TREE,
@@ -323,6 +327,7 @@ function renderSidebar() {
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
   treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
+  treeEl.appendChild(renderLeafSection("settings", "⚙️", "Settings"));
 }
 
 async function selectTop(key) {
@@ -338,6 +343,9 @@ async function selectTop(key) {
   } else if (key === "implementation") {
     refreshImplementRun();
     showPane("impl");
+  } else if (key === "settings") {
+    renderSettings();
+    showPane("settings");
   } else if (key === "specification") {
     state.specShowingOverview = true;
     renderSpecOverview();
@@ -1080,6 +1088,93 @@ async function stopImplementRun() {
 
 startImplementBtn.addEventListener("click", startImplementRun);
 stopImplementBtn.addEventListener("click", stopImplementRun);
+
+// ---------------------------------------------------------------------------
+// Settings (AI models + run limits, backed by config.json)
+// ---------------------------------------------------------------------------
+const MODEL_OPTIONS = [
+  { value: "claude-opus-4-8", label: "Opus 4.8" },
+  { value: "claude-sonnet-5", label: "Sonnet 5" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+  { value: "claude-fable-5", label: "Fable 5" },
+];
+
+function populateModelSelect(selectEl, currentValue) {
+  selectEl.innerHTML = "";
+  let found = false;
+  for (const opt of MODEL_OPTIONS) {
+    const el = document.createElement("option");
+    el.value = opt.value;
+    el.textContent = opt.label;
+    if (opt.value === currentValue) { el.selected = true; found = true; }
+    selectEl.appendChild(el);
+  }
+  // Keep an unrecognized/custom model id usable instead of silently swapping it out.
+  if (!found && currentValue) {
+    const el = document.createElement("option");
+    el.value = currentValue;
+    el.textContent = currentValue;
+    el.selected = true;
+    selectEl.appendChild(el);
+  }
+}
+
+function fillSettingsForm(config) {
+  populateModelSelect(settingsModelClarify, config.models.clarify);
+  populateModelSelect(settingsModelPlan, config.models.plan);
+  populateModelSelect(settingsModelImplement, config.models.implement);
+  settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
+  settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
+  settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
+}
+
+async function renderSettings() {
+  settingsSaveStatus.textContent = "";
+  try {
+    const res = await fetch("/api/config");
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Could not load settings.", true); return; }
+    fillSettingsForm(data.config);
+  } catch (e) {
+    toast("Network error loading settings.", true);
+  }
+}
+
+settingsSaveBtn.addEventListener("click", async () => {
+  settingsSaveBtn.disabled = true;
+  settingsSaveStatus.textContent = "";
+  settingsSaveStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/config/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        models: {
+          clarify: settingsModelClarify.value,
+          plan: settingsModelPlan.value,
+          implement: settingsModelImplement.value,
+        },
+        features_per_session: settingsFeaturesPerSession.value,
+        max_session_run: settingsMaxSessionRun.value,
+        max_clarification_run: settingsMaxClarificationRun.value,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      settingsSaveStatus.textContent = data.error || "Could not save settings.";
+      settingsSaveStatus.classList.add("err");
+      return;
+    }
+    fillSettingsForm(data.config);
+    settingsSaveStatus.textContent = "Saved.";
+    toast("Settings saved.");
+  } catch (e) {
+    settingsSaveStatus.textContent = "Network error while saving.";
+    settingsSaveStatus.classList.add("err");
+  } finally {
+    settingsSaveBtn.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Specification: open / mode / save

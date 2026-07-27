@@ -2,7 +2,8 @@
 
 _DashboardHandler serves the single-page app and the /api/* GET/POST routes (spec browse/
 edit/upload/delete/rename, clarify view/save/run, implement run/stop, clear, workspace
-init/open/close). All file access is confined to prd_dir / clar_dir via _resolve_within."""
+init/open/close, config get/save). All file access is confined to prd_dir / clar_dir via
+_resolve_within."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+import tempa_config
 from dashboard_config import (
     _resolve_source_dir, _workspace_can_close, _workspace_initialized, _workspace_root,
 )
@@ -117,6 +119,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_run_status(parse_qs(parsed.query))
         elif route == "/api/implement/run":
             self._handle_implement_run_status(parse_qs(parsed.query))
+        elif route == "/api/config":
+            self._handle_config_get()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -217,6 +221,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "epics": _epic_sessions(),
             })
 
+    def _handle_config_get(self) -> None:
+        config = tempa_config.read_config_safe()
+        self._send_json(200, {
+            "ok": True,
+            "config": {
+                "models": tempa_config.get_models(config),
+                "features_per_session": config.get("features_per_session"),
+                "max_session_run": config.get("max_session_run"),
+                "max_clarification_run": config.get("max_clarification_run"),
+            },
+        })
+
     # -- POST ---------------------------------------------------------------
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -244,6 +260,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_workspace_open()
         elif parsed.path == "/api/workspace/close":
             self._handle_workspace_close()
+        elif parsed.path == "/api/config/save":
+            self._handle_config_save()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -547,3 +565,63 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.server.clar_dir = _resolve_source_dir("clarifications", "clarifications")
         print("[workspace] root cleared")
         self._send_json(200, {"ok": True})
+
+    def _handle_config_save(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+
+        models_in = payload.get("models")
+        if not isinstance(models_in, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        models = {}
+        for stage in ("clarify", "plan", "implement"):
+            value = (models_in.get(stage) or "").strip()
+            if not value:
+                self._send_json(400, {"ok": False, "error": f"The {stage} model cannot be empty."})
+                return
+            models[stage] = tempa_config._resolve_model_alias(value)
+
+        def _parse_limit(name: str, required: bool) -> tuple[bool, int | None]:
+            """Returns (ok, value). `value` is None for a blank/absent field (only
+            valid when `required` is False, i.e. it means "no limit")."""
+            raw = payload.get(name)
+            if raw is None or raw == "":
+                return (not required), None
+            try:
+                parsed = int(raw)
+            except (TypeError, ValueError):
+                return False, None
+            return parsed >= 1, parsed
+
+        ok, features_per_session = _parse_limit("features_per_session", required=False)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Features per Session must be empty or a positive whole number."})
+            return
+        ok, max_session_run = _parse_limit("max_session_run", required=False)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Max Session Runs must be empty or a positive whole number."})
+            return
+        ok, max_clarification_run = _parse_limit("max_clarification_run", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Max Clarification Runs must be a positive whole number."})
+            return
+
+        config = tempa_config.load_config()
+        config["models"] = models
+        config["features_per_session"] = features_per_session
+        config["max_session_run"] = max_session_run
+        config["max_clarification_run"] = max_clarification_run
+        tempa_config.save_config(config)
+        print("[settings] configuration saved")
+        self._send_json(200, {
+            "ok": True,
+            "config": {
+                "models": models,
+                "features_per_session": features_per_session,
+                "max_session_run": max_session_run,
+                "max_clarification_run": max_clarification_run,
+            },
+        })

@@ -303,6 +303,26 @@
   .big-action-icon { font-size: 38px; line-height: 1; }
   .big-action-label { font-size: 0.9rem; font-weight: 600; }
 
+  /* ---- settings page ---- */
+  .settings-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; }
+  .settings-header { max-width: 720px; margin: 0 auto 24px; }
+  .settings-header h2 { margin: 0 0 8px; font-size: 1.3rem; }
+  .settings-intro { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  .settings-intro code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  .settings-group { max-width: 720px; margin: 0 auto 24px; border: 1px solid var(--border-strong);
+    border-radius: 10px; padding: 18px 22px; background: var(--panel); }
+  .settings-group h3 { margin: 0 0 16px; font-size: 1rem; }
+  .settings-field { margin-bottom: 18px; }
+  .settings-field:last-child { margin-bottom: 0; }
+  .settings-field label { display: block; font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; }
+  .settings-field-desc { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; max-width: 640px; }
+  .settings-field select, .settings-field input[type="number"] { width: 100%; max-width: 320px;
+    padding: 7px 10px; font-size: 0.9rem; border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg); color: var(--text); }
+  .settings-actions { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
+  .settings-save-status { color: var(--ok); font-size: 0.88rem; }
+  .settings-save-status.err { color: var(--danger); }
+
   /* ---- toast ---- */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: #1f2937; color: #fff; padding: 9px 18px; border-radius: 8px; font-size: 13px;

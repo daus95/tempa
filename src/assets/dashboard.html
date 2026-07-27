@@ -194,6 +194,54 @@
           <div class="clarify-log-body" id="implLogBody"></div>
         </div>
       </div>
+      <div id="settingsPane" class="pane settings-pane hidden">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <p class="settings-intro">Configure the AI models and run limits used by Tempa's clarification and implementation stages. These settings are stored in <code>config.json</code>.</p>
+        </div>
+        <div class="settings-group">
+          <h3>AI Models</h3>
+          <div class="settings-field">
+            <label for="settingsModelClarify">Clarifications</label>
+            <p class="settings-field-desc">Model used for the Clarification stage — analyzes the specification for ambiguities and conflicts. It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model.</p>
+            <select id="settingsModelClarify"></select>
+          </div>
+          <div class="settings-field">
+            <label for="settingsModelPlan">Planning</label>
+            <p class="settings-field-desc">Model used to automatically draft the epic/feature/task plan before implementation starts (via Start Implementation, or a replan). Runs frequently and unattended, so speed and cost usually matter more here than for Clarification.</p>
+            <select id="settingsModelPlan"></select>
+          </div>
+          <div class="settings-field">
+            <label for="settingsModelImplement">Implementation</label>
+            <p class="settings-field-desc">Model used for the Implementation stage — writing code, running QA, and verifying each feature. Runs repeatedly at high volume, per epic/feature/session.</p>
+            <select id="settingsModelImplement"></select>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3>Run Limits</h3>
+          <div class="settings-field">
+            <label for="settingsFeaturesPerSession">Features per Session</label>
+            <p class="settings-field-desc">Maximum number of features implemented in a single session run. Leave empty for no limit — the session processes all pending features for the epic until done.</p>
+            <input type="number" id="settingsFeaturesPerSession" min="1" step="1" placeholder="No limit">
+          </div>
+          <div class="settings-field">
+            <label for="settingsMaxSessionRun">Max Session Runs</label>
+            <p class="settings-field-desc">Maximum number of implementation/QA sessions allowed per epic — an anti-loop safeguard that stops Tempa from retrying the same epic indefinitely.</p>
+            <input type="number" id="settingsMaxSessionRun" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsMaxClarificationRun">Max Clarification Runs</label>
+            <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
+            <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="clarify-run-btn" id="settingsSaveBtn">
+            <span>💾</span><span>Save Settings</span>
+          </button>
+          <span class="settings-save-status" id="settingsSaveStatus"></span>
+        </div>
+      </div>
     </div>
   </main>
 </div>
