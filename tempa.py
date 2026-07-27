@@ -582,7 +582,7 @@ def _session_feature_lines(config: dict, epic_label: str, features_override: int
 
     lines = [f"Features done: {completed}/{total}"]
     if batch:
-        lines.append(f"Processed this session ({len(batch)} feature(s)):")
+        lines.append(f"Queued for this session ({len(batch)} feature(s)):")
         for f in batch:
             icon = "🔧" if f.get("status") == "require_fixing" else "⬜"
             lines.append(f"  {icon} {f.get('id', '?')} — {f.get('name', '')}")
@@ -688,13 +688,24 @@ def _run_claude_session(
     progress_thread: threading.Thread | None = None
 
     def _display_progress() -> None:
+        # When stdout is piped (e.g. the dashboard runs this as a subprocess), the
+        # parent reads line-by-line and only sees a "\r"-only update once a real "\n"
+        # is eventually written — for a long session that means the parent (and thus
+        # the dashboard) sees nothing until the run finishes. Only use the in-place
+        # "\r" overwrite on a real terminal; otherwise emit each tick as its own line
+        # so a piped reader gets live progress.
+        is_tty = sys.stdout.isatty()
         while not session_done.wait(timeout=1.0):
             now = datetime.now()
             elapsed_str = str(now - start_time).split(".")[0]
             time_str = now.strftime("%H:%M:%S")
             tag_part = f" [{progress_tag}]" if progress_tag else ""
             extra = extra_progress_fn() if extra_progress_fn else ""
-            print(f"\r[{time_str}]{tag_part} [{elapsed_str}] [{row_count[0]} rows]{extra}   ", end="", flush=True)
+            line = f"[{time_str}]{tag_part} [{elapsed_str}] [{row_count[0]} rows]{extra}"
+            if is_tty:
+                print(f"\r{line}   ", end="", flush=True)
+            else:
+                print(line, flush=True)
 
     try:
         claude_exe = shutil.which("claude") or shutil.which("claude.cmd")
@@ -775,13 +786,21 @@ def run_session(
 
     def _feature_progress_suffix() -> str:
         # Live feature progress: read from config.json (Claude updates completed_features
-        # whenever a feature finishes). Ignore read errors (e.g. config is being written)
-        # — display without feature info for that iteration.
+        # and each feature's status as it works). Ignore read errors (e.g. config is being
+        # written) — display without feature info for that iteration. Features are worked
+        # in array order, so the first non-done one is the one currently in progress.
         try:
             cfg = load_config()
             epic = next((s for s in (cfg.get("epic") or []) if s.get("epic_name") == session_label), None)
             if epic:
-                return f" [feat {epic.get('completed_features', 0)}/{epic.get('total_features', 0)}]"
+                completed = epic.get('completed_features', 0)
+                total = epic.get('total_features', 0)
+                current = next(
+                    (f for f in epic.get("features", []) if f.get("status") in ("pending", "require_fixing")),
+                    None,
+                )
+                current_part = f" — {current.get('id', '?')}" if current else ""
+                return f" [feat {completed}/{total}{current_part}]"
         except Exception:
             pass
         return ""

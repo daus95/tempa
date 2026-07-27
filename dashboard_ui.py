@@ -1517,7 +1517,8 @@ _PAGE_TEMPLATE = r"""<!doctype html>
   .home-danger-zone .home-step-desc { margin-top: 8px; }
 
   /* ---- implementation page (start/stop + status/log tabs) ---- */
-  .impl-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; }
+  .impl-pane { padding: 20px clamp(16px, 3vw, 36px) 60px; display: flex; flex-direction: column;
+    min-height: 100%; box-sizing: border-box; }
   .impl-header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
   .impl-header-status { color: var(--muted); font-size: 0.85rem; }
   .impl-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong); margin-bottom: 18px; }
@@ -1525,7 +1526,9 @@ _PAGE_TEMPLATE = r"""<!doctype html>
     font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .impl-tab:hover:not(:disabled) { border-color: transparent; color: var(--text); }
   .impl-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .impl-tab-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .impl-tab-panel.hidden { display: none; }
+  #implLogBody { flex: 1; min-height: 0; max-height: none; }
   .impl-epic-card { border: 1px solid var(--border-strong); border-radius: 8px; padding: 12px 16px;
     margin-bottom: 12px; max-width: 860px; background: var(--panel); }
   .impl-epic-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; }
