@@ -20,9 +20,10 @@ All state is stored in [`config.json`](config.json). All prompt templates are st
 
 ## Setup (One-Time Only)
 
-> Done once per machine/project. Once this is done, the recommended way to do the
-> recurring work is the [Dashboard](#dashboard-recommended) section below — power users
-> can use the CLI [Workflow (End-to-End)](#workflow-end-to-end) section instead.
+> Done once per machine. Once this is done, the recommended way to do the recurring work
+> is the [Dashboard](#dashboard-recommended) section below — power users can use the CLI
+> [Command Line Interface (CLI)](#command-line-interface-cli) section instead (its first step points
+> Tempa at your project).
 
 ### Step 1 — Prerequisites
 
@@ -77,35 +78,10 @@ tempa test            # verifies the Claude CLI can Write/Read/Delete a file
 
 ---
 
-### Step 3 — Initial Setup
-
-Point Tempa at the project you want to work on with `init`, passing the (absolute) path
-to your project folder:
-
-```bash
-tempa init C:\repo\<your-repo>
-```
-
-This command will:
-
-- Save the project location (`workspace.root`) to `config.json`.
-- Create the standard working folders in your project if they don't already exist — one of
-  them being the `specs` folder, where you'll place the specification you want to work on.
-
-> Run this once per project. Safe to re-run — folders that already exist on disk are not
-> re-created, and their contents are never overwritten.
-
-What you need to know at this point: **put your new specification in the `specs` folder**
-(default: `specs/prd`) inside that project. Full details on the working-folder structure and
-AI model configuration are in [docs/folders-and-paths.md](docs/folders-and-paths.md) and
-[docs/ai-models.md](docs/ai-models.md) — not required reading to get started.
-
----
-
 ## Dashboard (Recommended)
 
 > Prefer the terminal, or need to script Tempa? Every action below has a matching CLI
-> command — skip ahead to [Workflow (End-to-End)](#workflow-end-to-end).
+> command — skip ahead to [Command Line Interface (CLI)](#command-line-interface-cli).
 
 The dashboard walks you through the same specification → clarification → implementation
 flow as the CLI, but with buttons, inline file editing, and live progress instead of
@@ -117,7 +93,7 @@ tempa dashboard
 
 This opens `http://127.0.0.1:<port>/` in your browser (`Ctrl+C` in the terminal stops the
 server). If the project hasn't been set up yet, the **Home** page tells you to run
-`tempa init <path>` first (Step 3 above) — that one step still needs the CLI.
+`tempa init <path>` first (Workflow Step 1 below) — that one step still needs the CLI.
 
 The Home page is a 3-step checklist; each step unlocks once the one before it is satisfied:
 
@@ -153,7 +129,7 @@ findings inline: for each finding, choose **Follow the recommendation** or **I'l
 own answer** (a text box appears), then **Save**. Once a file is fully answered, click
 **Apply Answers** to write those resolutions back into the PRD/spec — then run **Start
 Clarification** again to confirm nothing critical remains. This loop (evaluate → answer →
-apply → re-evaluate) is the dashboard version of Workflow Step 2 below.
+apply → re-evaluate) is the dashboard version of Workflow Step 3 below.
 
 **Finalized Clarification** automates the rest of that loop (evaluate + apply, repeating
 until clean) — it stays disabled until a **Finalize readiness** panel shows all 3
@@ -186,7 +162,7 @@ different project next.
 
 ---
 
-## Workflow (End-to-End)
+## Command Line Interface (CLI)
 
 > Prerequisite: the **Setup (One-Time Only)** section above has been done. This is the
 > CLI/power-user path — the [Dashboard](#dashboard-recommended) above runs this exact same
@@ -194,27 +170,55 @@ different project next.
 
 ```
 ┌───────────────────────────┐
-│  1. Write Specification    │
+│  1. Initial Setup          │
 └─────────────┬──────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  2. Answer Clarifications  │  (loop: evaluate → answer → apply, until clean)
+│  2. Write Specification    │
 └─────────────┬──────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  3. Run Implementation     │  (loop per epic: feature → QA → fixes)
+│  3. Answer Clarifications  │  (loop: evaluate → answer → apply, until clean)
+└─────────────┬──────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  4. Run Implementation     │  (loop per epic: feature → QA → fixes)
 └───────────────────────────┘
 ```
 
-### Step 1 — Write the specification
+### Step 1 — Initial Setup
+
+Point Tempa at the project you want to work on with `init`, passing the (absolute) path
+to your project folder:
+
+```bash
+tempa init C:\repo\<your-repo>
+```
+
+This command will:
+
+- Save the project location (`workspace.root`) to `config.json`.
+- Create the standard working folders in your project if they don't already exist — one of
+  them being the `specs` folder, where you'll place the specification you want to work on.
+
+> Run this once per project. Safe to re-run — folders that already exist on disk are not
+> re-created, and their contents are never overwritten.
+
+What you need to know at this point: **put your new specification in the `specs` folder**
+(default: `specs/prd`) inside that project. Full details on the working-folder structure and
+AI model configuration are in [docs/folders-and-paths.md](docs/folders-and-paths.md) and
+[docs/ai-models.md](docs/ai-models.md) — not required reading to get started.
+
+### Step 2 — Write the specification
 
 Save it in the `sources.prd` folder (default `specs/prd`) — and **only** that: the **new**
 specification you want implemented. Don't put old/already-implemented specifications here.
 
 Specifications for the **existing** system should be kept separately in the `sources.docs`
-folder (default `docs/`) — not rewritten inside `specs/prd`. Plan drafting (part of Step 3)
+folder (default `docs/`) — not rewritten inside `specs/prd`. Plan drafting (part of Step 4)
 uses `docs/` (and the code) as a reference for "what already exists", so it doesn't
 duplicate work that's already done.
 
@@ -233,7 +237,7 @@ Not sure how to start, or just want to try Tempa out first? The [examples/](exam
 folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
 database) you can copy straight into `specs/prd` — see [examples/README.md](examples/README.md).
 
-### Step 2 — Answer clarifications (`clarify`)
+### Step 3 — Answer clarifications (`clarify`)
 
 The goal: the system asks about anything ambiguous/unclear in the PRD, you answer, and those
 answers get applied back into the PRD — repeated until there are no more `critical`/`major`
@@ -284,13 +288,13 @@ until clean, without you having to answer one by one anymore.
 
 `--finalize` stops as soon as there are no more `critical`/`major` findings — some `minor`
 findings may still remain, and that's **fine**: minor findings will be resolved anyway
-during implementation (Step 3). So once `--finalize` finishes, you can move straight on to
+during implementation (Step 4). So once `--finalize` finishes, you can move straight on to
 implementation without needing to chase down the remaining minor findings.
 
 Full reference for every mode (`clarify` manual, `--auto-answer`, `--apply`, `--finalize`):
 see [docs/clarify-modes.md](docs/clarify-modes.md).
 
-### Step 3 — Run implementation (`implement`)
+### Step 4 — Run implementation (`implement`)
 
 ```bash
 tempa implement
@@ -308,7 +312,7 @@ recovering from problems, manual verification): see
 
 ## Further Reference
 
-> Not required reading to get started — see Setup Step 3, the Dashboard, or Workflow above
+> Not required reading to get started — see the Dashboard or Workflow above
 > first.
 
 - **Folder & Path Structure** — what a working folder is, `workspace.*`, `sources.*`:
