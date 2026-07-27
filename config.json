@@ -1,11 +1,4 @@
 {
-    "sources": {
-        "prd": "specs/prd",
-        "docs": "docs",
-        "epics": "specs/pbi/epics",
-        "clarifications": "specs/clarifications",
-        "apps": "apps"
-    },
     "models": {
         "clarify": "claude-opus-4-8",
         "plan": "claude-sonnet-5",
