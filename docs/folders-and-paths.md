@@ -43,16 +43,21 @@ tempa set-folders --root C:\repo\<your-repo> --specs new-specs --archive old-spe
 
 ## Sources — concrete paths per command
 
-`sources` is derived from `workspace`: concrete paths (relative to `workspace.root`) that
-each command actually reads/writes. Current defaults:
+`sources` is **computed from `workspace`** — nothing needs to be set in `config.json` for
+it. `docs` and `apps` mirror `workspace.docs`/`workspace.apps` exactly; `prd`, `epics` and
+`clarifications` default to a fixed suffix under `workspace.specs`. Current defaults:
 
-| Key | Path | Used by |
+| Key | Path (default) | Used by |
 |-----|------|--------------|
-| `prd` | `specs/prd` | **PRD** = the **new** specification to be worked on (incoming work folder) |
-| `docs` | `docs` | **current** system documentation — reference for "what already exists" |
-| `clarifications` | `specs/clarifications` | clarification results output |
-| `epics` | `specs/pbi/epics` | epic/feature/task output from plan drafting (automatic via `implement`) |
-| `apps` | `apps` | monorepo root — **every service**; each service's source & tests live inside its own folder |
+| `prd` | `<specs>/prd` | **PRD** = the **new** specification to be worked on (incoming work folder) |
+| `docs` | `workspace.docs` | **current** system documentation — reference for "what already exists" |
+| `clarifications` | `<specs>/clarifications` | clarification results output |
+| `epics` | `<specs>/pbi/epics` | epic/feature/task output from plan drafting (automatic via `implement`) |
+| `apps` | `workspace.apps` | monorepo root — **every service**; each service's source & tests live inside its own folder |
+
+To point any one of these somewhere else, set it explicitly under `sources` in `config.json`
+(relative values are joined onto `workspace.root`; absolute values are used as-is) — an
+explicit `sources.<key>` always overrides its computed default.
 
 > **Multi-service monorepo.** The application consists of many services (e.g.
 > `apps/backend`, `apps/web`, …), each holding both its own source code **and** its own

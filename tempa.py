@@ -52,6 +52,15 @@ DEFAULT_WORKSPACE = {
     "archive": "archive",
 }
 
+# Relative suffix under workspace.specs for each of these `sources` folders (not
+# just "specs" because these need one more nesting level, e.g. specs/pbi/epics).
+# Used by get_sources() to derive a default when `sources.<key>` isn't set.
+DEFAULT_SOURCE_SUFFIXES = {
+    "prd": "prd",
+    "epics": "pbi/epics",
+    "clarifications": "clarifications",
+}
+
 # Human-readable labels for each workspace folder, used in CLI output.
 WORKSPACE_LABELS = {
     "root": "Root folder (absolute)",
@@ -326,11 +335,30 @@ def resolve_source_path(config: dict, value: str) -> str:
 
 
 def get_sources(config: dict) -> dict:
-    """Return the `sources` dict with every value resolved to an absolute path
-    relative to workspace.root (see resolve_source_path). Use this everywhere
-    instead of reading config["sources"] directly, so relative source paths work."""
+    """Return the `sources` dict (prd/docs/epics/apps/clarifications), each
+    resolved to an absolute path. Values are derived from `workspace` by
+    default — `docs`/`apps` mirror workspace.docs/workspace.apps, and
+    `prd`/`epics`/`clarifications` default to that suffix under workspace.specs
+    (see DEFAULT_SOURCE_SUFFIXES) — so config.json doesn't need to duplicate
+    them. An explicit `sources.<key>` entry in config.json still overrides its
+    default (relative values resolved via resolve_source_path, so an absolute
+    override is used as-is). Use this everywhere instead of reading
+    config["sources"] directly."""
+    workspace_resolved = resolve_workspace_paths(config)
+    specs_dir = resolve_specs_dir(config)
+    defaults = {
+        "docs": workspace_resolved.get("docs", ""),
+        "apps": workspace_resolved.get("apps", ""),
+    }
+    for key, suffix in DEFAULT_SOURCE_SUFFIXES.items():
+        defaults[key] = str(specs_dir / suffix)
+
     raw = config.get("sources", {})
-    return {key: resolve_source_path(config, value) for key, value in raw.items()}
+    result = dict(defaults)
+    for key, value in raw.items():
+        if value:
+            result[key] = resolve_source_path(config, value)
+    return result
 
 
 def resolve_specs_dir(config: dict) -> Path:
@@ -349,11 +377,9 @@ def resolve_specs_dir(config: dict) -> Path:
 
 
 def _resolve_prd_dir(config: dict) -> Path:
-    """Return the absolute path of the PRD folder (sources.prd), falling back to
-    <specs>/prd when sources.prd isn't configured. Shared by every entry point that
-    opens the dashboard's Specification section."""
-    prd_dir_str = get_sources(config).get("prd", "")
-    return Path(prd_dir_str) if prd_dir_str else resolve_specs_dir(config) / "prd"
+    """Return the absolute path of the PRD folder (sources.prd). Shared by every
+    entry point that opens the dashboard's Specification section."""
+    return Path(get_sources(config)["prd"])
 
 
 def _format_stream_line(data: dict) -> str | None:
@@ -2343,11 +2369,16 @@ CONFIG OPTIONS (config.json)
   workspace.apps                  Application implementation folder (default: apps)
   workspace.infra                 Infrastructure scripts folder, e.g. docker compose (default: infra)
   workspace.archive                Archive folder for old, unused specifications (default: archive)
-  sources.*                       RELATIVE to workspace.root (absolute paths are still supported)
-  sources.prd                     PRD folder = the NEW specification to be worked on
-  sources.docs                    CURRENT system documentation folder (reference for 'what already exists')
-  sources.epics                   Path to the epic spec folder (plan output, run via implement)
-  sources.apps                    Monorepo root (ALL services; each service's src & tests live inside it)
+  sources.*                       DERIVED from workspace.* by default (see below); set a key here to override it
+                                      (relative to workspace.root, absolute paths also supported)
+  sources.prd                     PRD folder = the NEW specification to be worked on (default: workspace.specs/prd)
+  sources.docs                    CURRENT system documentation folder, reference for 'what already exists'
+                                      (default: workspace.docs)
+  sources.epics                   Path to the epic spec folder, plan output, run via implement
+                                      (default: workspace.specs/pbi/epics)
+  sources.apps                    Monorepo root, ALL services; each service's src & tests live inside it
+                                      (default: workspace.apps)
+  sources.clarifications          Clarification results folder (default: workspace.specs/clarifications)
   models.clarify                  AI model for clarify (default: claude-opus-4-8)
   models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
@@ -2419,10 +2450,8 @@ def print_status() -> None:
 
 
 def _resolve_clar_dir(config: dict) -> Path:
-    """Return the absolute path of the clarifications folder (sources.clarifications),
-    falling back to <specs>/clarifications when it isn't configured."""
-    clar_dir_str = get_sources(config).get("clarifications", "")
-    return Path(clar_dir_str) if clar_dir_str else resolve_specs_dir(config) / "clarifications"
+    """Return the absolute path of the clarifications folder (sources.clarifications)."""
+    return Path(get_sources(config)["clarifications"])
 
 
 def run_spec_show() -> None:

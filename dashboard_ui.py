@@ -440,10 +440,13 @@ def _workspace_can_close() -> bool:
 
 def _resolve_source_dir(source_key: str, specs_fallback: str) -> Path:
     """Re-derive one `sources` folder (e.g. "prd", "clarifications") straight from
-    config.json, mirroring tempa.py's resolve_source_path/resolve_specs_dir without
-    importing tempa.py (see _load_dashboard_config). Used to refresh server.prd_dir /
-    server.clar_dir right after workspace.root is set via the Home page, so the
-    dashboard reflects the new location without a restart."""
+    config.json, mirroring tempa.py's get_sources()/resolve_specs_dir without
+    importing tempa.py (see _load_dashboard_config). `sources.<key>` is normally
+    absent from config.json now (tempa.py derives it from workspace.specs by
+    default) — `raw` here is only ever populated for an explicit override. Used
+    to refresh server.prd_dir / server.clar_dir right after workspace.root is set
+    via the Home page, so the dashboard reflects the new location without a
+    restart."""
     config = _load_dashboard_config()
     root = config.get("workspace", {}).get("root", "") or ""
     raw = config.get("sources", {}).get(source_key, "")
