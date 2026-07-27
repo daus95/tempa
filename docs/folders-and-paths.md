@@ -80,7 +80,7 @@ project you're working on:
 
 | Folder | Contents |
 |--------|-----|
-| [`prompt/`](../prompt/) | prompt templates (`.md`), one file per prompt |
+| [`src/prompt/`](../src/prompt/) | prompt templates (`.md`), one file per prompt |
 | `docs/` (this folder) | supplementary README documentation |
 | `logs/` | logs for every Claude session + the runner process log |
 | `qa/` | QA reports per epic |
