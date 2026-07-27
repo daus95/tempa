@@ -75,15 +75,15 @@ WORKSPACE_LABELS = {
 # - plan     : epic/feature/task planning session (run automatically by implement / implement --replan)
 # - implement: implementation session (implement), including QA and verify
 DEFAULT_MODELS = {
-    "clarify": "claude-opus-4-8",
+    "clarify": "claude-opus-5",
     "plan": "claude-sonnet-5",
     "implement": "claude-sonnet-5",
 }
 
-# Friendly aliases → full model id, so users can type e.g. "opus-4.8" or "sonnet-5".
+# Friendly aliases → full model id, so users can type e.g. "opus-5" or "sonnet-5".
 MODEL_ALIASES = {
-    "opus-4.8": "claude-opus-4-8",
-    "opus": "claude-opus-4-8",
+    "opus-5": "claude-opus-5",
+    "opus": "claude-opus-5",
     "sonnet-5": "claude-sonnet-5",
     "sonnet": "claude-sonnet-5",
     "haiku-4.5": "claude-haiku-4-5-20251001",
@@ -210,7 +210,7 @@ def resolve_clar_dir(config: dict) -> Path:
 
 
 def _resolve_model_alias(value: str) -> str:
-    """Map a friendly alias (e.g. "opus-4.8") to its full model id. If `value` is not
+    """Map a friendly alias (e.g. "opus-5") to its full model id. If `value` is not
     a known alias, return it unchanged (assumed to already be a valid model id)."""
     return MODEL_ALIASES.get(value.strip().lower(), value)
 

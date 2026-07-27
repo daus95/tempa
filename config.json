@@ -1,10 +1,10 @@
 {
     "models": {
-        "clarify": "claude-opus-4-8",
+        "clarify": "claude-opus-5",
         "plan": "claude-sonnet-5",
         "implement": "claude-sonnet-5"
     },
-    "features_per_session": null,
+    "features_per_session": 3,
     "max_session_run": 30,
     "max_clarification_run": 10,
     "last_clarification_findings": {

@@ -146,7 +146,7 @@ function renderMarkdown(src) {
 // App state + DOM refs
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
-const treeEl = $("tree"), specViewer = $("specViewer"), specEditor = $("specEditor"),
+const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specViewer"), specEditor = $("specEditor"),
   toolbarEl = $("toolbar"), filepathEl = $("filepath"), specSeg = $("specSeg"),
   viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"), followAllBtn = $("followAllBtn"),
   clarifySummary = $("clarifySummary"), clarifyBody = $("clarifyBody"),
@@ -327,7 +327,8 @@ function renderSidebar() {
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
   treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
-  treeEl.appendChild(renderLeafSection("settings", "⚙️", "Settings"));
+  treeBottomEl.innerHTML = "";
+  treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings"));
 }
 
 async function selectTop(key) {
@@ -1093,7 +1094,7 @@ stopImplementBtn.addEventListener("click", stopImplementRun);
 // Settings (AI models + run limits, backed by config.json)
 // ---------------------------------------------------------------------------
 const MODEL_OPTIONS = [
-  { value: "claude-opus-4-8", label: "Opus 4.8" },
+  { value: "claude-opus-5", label: "Opus 5" },
   { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
   { value: "claude-fable-5", label: "Fable 5" },
