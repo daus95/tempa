@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tempa Dashboard</title>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <span class="icon">🛠️</span>
+      <span class="title">Tempa Dashboard</span>
+      <button id="refreshBtn" title="Rescan the folders">Refresh</button>
+    </div>
+    <div class="tree" id="tree"></div>
+  </aside>
+  <div class="splitter" id="splitter"></div>
+  <main class="main">
+    <div class="toolbar hidden" id="toolbar">
+      <span class="filepath" id="filepath">Home</span>
+      <div class="seg hidden" id="specSeg">
+        <button id="viewBtn" class="active">View</button>
+        <button id="editBtn">Edit</button>
+      </div>
+      <button id="followAllBtn" class="hidden">Follow all recommendations</button>
+      <button id="saveBtn" class="primary hidden" disabled>Save</button>
+    </div>
+    <div class="content">
+      <div id="homePane" class="pane home-pane">
+        <div class="home-brand">TEMPA</div>
+        <div id="homeNotInit" class="home-init-prompt hidden">
+          <div class="home-init-text">
+            No application repository folder has been set yet.
+          </div>
+          <button type="button" class="big-action" id="homeSelectFolderBtn">
+            <span class="big-action-icon">📂</span>
+            <span class="big-action-label">Select Working Folder</span>
+          </button>
+        </div>
+        <div id="homeSteps" class="home-steps hidden">
+          <div class="home-workspace-panel" id="homeWorkspacePanel">
+            <span class="home-workspace-icon">📁</span>
+            <span class="home-workspace-label">Working Folder:</span>
+            <span class="home-workspace-path" id="homeWorkspacePath" title="Open in Explorer"></span>
+            <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder">✕</button>
+          </div>
+          <div class="home-step" id="homeStep1">
+            <div class="home-step-header">
+              <span class="home-step-num">1</span>
+              <span class="home-step-title">Upload Specification</span>
+            </div>
+            <p class="home-step-desc">Upload specification documents (PRD) as the basis for clarification and implementation.</p>
+            <div class="home-step-actions">
+              <button type="button" class="big-action" id="homeAddFileBtn">
+                <span class="big-action-icon">📄</span>
+                <span class="big-action-label">Add File</span>
+              </button>
+              <button type="button" class="big-action" id="homeAddFolderBtn">
+                <span class="big-action-icon">📁</span>
+                <span class="big-action-label">Add Folder</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep1Status"></div>
+          </div>
+          <div class="home-step" id="homeStep2">
+            <div class="home-step-header">
+              <span class="home-step-num">2</span>
+              <span class="home-step-title">Clarification</span>
+            </div>
+            <p class="home-step-desc">Run clarification to find and resolve ambiguities/conflicts in the specification.</p>
+            <div class="home-step-actions">
+              <button type="button" class="clarify-run-btn" id="homeStartClarifyBtn">
+                <span>▶️</span><span>Start Clarification</span>
+              </button>
+              <button type="button" class="clarify-run-btn secondary" id="homeFinalizeClarifyBtn">
+                <span>🏁</span><span>Finalized Clarification</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep2Status"></div>
+          </div>
+          <div class="home-step" id="homeStep3">
+            <div class="home-step-header">
+              <span class="home-step-num">3</span>
+              <span class="home-step-title">Start Implementation</span>
+            </div>
+            <p class="home-step-desc">Start the automated implementation process based on the clarification results.</p>
+            <div class="home-step-actions">
+              <button type="button" class="clarify-run-btn" id="homeStartImplementBtn">
+                <span>🚀</span><span>Start Implementation</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStep3Status"></div>
+          </div>
+          <div class="home-danger-zone">
+            <button type="button" class="home-clear-btn" id="homeClearAllBtn">
+              <span>🗑️</span><span>Clear All</span>
+            </button>
+            <p class="home-step-desc">Delete all plan, QA, log, and clarification results (specification files will not be deleted). This action cannot be undone.</p>
+          </div>
+        </div>
+      </div>
+      <div id="specPane" class="pane hidden">
+        <div id="specViewer" class="viewer markdown-body"></div>
+        <textarea id="specEditor" class="editor hidden" spellcheck="false"></textarea>
+      </div>
+      <div id="specOverviewPane" class="pane spec-overview-pane hidden">
+        <div class="spec-overview-summary" id="specFileCount"></div>
+        <div class="spec-overview-hint">Pick a file from Specification on the left to view it.</div>
+        <div class="spec-overview-actions">
+          <button type="button" class="big-action" id="addFileBtn">
+            <span class="big-action-icon">📄</span>
+            <span class="big-action-label">Add File</span>
+          </button>
+          <button type="button" class="big-action" id="addFolderBtn">
+            <span class="big-action-icon">📁</span>
+            <span class="big-action-label">Add Folder</span>
+          </button>
+        </div>
+        <input type="file" id="addFileInput" class="hidden" multiple>
+        <input type="file" id="addFolderInput" class="hidden" multiple webkitdirectory directory>
+      </div>
+      <div id="clarifyPane" class="pane clarify-pane hidden">
+        <div class="clarify-summary" id="clarifySummary"></div>
+        <div id="clarifyBody"></div>
+      </div>
+      <div id="clarifyOverviewPane" class="pane clarify-overview-pane hidden">
+        <div class="clarify-run-actions">
+          <button type="button" class="clarify-run-btn" id="startClarifyBtn">
+            <span>▶️</span><span>Start Clarification</span>
+          </button>
+          <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
+            <span>📤</span><span>Apply Answers</span>
+          </button>
+        </div>
+        <div class="gate-panel" id="finalizeGate">
+          <h3>Finalize readiness</h3>
+          <ul class="gate-checklist" id="finalizeGateList"></ul>
+          <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
+            <span>🏁</span><span>Finalized Clarification</span>
+          </button>
+        </div>
+        <div class="ready-banner hidden" id="implementReadyBanner">
+          <div class="ready-banner-text">
+            <strong>✅ Ready for implementation.</strong> No critical or major findings remain —
+            minor findings will be resolved during implementation.
+          </div>
+          <button type="button" class="clarify-run-btn" id="clarifyStartImplementBtn">
+            <span>🚀</span><span>Start Implementation</span>
+          </button>
+        </div>
+        <details class="clarify-log hidden" id="clarifyLogPanel">
+          <summary>Clarification log <span class="clarify-log-status" id="clarifyLogStatus"></span></summary>
+          <div class="clarify-log-body" id="clarifyLogBody"></div>
+        </details>
+        <div class="group">
+          <h3>Unanswered</h3>
+          <table>
+            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th></tr></thead>
+            <tbody id="clarifyUnansweredTbody"></tbody>
+          </table>
+        </div>
+        <div class="group">
+          <h3>Fully answered</h3>
+          <table>
+            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th><th>Applied</th></tr></thead>
+            <tbody id="clarifyAnsweredTbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="implPane" class="pane impl-pane hidden">
+        <div class="impl-header">
+          <button type="button" class="clarify-run-btn" id="startImplementBtn">
+            <span>🚀</span><span>Start Implementation</span>
+          </button>
+          <button type="button" class="clarify-run-btn secondary hidden" id="stopImplementBtn">
+            <span>⏹️</span><span>Stop Implementation</span>
+          </button>
+          <span class="impl-header-status" id="implHeaderStatus"></span>
+        </div>
+        <div class="gate-panel" id="implGate">
+          <h3>Implementation readiness</h3>
+          <ul class="gate-checklist" id="implGateList"></ul>
+        </div>
+        <div class="impl-tabs">
+          <button type="button" class="impl-tab active" id="implTabStatusBtn">Status</button>
+          <button type="button" class="impl-tab" id="implTabLogBtn">Log</button>
+        </div>
+        <div class="impl-tab-panel" id="implStatusPanel">
+          <div id="implStatusBody"></div>
+        </div>
+        <div class="impl-tab-panel hidden" id="implLogPanel">
+          <div class="clarify-log-body" id="implLogBody"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="row-context-menu hidden" id="rowContextMenu">
+  <button type="button" id="rowMenuRename">Rename</button>
+  <button type="button" id="rowMenuDelete" class="danger">Delete</button>
+</div>
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-message" id="modalMessage"></div>
+    <input type="text" class="modal-input hidden" id="modalInput">
+    <div class="modal-actions">
+      <button type="button" id="modalCancelBtn">Cancel</button>
+      <button type="button" class="primary" id="modalOkBtn">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>/*__JS__*/</script>
+</body>
+</html>

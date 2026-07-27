@@ -9,7 +9,7 @@ application from a specification: clarifying the PRD, drafting a plan (epic/feat
 implementing it, and running QA — all without needing to be watched.
 
 All state is stored in [`config.json`](config.json). All prompt templates are stored as
-`.md` files in the [`prompt/`](prompt/) folder so they're easy to read and edit.
+`.md` files in the [`src/prompt/`](src/prompt/) folder so they're easy to read and edit.
 
 > Once set up, the recommended way to drive Tempa is the web **dashboard**
 > (`tempa dashboard`) — see [Dashboard (Recommended)](#dashboard-recommended) below. Every
@@ -44,18 +44,28 @@ want:
 
 Put the extracted contents in a folder **separate from, and outside**, the repo you're going
 to work on — don't put it inside your repo folder, so it doesn't get committed to your git
-repo. The `tempa.py`, `config.json`, and `prompt/` structure lives directly inside that
-`tempa` folder. For example, if your repo is at `C:\repo\<your-repo>`, place Tempa as a
-sibling folder, e.g. `C:\tools\tempa` or `C:\repo\tempa` (not `C:\repo\<your-repo>\tempa`):
+repo. The `tempa.py` launcher and `config.json` sit at the top of that `tempa` folder;
+everything the tool ships with — all implementation modules, the prompt templates, and the
+dashboard's assets — lives in the `src/` subfolder. Keep the whole folder together: the
+launcher puts `src/` on the import path and the modules import each other by name, so nothing
+works if they're separated. For example, if your repo is at `C:\repo\<your-repo>`, place Tempa
+as a sibling folder, e.g. `C:\tools\tempa` or `C:\repo\tempa` (not `C:\repo\<your-repo>\tempa`):
 
 ```
 C:\repo\<your-repo>\      (your repo — left untouched)
 C:\tools\tempa\           (Tempa folder — separate)
-├─ tempa.py
+├─ tempa.py               (launcher / entry point)
 ├─ tempa.cmd              (Windows launcher)
 ├─ tempa                  (macOS/Linux launcher)
-├─ config.json
-└─ prompt\
+├─ config.json            (per-project settings — edited by you)
+└─ src\                   (everything the tool ships with)
+   ├─ tempa_cli.py           (CLI dispatch)
+   ├─ tempa_*.py             (config, logging, prompts, session,
+   │                            implement, clarify, maintenance, commands)
+   ├─ dashboard_*.py         (ui, server, config, spec, clarify_parse,
+   │                            clarify_render, runs, winui, assets)
+   ├─ prompt\                (prompt templates, one .md per prompt)
+   └─ assets\                (dashboard.html / .css / .js)
 ```
 
 Add that Tempa folder to your `PATH` so the `tempa` command works from anywhere:
@@ -323,7 +333,7 @@ recovering from problems, manual verification): see
   [docs/command-reference.md](docs/command-reference.md)
 - **`config.json` structure** — every key and what it does:
   [docs/config-json.md](docs/config-json.md)
-- **Prompt templates** (the `prompt/` folder) — file list & how to customize harness behavior:
+- **Prompt templates** (the `src/prompt/` folder) — file list & how to customize harness behavior:
   [docs/prompt-templates.md](docs/prompt-templates.md)
 - **Logs & output** — where logs for each session/stage live:
   [docs/logging.md](docs/logging.md)

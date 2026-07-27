@@ -1,4 +1,4 @@
-# Prompt Templates (`prompt/`)
+# Prompt Templates (`src/prompt/`)
 
 See [README.md](../README.md) for a summary. One `.md` file per prompt; edit them directly
 to customize harness behavior.
