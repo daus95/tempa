@@ -3,17 +3,30 @@
 See [README.md](../README.md) for a workflow summary. This document explains the details of
 the folder structure Tempa uses for the project you're working on.
 
-## What is a "working folder"?
+## What is a "working folder" (workspace)?
 
-A **working folder** is the root folder of the project you're working on (not Tempa's
-installation folder) along with its standard sub-folder structure — where Tempa reads
-specifications, documentation, code, and writes output (plans, QA reports, etc). Set
-**once** via `init` (see Workflow Step 1 in the README), stored in `config.json` under the
-`workspace` key.
+A **working folder** (workspace) is the root folder of the project you're working on (not
+Tempa's installation folder) along with its standard sub-folder structure — where Tempa reads
+specifications, documentation, code, and writes output (plans, QA reports, etc).
 
-Tempa only needs to know **one absolute path**: `workspace.root`. Every other sub-folder
-(both under `workspace` and `sources`, see below) is stored **relative** to this root, so no
-absolute path is repeated throughout the config.
+Set via `init <abs>` (see Workflow Step 1 in the README). Unlike everything else described in
+this doc, Tempa needs to know which workspace is active **before** it can even read
+`config.json` — since `config.json` itself now lives inside the workspace (see "Tempa's own
+folder" below). So `init` first writes a tiny pointer file, `.active-workspace`, at Tempa's
+own install root (one absolute path, nothing else) — then every other path (`workspace.root`
+and everything below it) is read from/stored in that workspace's own `config.json`.
+
+- `tempa close-folder` detaches the active workspace: it only deletes `.active-workspace`.
+  The workspace's own `.tempa/` folder (config, epic/session history, logs, QA reports,
+  specs) is left exactly as it was.
+- `tempa init <abs>` on a folder used before reopens it as-is (loads its existing
+  `.tempa/config.json` unchanged); on a new folder, it creates a fresh one.
+- This is how two workspaces stay independent: closing one and opening another never mixes
+  or overwrites either one's config/history.
+
+Every workspace sub-folder (both under `workspace` and `sources`, see below) is stored
+**relative** to `workspace.root`, so no absolute path (other than `root` itself) is repeated
+throughout the config.
 
 ## Working folder (`workspace`)
 
@@ -22,7 +35,7 @@ absolute path is repeated throughout the config.
 | `root` | parent folder of every other folder (**absolute**) | — (set by `init`) |
 | `docs` | **current** application documentation | `docs` |
 | `adr` | Architecture Decision Records | `adr` |
-| `specs` | **new** specifications to be worked on | `specs` |
+| `specs` | **new** specifications to be worked on | `.tempa/specs` (Tempa-managed, see below — kept alongside config/logs/qa/verify, unlike the other folders here which sit directly under root) |
 | `apps` | application implementation | `apps` |
 | `infra` | infrastructure scripts (e.g. docker compose) | `infra` |
 | `archive` | archive of old specs no longer in use | `archive` |
@@ -49,10 +62,10 @@ it. `docs` and `apps` mirror `workspace.docs`/`workspace.apps` exactly; `prd`, `
 
 | Key | Path (default) | Used by |
 |-----|------|--------------|
-| `prd` | `<specs>/prd` | **PRD** = the **new** specification to be worked on (incoming work folder) |
+| `prd` | `<specs>/prd` (i.e. `.tempa/specs/prd`) | **PRD** = the **new** specification to be worked on (incoming work folder) |
 | `docs` | `workspace.docs` | **current** system documentation — reference for "what already exists" |
-| `clarifications` | `<specs>/clarifications` | clarification results output |
-| `epics` | `<specs>/pbi/epics` | epic/feature/task output from plan drafting (automatic via `implement`) |
+| `clarifications` | `<specs>/clarifications` (i.e. `.tempa/specs/clarifications`) | clarification results output |
+| `epics` | `<specs>/pbi/epics` (i.e. `.tempa/specs/pbi/epics`) | epic/feature/task output from plan drafting (automatic via `implement`) |
 | `apps` | `workspace.apps` | monorepo root — **every service**; each service's source & tests live inside its own folder |
 
 To point any one of these somewhere else, set it explicitly under `sources` in `config.json`
@@ -73,15 +86,40 @@ explicit `sources.<key>` always overrides its computed default.
 > Absolute paths are still supported: if a `sources.*` value is already absolute, it's used
 > as-is (not joined with root).
 
-## Tempa's internal folders
+## The workspace's `.tempa/` folder
 
-These folders live inside **Tempa's own installation** (where `tempa.py` lives) — not in the
-project you're working on:
+Unlike the folders above, `config.json`, `logs/`, `qa/`, `verify/`, and `specs/` are NOT
+scattered across the workspace root or Tempa's own install — they all live together under one
+hidden folder **inside the active workspace**: `<workspace_root>/.tempa/`. That keeps every
+workspace's state self-contained, so switching to a different workspace and back never loses
+or overwrites anything.
 
-| Folder | Contents |
+| Folder/file | Contents |
 |--------|-----|
-| [`src/prompt/`](../src/prompt/) | prompt templates (`.md`), one file per prompt |
+| `.tempa/config.json` | this workspace's config — epic/session history, models, workspace/sources overrides, etc. |
+| `.tempa/logs/` | logs for every Claude session + the runner process log |
+| `.tempa/qa/` | QA reports per epic |
+| `.tempa/verify/` | manual verification reports (`verify`) |
+| `.tempa/specs/` | new specifications to be worked on (`workspace.specs`, `sources.prd/epics/clarifications` — see above) |
+
+`tempa init <abs>` creates `<abs>/.gitignore` (or appends to it) with a `.tempa/` entry, so
+none of this is committed to the workspace's own repo.
+
+`init`/`close-folder` only ever touch `.active-workspace` (see above) and the contents of
+`.tempa/` — they never read or write anything under `docs/`, `adr/`, `apps/`, `infra/`, or
+`archive/`.
+
+## Tempa's own folder (before any workspace is active)
+
+Until `init` is run for the first time (or right after `close-folder`), there's no active
+workspace to hold `.tempa/` — so Tempa falls back to the exact same layout inside its **own**
+install folder (where `tempa.py` lives): `<tempa_install>/.tempa/config.json`,
+`<tempa_install>/.tempa/logs/`, etc. This is scratch space only, so commands like
+`set-model`/`test`/`show-models` still work pre-`init`; it is never migrated into a workspace
+once one is selected.
+
+| File | Contents |
+|--------|-----|
+| [`src/prompt/`](../src/prompt/) | prompt templates (`.md`), one file per prompt — shipped with Tempa, not workspace-specific |
 | `docs/` (this folder) | supplementary README documentation |
-| `logs/` | logs for every Claude session + the runner process log |
-| `qa/` | QA reports per epic |
-| `verify/` | manual verification reports (`verify`) |
+| `.active-workspace` | the active-workspace pointer (absolute path, or absent = no active workspace) |

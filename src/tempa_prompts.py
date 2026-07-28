@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tempa_config import CONFIG_PATH, PROMPT_DIR, get_sources
+from tempa_config import PROMPT_DIR, get_config_path, get_sources
 from tempa_logging import log
 
 
@@ -44,7 +44,7 @@ def _resolve_template_params(config: dict, epic_name: str) -> dict:
     params = {
         "epic": epic_name,
         "sources": sources_str,
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(get_config_path()),
     }
     for key, value in sources.items():
         params[f"sources.{key}"] = value
@@ -116,7 +116,7 @@ def build_session_prompt(
     features_block = _build_features_block(config, epic)
 
     config_path_note = (
-        f"AGENT CONFIG FILE: {CONFIG_PATH}\n"
+        f"AGENT CONFIG FILE: {get_config_path()}\n"
         f"Always use Read first, then Edit. Do not use Glob — use the absolute path above.\n"
     )
     if features_per_session:
@@ -124,7 +124,7 @@ def build_session_prompt(
             f"MANDATORY RULE — DO NOT SKIP:\n"
             f"Implement or fix the features from the 🔧 and ⬜ list above, one at a time, in order.\n"
             f"Every time you finish 1 feature:\n"
-            f"  1. READ {CONFIG_PATH} then EDIT:\n"
+            f"  1. READ {get_config_path()} then EDIT:\n"
             f"     a. Find the entry with \"epic_name\": \"{epic}\" in the \"epic\" array\n"
             f"     b. In that entry's \"features\" array, find the object whose \"id\" = the feature just finished\n"
             f"     c. Change its \"status\" to \"done\"\n"
@@ -141,7 +141,7 @@ def build_session_prompt(
             f"MANDATORY RULE — DO THIS EVERY TIME YOU FINISH 1 FEATURE (before moving to the next one):\n"
             f"A 🔧 feature means it's already implemented but has QA findings — fix it per the QA report.\n"
             f"A ⬜ feature means it was never built — implement it from scratch.\n"
-            f"  1. READ {CONFIG_PATH} then EDIT:\n"
+            f"  1. READ {get_config_path()} then EDIT:\n"
             f"     a. Find the entry with \"epic_name\": \"{epic}\" in the \"epic\" array\n"
             f"     b. In that entry's \"features\" array, find the object whose \"id\" = the feature just finished\n"
             f"     c. Change its \"status\" to \"done\"\n"
@@ -150,7 +150,7 @@ def build_session_prompt(
             f"       is the overall epic status — DO NOT change it until all features are done\n"
             f"\n"
             f"MANDATORY RULE — AFTER THE ENTIRE EPIC IS DONE:\n"
-            f"  READ {CONFIG_PATH} then EDIT: change \"status\" AT THE EPIC LEVEL\n"
+            f"  READ {get_config_path()} then EDIT: change \"status\" AT THE EPIC LEVEL\n"
             f"  (the field directly on the entry \"epic_name\": \"{epic}\", not \"status\" inside the \"features\" array)\n"
             f"  to \"done\".\n"
             f"  ⚠ CRITICAL: If the epic's \"status\" is not changed to \"done\",\n"
@@ -179,7 +179,7 @@ def build_clarification_prompt(config: dict) -> str:
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(get_config_path()),
     }
     return build_prompt(template, params)
 
@@ -190,7 +190,7 @@ def build_apply_clarification_prompt(config: dict) -> str:
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(get_config_path()),
     }
     return build_prompt(template, params)
 
@@ -201,7 +201,7 @@ def build_auto_answer_prompt(config: dict) -> str:
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(get_config_path()),
     }
     return build_prompt(template, params)
 
@@ -214,7 +214,7 @@ def _plan_epics_params(config: dict) -> dict:
         "sources.docs": sources.get("docs", ""),
         "sources.epics": sources.get("epics", ""),
         "sources.apps": sources.get("apps", ""),
-        "config_path": str(CONFIG_PATH),
+        "config_path": str(get_config_path()),
     }
 
 

@@ -42,12 +42,12 @@ def _workspace_root() -> str:
 
 
 def _workspace_can_close() -> bool:
-    """Whether the Home page's "close working folder" icon should be shown/allowed —
-    only once the harness's own state has already been cleared via `tempa clear`
-    ("epic" array emptied, last_auto_answer reset to 0), mirroring the same
-    precondition tempa.py's run_close_folder() enforces server-side."""
-    config = _load_dashboard_config()
-    return not (config.get("epic") or []) and not config.get("last_auto_answer", 0)
+    """Whether the Home page's "close working folder" icon should be shown/allowed.
+    Always true while a workspace is active — closing only drops the active-workspace
+    pointer (see tempa_config.clear_active_workspace_root()); the workspace's own
+    .tempa/ folder (epic/session state, logs, qa, specs) is never touched, so there's
+    nothing left to protect against."""
+    return True
 
 
 def _resolve_source_dir(source_key: str, specs_fallback: str) -> Path:

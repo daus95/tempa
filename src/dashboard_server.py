@@ -480,8 +480,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_workspace_init(self) -> None:
         """"Select Working Folder" on the Home page: open a native folder picker, then
-        run `tempa.py init <folder>` (same as the CLI) to stamp workspace.root into
-        config.json and scaffold the default working folders under it."""
+        run `tempa.py init <folder>` (same as the CLI) to make it the active workspace —
+        pointing Tempa at `<folder>/.tempa/config.json` (created fresh, or loaded as-is if
+        this folder was used before) — and scaffold the default working folders under it."""
         root = _pick_folder_dialog()
         if root is None:
             self._send_json(200, {"ok": False, "cancelled": True})
@@ -534,17 +535,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True})
 
     def _handle_workspace_close(self) -> None:
-        """Clear workspace.root — the "✕" icon next to the working-folder path,
-        shown only once _workspace_can_close() is true. Shells out to
-        `tempa.py close-folder` (same subprocess pattern as init/clear) so the
-        precondition check and config.json write stay in one place."""
-        if not _workspace_can_close():
-            self._send_json(409, {
-                "ok": False,
-                "error": "Run Clear All first — the working folder can only be closed "
-                         "once the epic array is empty and last_auto_answer is 0.",
-            })
-            return
+        """Detach the active workspace — the "✕" icon next to the working-folder path.
+        Shells out to `tempa.py close-folder` (same subprocess pattern as init/clear) so
+        the pointer-clearing logic stays in one place. Always available while a workspace
+        is active — it only drops the active-workspace pointer, the workspace's own
+        .tempa/ folder is never touched, so there's nothing to gate on."""
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
         cmd = [sys.executable, str(tempa_py), "close-folder"]
         try:

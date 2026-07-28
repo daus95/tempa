@@ -17,7 +17,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from tempa_config import LOGS_DIR
+from tempa_config import get_logs_dir
 
 # The prompt sent to Claude is NOT shown on the console unless the user adds
 # --show-prompt. (The prompt is always recorded to the log file regardless.)
@@ -50,9 +50,10 @@ _process_log_lock = threading.Lock()
 
 def _init_process_log() -> None:
     global _process_log_path
-    LOGS_DIR.mkdir(exist_ok=True)
+    logs_dir = get_logs_dir()
+    logs_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    _process_log_path = LOGS_DIR / f"process_{timestamp}.txt"
+    _process_log_path = logs_dir / f"process_{timestamp}.txt"
 
 
 def process_log_path() -> Path | None:

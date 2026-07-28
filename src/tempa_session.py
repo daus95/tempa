@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from tempa_config import (
-    LOGS_DIR, QA_DIR, WORKING_DIR, get_model, load_config, save_config,
+    WORKING_DIR, get_logs_dir, get_model, get_qa_dir, load_config, save_config,
 )
 from tempa_logging import SHOW_PROMPT, _state, _banner, _print_log_tail, log
 
@@ -284,9 +284,10 @@ def _run_claude_session(
     progress thread down cleanly. `cmd_builder(claude_exe)` builds the CLI command once the
     executable has been resolved. Returns (exit_code, log_path); exit_code is -1 if the
     `claude` executable could not even be found/started (the error is written to the log)."""
-    LOGS_DIR.mkdir(exist_ok=True)
+    logs_dir = get_logs_dir()
+    logs_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = LOGS_DIR / f"{log_prefix}_{timestamp}.txt"
+    log_path = logs_dir / f"{log_prefix}_{timestamp}.txt"
 
     start_time = datetime.now()
     start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -460,7 +461,7 @@ def run_qa_session(
     resume_session_id: str | None = None,
 ) -> None:
 
-    QA_DIR.mkdir(exist_ok=True)
+    get_qa_dir().mkdir(parents=True, exist_ok=True)
     action = "Resuming" if resume_session_id else "Starting"
 
     on_json_event, _ = _capture_session_id(index, "qa_session_id", resume_session_id, f"QA [{session_label}]")

@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from tempa_config import CONFIG_PATH, POLL_INTERVAL_SEC, SCRIPT_DIR, WORKING_DIR, load_config
+from tempa_config import POLL_INTERVAL_SEC, WORKING_DIR, get_config_path, get_qa_dir, load_config
 from tempa_implement import main
 from tempa_clarify import (
     run_answer_command, run_clarify_answer, run_clarify_apply,
@@ -50,7 +50,7 @@ def print_help() -> None:
 Agent Runner — Qlar Medical Clinic Back-Office
 ===============================================
 
-Config  : {CONFIG_PATH}
+Config  : {get_config_path()}
 Work dir: {WORKING_DIR}
 Poll    : {POLL_INTERVAL_SEC}s
 
@@ -62,7 +62,8 @@ USAGE
   tempa set-folders --root <abs> [--docs r] [--adr r] [--specs r] [--apps r] [--infra r] [--archive r]
                                   Only set the default working folders (without creating them on disk)
   tempa show-folders         Show the active working folders (+ resolved absolute paths)
-  tempa close-folder         Clear workspace.root (requires epic=[] and last_auto_answer=0 first)
+  tempa close-folder         Detach the active workspace (its config/logs/qa/specs stay put in
+                                  <root>/.tempa/, untouched — reopen it later with `init` to resume)
   tempa set-model [--clarify m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-5, sonnet-5, ...)
   tempa show-models          Show the AI model per stage
@@ -79,7 +80,7 @@ USAGE
   tempa clarify --auto-answer  Automatically answer unanswered clarification findings (without re-evaluating)
   tempa clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
   tempa clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
-  tempa clarify --clear      Delete all files in specs/clarifications except claude.md (asks for confirmation; --yes to skip)
+  tempa clarify --clear      Delete all files in .tempa/specs/clarifications except claude.md (asks for confirmation; --yes to skip)
 
   -- Plan & Start Implementation --
   tempa implement            Start the agent runner (polls every {POLL_INTERVAL_SEC}s).
@@ -87,12 +88,12 @@ USAGE
                                   plan (lay out Epic/Feature/Task from the PRD) automatically first.
   tempa implement --replan   Force re-running plan first, then continue/start implementation
   tempa implement --features 4  Start with a limit of 4 features per session (overrides config)
-  tempa implement --clear-plan  Clear plan: delete ALL contents of the specs/pbi folder + empty the "epic" array (asks for confirmation; --yes to skip)
+  tempa implement --clear-plan  Clear plan: delete ALL contents of the .tempa/specs/pbi folder + empty the "epic" array (asks for confirmation; --yes to skip)
                                   (plan generation itself is now part of implement, see above)
   tempa implement --reset         Reset on_progress → pending (clears session_id)
   tempa implement --reset-failed  Reset all failed → pending
   tempa implement --reset-qa      Reset qa_passed=false for all done epics (forces QA to re-run)
-  tempa implement --clear    Delete ALL files in the qa/ and logs/ folders (asks for confirmation; --yes to skip)
+  tempa implement --clear    Delete ALL files in the workspace's .tempa/qa and .tempa/logs folders (asks for confirmation; --yes to skip)
 
   -- Monitoring & Utilities --
   tempa dashboard            Open the web dashboard (Home / Specification / Clarification / Implementation
@@ -112,20 +113,23 @@ CONFIG OPTIONS (config.json)
   workspace.root                  Root folder (MUST be absolute) — every other folder is relative to this
   workspace.docs                  Current application documentation folder (default: docs)
   workspace.adr                   Architecture decision record folder (default: adr)
-  workspace.specs                 NEW specification folder to be worked on (default: specs)
+  workspace.specs                 NEW specification folder to be worked on (default: specs, stored
+                                      under <root>/.tempa/ rather than directly under root)
   workspace.apps                  Application implementation folder (default: apps)
   workspace.infra                 Infrastructure scripts folder, e.g. docker compose (default: infra)
   workspace.archive                Archive folder for old, unused specifications (default: archive)
   sources.*                       DERIVED from workspace.* by default (see below); set a key here to override it
                                       (relative to workspace.root, absolute paths also supported)
-  sources.prd                     PRD folder = the NEW specification to be worked on (default: workspace.specs/prd)
+  sources.prd                     PRD folder = the NEW specification to be worked on (default: workspace.specs/prd,
+                                      i.e. <root>/.tempa/specs/prd)
   sources.docs                    CURRENT system documentation folder, reference for 'what already exists'
                                       (default: workspace.docs)
   sources.epics                   Path to the epic spec folder, plan output, run via implement
-                                      (default: workspace.specs/pbi/epics)
+                                      (default: workspace.specs/pbi/epics, i.e. <root>/.tempa/specs/pbi/epics)
   sources.apps                    Monorepo root, ALL services; each service's src & tests live inside it
                                       (default: workspace.apps)
-  sources.clarifications          Clarification results folder (default: workspace.specs/clarifications)
+  sources.clarifications          Clarification results folder (default: workspace.specs/clarifications,
+                                      i.e. <root>/.tempa/specs/clarifications)
   models.clarify                  AI model for clarify (default: claude-opus-5)
   models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
@@ -154,7 +158,7 @@ SESSION STATUS
 QA STATUS (qa_passed field per epic)
   false (🔍)   QA has not run yet — the runner will run QA before the next implementation
   true  (✅)   QA has passed — the next epic's implementation may start
-  QA reports are saved at: {SCRIPT_DIR / "qa"}
+  QA reports are saved at: {get_qa_dir()}
 
 PROGRESS ({done}/{total} epics done)""")
 
