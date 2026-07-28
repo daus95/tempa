@@ -27,7 +27,7 @@ from tempa_maintenance import (
     _reset_failed_epics, _reset_on_progress_epics, _reset_qa_state,
 )
 from tempa_commands import (
-    print_models, print_status, print_workspace, run_close_folder,
+    print_models, print_principles, print_status, print_workspace, run_close_folder,
     run_dashboard_command, run_init, run_spec_show, run_test, run_verify,
     set_models, set_working_folders,
 )
@@ -67,6 +67,8 @@ USAGE
   tempa set-model [--clarify m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-5, sonnet-5, ...)
   tempa show-models          Show the AI model per stage
+  tempa show-principles      Show the architecture principles applied to every stage's prompt
+                                  (optional; set them in the dashboard's Architecture Principles page)
   tempa test                 Permission test (verifies the claude CLI runs)
   tempa --help               Show this help
 
@@ -147,6 +149,8 @@ PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in c
   src/prompt/review_epics.md          Prompt to review & fix the result (plan, run via implement)
   Available placeholders: ${{epic}}, ${{sources}}, ${{sources.<key>}}, ${{config_path}},
   ${{output_file}}, ${{qa_output_file}} (depends on the prompt).
+  The workspace's architecture principles (.tempa/architecture-principles.md) are prepended to
+  EVERY prompt above automatically — no placeholder needed. See: tempa show-principles
 
 SESSION STATUS
   pending        Not started yet
@@ -204,6 +208,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--implement")
 
     sub.add_parser("show-models", parents=[common], add_help=False)
+    sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
 
@@ -307,6 +312,8 @@ def run() -> None:
         set_models(cli_args)
     elif cli_args.command == "show-models":
         print_models()
+    elif cli_args.command == "show-principles":
+        print_principles()
     elif cli_args.command == "test":
         run_test()
     elif cli_args.command == "dashboard":

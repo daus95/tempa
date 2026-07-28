@@ -125,7 +125,12 @@
   .home-step-num { display: inline-flex; align-items: center; justify-content: center;
     width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff;
     font-weight: 700; font-size: 0.85rem; flex: none; }
+  .home-step-icon { font-size: 1.15rem; width: 26px; text-align: center; flex: none; }
   .home-step-title { font-weight: 700; font-size: 1.02rem; }
+  .home-step-badge { color: var(--muted); border: 1px solid var(--border-strong);
+    border-radius: 20px; padding: 1px 9px; font-size: 0.7rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .home-step-optional { border-style: dashed; }
   .home-step-desc { color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
   .home-step-actions { display: flex; gap: 12px; flex-wrap: wrap; }
   .home-step-status { margin-top: 10px; font-size: 0.88rem; color: var(--text); }
@@ -328,6 +333,10 @@
   .settings-field-desc { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; max-width: 640px; }
   .settings-field select, .settings-field input[type="number"] { width: 100%; max-width: 320px;
     padding: 7px 10px; font-size: 0.9rem; border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg); color: var(--text); }
+  .principles-editor { width: 100%; min-height: 340px; resize: vertical; padding: 12px 14px;
+    font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace; tab-size: 4;
+    border: 1px solid var(--border-strong); border-radius: 6px;
     background: var(--bg); color: var(--text); }
   .settings-actions { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
   .settings-save-status { color: var(--ok); font-size: 0.88rem; }

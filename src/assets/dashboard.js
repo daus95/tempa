@@ -10,6 +10,7 @@ const INITIAL_WORKSPACE_ROOT = /*__WORKSPACE_ROOT__*/null;
 const INITIAL_WORKSPACE_CAN_CLOSE = /*__WORKSPACE_CAN_CLOSE__*/null;
 const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
 const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
+const INITIAL_PRINCIPLES_SET = /*__PRINCIPLES_SET__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -178,9 +179,13 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
-  settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus");
+  settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
+  homePrinciplesBtn = $("homePrinciplesBtn"), homeStepPrinciplesStatus = $("homeStepPrinciplesStatus"),
+  principlesEditor = $("principlesEditor"), principlesSaveBtn = $("principlesSaveBtn"),
+  principlesSaveStatus = $("principlesSaveStatus");
 
-const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl", "settings"];
+const PANES = ["home", "spec", "specOverview", "clarify", "clarifyOverview", "impl", "settings",
+  "principles"];
 
 const state = {
   specTree: INITIAL_SPEC_TREE,
@@ -205,6 +210,7 @@ const state = {
   workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE || { hasRun: false, lastAction: null, critical: 0, ready: false },
+  principlesSet: !!INITIAL_PRINCIPLES_SET,
   epics: [],
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
@@ -329,6 +335,7 @@ function renderSidebar() {
   treeEl.appendChild(renderClarifySection());
   treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
+  treeBottomEl.appendChild(renderLeafSection("principles", "📐", "Architecture Principles", !state.workspaceInitialized));
   treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings", !state.workspaceInitialized));
 }
 
@@ -348,6 +355,9 @@ async function selectTop(key) {
   } else if (key === "settings") {
     renderSettings();
     showPane("settings");
+  } else if (key === "principles") {
+    renderPrinciples();
+    showPane("principles");
   } else if (key === "specification") {
     state.specShowingOverview = true;
     renderSpecOverview();
@@ -370,6 +380,10 @@ function renderHomeWorkflow() {
 
   homeWorkspacePath.textContent = state.workspaceRoot;
   homeWorkspaceCloseBtn.classList.toggle("hidden", !state.workspaceCanClose);
+
+  homeStepPrinciplesStatus.textContent = state.principlesSet
+    ? "Set — applied to every clarification, plan, implementation, and QA prompt."
+    : "Not set — Tempa runs without project-wide principles.";
 
   const specCount = countSpecFiles(state.specTree);
   const step1Done = specCount > 0;
@@ -462,6 +476,8 @@ homeWorkspaceCloseBtn.addEventListener("click", async (e) => {
     homeWorkspaceCloseBtn.disabled = false;
   }
 });
+
+homePrinciplesBtn.addEventListener("click", () => selectTop("principles"));
 
 homeAddFileBtn.addEventListener("click", () => { addFileInput.value = ""; addFileInput.click(); });
 homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; addFolderInput.click(); });
@@ -1194,6 +1210,51 @@ settingsSaveBtn.addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Architecture Principles
+// ---------------------------------------------------------------------------
+async function renderPrinciples() {
+  principlesSaveStatus.textContent = "";
+  principlesSaveStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/principles");
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Could not load the principles.", true); return; }
+    principlesEditor.value = data.content;
+    state.principlesSet = !!data.content;
+  } catch (e) {
+    toast("Network error loading the principles.", true);
+  }
+}
+
+principlesSaveBtn.addEventListener("click", async () => {
+  principlesSaveBtn.disabled = true;
+  principlesSaveStatus.textContent = "";
+  principlesSaveStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/principles/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: principlesEditor.value }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      principlesSaveStatus.textContent = data.error || "Could not save the principles.";
+      principlesSaveStatus.classList.add("err");
+      return;
+    }
+    principlesEditor.value = data.content;
+    state.principlesSet = !!data.content;
+    toast(data.content ? "Architecture principles saved." : "Architecture principles cleared.");
+    selectTop("home");
+  } catch (e) {
+    principlesSaveStatus.textContent = "Network error while saving.";
+    principlesSaveStatus.classList.add("err");
+  } finally {
+    principlesSaveBtn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Specification: open / mode / save
 // ---------------------------------------------------------------------------
 async function openSpecFile(node) {
@@ -1304,6 +1365,7 @@ async function refreshSpecTree() {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
@@ -1556,6 +1618,7 @@ async function refreshClarifyList() {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
@@ -1595,6 +1658,7 @@ $("refreshBtn").addEventListener("click", async () => {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();

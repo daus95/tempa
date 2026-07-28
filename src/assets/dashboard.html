@@ -56,6 +56,20 @@
             <span class="home-workspace-path" id="homeWorkspacePath" title="Open in Explorer"></span>
             <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder">✕</button>
           </div>
+          <div class="home-step home-step-optional" id="homeStepPrinciples">
+            <div class="home-step-header">
+              <span class="home-step-icon">📐</span>
+              <span class="home-step-title">Architecture Principles</span>
+              <span class="home-step-badge">Optional</span>
+            </div>
+            <p class="home-step-desc">Project-wide rules Tempa applies to every stage — clarification, planning, implementation, and QA. Skip this and go straight to step 1 if you don't need them.</p>
+            <div class="home-step-actions">
+              <button type="button" class="clarify-run-btn secondary" id="homePrinciplesBtn">
+                <span>📐</span><span>Set / View Principles</span>
+              </button>
+            </div>
+            <div class="home-step-status" id="homeStepPrinciplesStatus"></div>
+          </div>
           <div class="home-step" id="homeStep1">
             <div class="home-step-header">
               <span class="home-step-num">1</span>
@@ -251,6 +265,33 @@
             <span>💾</span><span>Save Settings</span>
           </button>
           <span class="settings-save-status" id="settingsSaveStatus"></span>
+        </div>
+      </div>
+      <div id="principlesPane" class="pane settings-pane hidden">
+        <div class="settings-header">
+          <h2>Architecture Principles</h2>
+          <p class="settings-intro">
+            The standing rules of this project — technology choices, conventions, and quality bars
+            that apply everywhere. Tempa prepends them to <strong>every</strong> prompt it sends:
+            clarification, applying answers, planning, implementation, QA, and verification. That's
+            what keeps the same rules in force across sessions that don't otherwise share memory.
+            Optional — leave it empty and nothing is injected.
+            <a href="/architecture-principles" target="_blank" rel="noopener">Learn more →</a>
+          </p>
+        </div>
+        <div class="settings-group">
+          <div class="settings-field">
+            <label for="principlesEditor">Principles</label>
+            <p class="settings-field-desc">Free-form Markdown. Write rules specific enough to check, and keep the list short — every line here is enforced as non-negotiable. Saved to <code>.tempa/architecture-principles.md</code> in your working folder. Clearing this box removes the principles entirely.</p>
+            <textarea id="principlesEditor" class="principles-editor" spellcheck="false"
+              placeholder="e.g.&#10;- PostgreSQL 16 is the only datastore.&#10;- All database access goes through repository classes. No SQL in route handlers.&#10;- Every endpoint has an integration test against a real database."></textarea>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="clarify-run-btn" id="principlesSaveBtn">
+            <span>💾</span><span>Save Principles</span>
+          </button>
+          <span class="settings-save-status" id="principlesSaveStatus"></span>
         </div>
       </div>
     </div>

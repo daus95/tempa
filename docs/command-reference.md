@@ -10,6 +10,7 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `close-folder` | Detaches the active workspace (drops the active-workspace pointer only — the workspace's own `.tempa/` folder is left untouched, ready to reopen) |
 | `set-model [--clarify m] [--plan m] [--implement m]` | Sets the AI model per stage (alias/id) |
 | `show-models` | Shows the AI model per stage |
+| `show-principles` | Shows the [architecture principles](architecture-principles.md) prepended to every stage's prompt (optional; edited in the dashboard) |
 | `dashboard` | Opens the web dashboard (Home / Specification / Clarification / Implementation) |
 | `spec --show` | Opens the dashboard directly on the Specification section |
 | `clarify` | Clarify the PRD — one manual evaluation pass (human-in-the-loop), then opens the clarification-answer web UI on the result (unless `--noui`); saving in the UI auto-applies the answers, then asks whether to run another round |

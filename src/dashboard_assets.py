@@ -11,6 +11,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+import tempa_config
+
 from dashboard_config import _workspace_can_close, _workspace_initialized, _workspace_root
 from dashboard_clarify_parse import _clarify_finalize_status, _live_clarification_findings
 
@@ -27,6 +29,16 @@ def _page_template() -> str:
     return html.replace("/*__CSS__*/", css).replace("/*__JS__*/", js)
 
 
+@lru_cache(maxsize=1)
+def principles_guide_page() -> str:
+    """The "Learn more" page linked from the Architecture Principles pane. A standalone
+    document (opened in its own tab) that inlines the same stylesheet, so it inherits the
+    dashboard's markdown typography and light/dark theming."""
+    html = (ASSET_DIR / "principles-guide.html").read_text(encoding="utf-8")
+    css = (ASSET_DIR / "dashboard.css").read_text(encoding="utf-8")
+    return html.replace("/*__CSS__*/", css)
+
+
 def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
                   clarify_answered: list[dict], initial_view: str) -> str:
     tree_json = json.dumps(spec_tree, ensure_ascii=False)
@@ -37,6 +49,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     workspace_initialized_json = json.dumps(_workspace_initialized())
     workspace_root_json = json.dumps(_workspace_root())
     workspace_can_close_json = json.dumps(_workspace_can_close())
+    principles_set_json = json.dumps(bool(tempa_config.read_principles()))
     live_findings = _live_clarification_findings(clarify_unanswered + clarify_answered)
     clarify_findings_json = json.dumps(live_findings, ensure_ascii=False)
     clarify_finalize_json = json.dumps(_clarify_finalize_status(live_findings), ensure_ascii=False)
@@ -50,6 +63,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__WORKSPACE_INITIALIZED__*/null", workspace_initialized_json)
         .replace("/*__WORKSPACE_ROOT__*/null", workspace_root_json)
         .replace("/*__WORKSPACE_CAN_CLOSE__*/null", workspace_can_close_json)
+        .replace("/*__PRINCIPLES_SET__*/null", principles_set_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
     )

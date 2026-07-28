@@ -1,2 +1,5 @@
 tempa text eol=lf
 tempa.cmd text eol=crlf
+"Open Dashboard.command" text eol=lf
+"Open Dashboard.sh" text eol=lf
+"Open Dashboard.cmd" text eol=crlf

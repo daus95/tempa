@@ -18,9 +18,9 @@ from dashboard_ui import run_dashboard
 
 from tempa_config import (
     DEFAULT_WORKSPACE, WORKING_DIR, WORKSPACE_LABELS,
-    clear_active_workspace_root, get_logs_dir, get_model, get_models, get_qa_dir,
-    get_sources, get_verify_dir, get_workspace, load_config, resolve_workspace_paths,
-    save_config, set_active_workspace_root, _resolve_model_alias,
+    clear_active_workspace_root, get_logs_dir, get_model, get_models, get_principles_path,
+    get_qa_dir, get_sources, get_verify_dir, get_workspace, load_config, read_principles,
+    resolve_workspace_paths, save_config, set_active_workspace_root, _resolve_model_alias,
 )
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
@@ -338,6 +338,20 @@ def print_models(config: dict | None = None) -> None:
     }
     for stage in ("clarify", "plan", "implement"):
         print(f"  {labels[stage]:<34} {models.get(stage, '?')}", flush=True)
+
+
+def print_principles() -> None:
+    """Display the workspace's architecture principles, applied to every stage's prompt."""
+    _banner("ARCHITECTURE PRINCIPLES")
+    print(f"  File: {get_principles_path()}", flush=True)
+    print(flush=True)
+    principles = read_principles()
+    if not principles:
+        print("  Not set — Tempa runs without project-wide principles.", flush=True)
+        print("  Set them in the dashboard (tempa dashboard -> Architecture Principles).", flush=True)
+        return
+    for line in principles.splitlines():
+        print(f"  {line}", flush=True)
 
 
 def set_models(args: argparse.Namespace) -> None:
