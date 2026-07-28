@@ -328,7 +328,7 @@ function renderSidebar() {
   treeEl.appendChild(renderClarifySection());
   treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
-  treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings"));
+  treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings", !state.workspaceInitialized));
 }
 
 async function selectTop(key) {

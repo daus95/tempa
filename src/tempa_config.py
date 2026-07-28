@@ -168,11 +168,19 @@ def load_config() -> dict:
     exist yet (e.g. a brand-new workspace, or a fresh clone) so every caller gets a usable
     dict instead of a FileNotFoundError. Resolved fresh on every call via get_config_path(),
     so it always reflects whichever workspace is currently active (see
-    get_active_workspace_root())."""
+    get_active_workspace_root()).
+
+    The default is only written to disk when a workspace is actually active. With no
+    active workspace (fresh install, or after `close-folder`), read-only callers like
+    `--help`/`status`/`dashboard` would otherwise recreate a useless config.json in
+    Tempa's own install folder just by being run. Commands that intentionally use that
+    folder as pre-init scratch space (`set-model`, `set-folders`, `test`) still persist
+    there fine — they call save_config() themselves once the user actually sets something."""
     config_path = get_config_path()
     if not config_path.exists():
         config = copy.deepcopy(DEFAULT_CONFIG)
-        save_config(config)
+        if get_active_workspace_root() is not None:
+            save_config(config)
         return config
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
