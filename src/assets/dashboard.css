@@ -129,6 +129,13 @@
   .home-step-desc { color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
   .home-step-actions { display: flex; gap: 12px; flex-wrap: wrap; }
   .home-step-status { margin-top: 10px; font-size: 0.88rem; color: var(--text); }
+  .home-step2-file-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex;
+    flex-direction: column; gap: 6px; }
+  .home-step2-file-item { display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
+    background: var(--bg); cursor: pointer; font-size: 0.85rem; }
+  .home-step2-file-item:hover { background: var(--border-strong); }
+  .home-step2-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .home-danger-zone { max-width: 720px; margin: 32px auto 0; padding-top: 20px;
     border-top: 1px solid var(--border); text-align: center; }
   .home-clear-btn { background: var(--panel); color: var(--danger); border-color: var(--danger);
