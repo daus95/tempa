@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from tempa_config import (
-    LOGS_DIR, QA_DIR, get_sources, get_workspace, load_config, save_config,
+    get_logs_dir, get_qa_dir, get_sources, get_workspace, load_config, save_config,
 )
 from tempa_logging import _banner, log
 
@@ -46,17 +46,19 @@ def _safety_check_clear_target(dir_path: Path, root: str) -> None:
 
 
 def _do_clear_implement() -> tuple[int, int]:
-    """Delete all contents of QA_DIR and LOGS_DIR (the harness's own qa/log output — not
-    workspace-relative). Returns (qa file count, logs file count) deleted."""
+    """Delete all contents of the active workspace's qa/ and logs/ folders (under
+    .tempa/, not workspace.root-relative). Returns (qa file count, logs file count) deleted."""
+    qa_dir = get_qa_dir()
     qa_count = 0
-    if QA_DIR.exists():
-        qa_count = sum(1 for p in QA_DIR.rglob("*") if p.is_file())
-        for child in QA_DIR.iterdir():
+    if qa_dir.exists():
+        qa_count = sum(1 for p in qa_dir.rglob("*") if p.is_file())
+        for child in qa_dir.iterdir():
             shutil.rmtree(child) if child.is_dir() else child.unlink()
+    logs_dir = get_logs_dir()
     logs_count = 0
-    if LOGS_DIR.exists():
-        logs_count = sum(1 for p in LOGS_DIR.rglob("*") if p.is_file())
-        for child in LOGS_DIR.iterdir():
+    if logs_dir.exists():
+        logs_count = sum(1 for p in logs_dir.rglob("*") if p.is_file())
+        for child in logs_dir.iterdir():
             shutil.rmtree(child) if child.is_dir() else child.unlink()
     return qa_count, logs_count
 
@@ -158,22 +160,24 @@ def run_plan_clear() -> None:
 
 
 def run_implement_clear() -> None:
-    """Delete all contents of the harness's own qa/ and logs/ folders (QA reports & session
-    logs — not workspace-relative, always SCRIPT_DIR/qa and SCRIPT_DIR/logs). Asks for
-    interactive confirmation before deleting. Skip confirmation with --yes."""
-    qa_files = [p for p in QA_DIR.rglob("*") if p.is_file()] if QA_DIR.exists() else []
-    log_files = [p for p in LOGS_DIR.rglob("*") if p.is_file()] if LOGS_DIR.exists() else []
+    """Delete all contents of the active workspace's own qa/ and logs/ folders (QA reports &
+    session logs, under <workspace_root>/.tempa/ — not workspace.root-relative otherwise).
+    Asks for interactive confirmation before deleting. Skip confirmation with --yes."""
+    qa_dir = get_qa_dir()
+    logs_dir = get_logs_dir()
+    qa_files = [p for p in qa_dir.rglob("*") if p.is_file()] if qa_dir.exists() else []
+    log_files = [p for p in logs_dir.rglob("*") if p.is_file()] if logs_dir.exists() else []
 
     if not qa_files and not log_files:
-        log(f"Nothing to clear — {QA_DIR} and {LOGS_DIR} are already empty.")
+        log(f"Nothing to clear — {qa_dir} and {logs_dir} are already empty.")
         sys.exit(0)
 
     _banner("IMPLEMENT CLEAR — DESTRUCTIVE ACTION")
-    print(f"  Delete: {QA_DIR} ({len(qa_files)} file(s)) | {LOGS_DIR} ({len(log_files)} file(s))", flush=True)
+    print(f"  Delete: {qa_dir} ({len(qa_files)} file(s)) | {logs_dir} ({len(log_files)} file(s))", flush=True)
     _confirm_destructive("Implement clear CANCELLED — nothing was changed.")
 
     qa_count, logs_count = _do_clear_implement()
-    log(f"Implement clear done — {qa_count} file(s) deleted in {QA_DIR}, {logs_count} file(s) deleted in {LOGS_DIR}.")
+    log(f"Implement clear done — {qa_count} file(s) deleted in {qa_dir}, {logs_count} file(s) deleted in {logs_dir}.")
     sys.exit(0)
 
 
@@ -199,8 +203,10 @@ def run_clear_all() -> None:
     _safety_check_clear_target(pbi_dir, root)
     _safety_check_clear_target(clar_dir, root)
 
-    qa_files = [p for p in QA_DIR.rglob("*") if p.is_file()] if QA_DIR.exists() else []
-    log_files = [p for p in LOGS_DIR.rglob("*") if p.is_file()] if LOGS_DIR.exists() else []
+    qa_dir = get_qa_dir()
+    logs_dir = get_logs_dir()
+    qa_files = [p for p in qa_dir.rglob("*") if p.is_file()] if qa_dir.exists() else []
+    log_files = [p for p in logs_dir.rglob("*") if p.is_file()] if logs_dir.exists() else []
     plan_files = [p for p in pbi_dir.rglob("*") if p.is_file()] if pbi_dir.exists() else []
     epic_count = len((config.get("epic") or []))
     keep = {"claude.md"}
@@ -219,7 +225,7 @@ def run_clear_all() -> None:
         sys.exit(0)
 
     _banner("CLEAR ALL — DESTRUCTIVE ACTION")
-    print(f"  Implement : {QA_DIR} ({len(qa_files)} file(s)) | {LOGS_DIR} ({len(log_files)} file(s))", flush=True)
+    print(f"  Implement : {qa_dir} ({len(qa_files)} file(s)) | {logs_dir} ({len(log_files)} file(s))", flush=True)
     print(f"  Plan      : {pbi_dir} ({len(plan_files)} file(s), all sub-folders) | "
           f"empty \"epic\" array: config.json ({epic_count} entry(ies) → 0)", flush=True)
     print(f"  Clarify   : {clar_dir} ({len(clar_to_delete)} item(s), except claude.md)", flush=True)

@@ -161,10 +161,10 @@ console output; **Stop Implementation** is available while it's running.
 (your specification files are never touched) — useful for restarting the clarification or
 implementation loop from scratch. This cannot be undone.
 
-The **✕** next to the working-folder path (top of Home) appears once **Clear All** has been
-run — it closes the link to the current project (clears `workspace.root` in `config.json`;
-no files are deleted, same as `tempa close-folder` on the CLI) so you can point Tempa at a
-different project next.
+The **✕** next to the working-folder path (top of Home) detaches the current project (same
+as `tempa close-folder` on the CLI) — no files are deleted, it just drops the link so you can
+point Tempa at a different project next. The current project's config/history stays in its
+own `.tempa/` folder, ready to resume if you point Tempa back at it later.
 
 > The folder picker, "open in explorer", and the **✕** icon are Windows-only conveniences.
 > On macOS/Linux, set the working folder with `tempa init <path>` (CLI) first, then use the
@@ -210,26 +210,31 @@ tempa init C:\repo\<your-repo>
 
 This command will:
 
-- Save the project location (`workspace.root`) to `config.json`.
+- Make this project the active workspace, and save its config to
+  `<your-repo>\.tempa\config.json` (reused as-is if you've pointed Tempa at this project
+  before — otherwise created fresh).
 - Create the standard working folders in your project if they don't already exist — one of
-  them being the `specs` folder, where you'll place the specification you want to work on.
+  them being the `specs` folder (kept inside `.tempa/`), where you'll place the specification
+  you want to work on.
 
 > Run this once per project. Safe to re-run — folders that already exist on disk are not
 > re-created, and their contents are never overwritten.
 
 What you need to know at this point: **put your new specification in the `specs` folder**
-(default: `specs/prd`) inside that project. Full details on the working-folder structure and
-AI model configuration are in [docs/folders-and-paths.md](docs/folders-and-paths.md) and
+(default: `.tempa/specs/prd`) inside that project. Full details on the working-folder
+structure and AI model configuration are in
+[docs/folders-and-paths.md](docs/folders-and-paths.md) and
 [docs/ai-models.md](docs/ai-models.md) — not required reading to get started.
 
 ### Step 2 — Write the specification
 
-Save it in the `sources.prd` folder (default `specs/prd`) — and **only** that: the **new**
-specification you want implemented. Don't put old/already-implemented specifications here.
+Save it in the `sources.prd` folder (default `.tempa/specs/prd`) — and **only** that: the
+**new** specification you want implemented. Don't put old/already-implemented specifications
+here.
 
 Specifications for the **existing** system should be kept separately in the `sources.docs`
-folder (default `docs/`) — not rewritten inside `specs/prd`. Plan drafting (part of Step 4)
-uses `docs/` (and the code) as a reference for "what already exists", so it doesn't
+folder (default `docs/`) — not rewritten inside `.tempa/specs/prd`. Plan drafting (part of
+Step 4) uses `docs/` (and the code) as a reference for "what already exists", so it doesn't
 duplicate work that's already done.
 
 The new specification should ideally cover:
@@ -245,7 +250,7 @@ will match what you actually want.
 
 Not sure how to start, or just want to try Tempa out first? The [examples/](examples/)
 folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
-database) you can copy straight into `specs/prd` — see [examples/README.md](examples/README.md).
+database) you can copy straight into `.tempa/specs/prd` — see [examples/README.md](examples/README.md).
 
 ### Step 3 — Answer clarifications (`clarify`)
 

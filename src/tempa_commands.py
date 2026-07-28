@@ -17,9 +17,10 @@ from pathlib import Path
 from dashboard_ui import run_dashboard
 
 from tempa_config import (
-    DEFAULT_WORKSPACE, LOGS_DIR, VERIFY_DIR, WORKING_DIR, WORKSPACE_LABELS,
-    get_model, get_models, get_sources, get_workspace, load_config,
-    resolve_workspace_paths, save_config, _resolve_model_alias,
+    DEFAULT_WORKSPACE, WORKING_DIR, WORKSPACE_LABELS,
+    clear_active_workspace_root, get_logs_dir, get_model, get_models, get_qa_dir,
+    get_sources, get_verify_dir, get_workspace, load_config, resolve_workspace_paths,
+    save_config, set_active_workspace_root, _resolve_model_alias,
 )
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
@@ -48,9 +49,10 @@ def run_test() -> None:
         f"(4) Write the text 'done' to the file {done_file}."
     )
 
-    LOGS_DIR.mkdir(exist_ok=True)
+    logs_dir = get_logs_dir()
+    logs_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = LOGS_DIR / f"test_{timestamp}.txt"
+    log_path = logs_dir / f"test_{timestamp}.txt"
 
     log(f"Permission test starting — claude: {claude_exe} | log: {log_path.name}")
 
@@ -84,9 +86,10 @@ def run_test() -> None:
 
 def run_verify(epic: str) -> None:
     config = load_config()
-    VERIFY_DIR.mkdir(exist_ok=True)
+    verify_dir = get_verify_dir()
+    verify_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = VERIFY_DIR / f"{epic}-verify-{timestamp}.md"
+    output_file = verify_dir / f"{epic}-verify-{timestamp}.md"
 
     params = _resolve_template_params(config, epic)
     params["output_file"] = str(output_file)
@@ -205,34 +208,31 @@ def set_working_folders(args: argparse.Namespace) -> None:
 
 
 def run_close_folder() -> None:
-    """Clear workspace.root in config.json (the Home page's "close working folder"
-    icon) — lets Tempa be pointed at a different project without touching the current
-    project's own files, since nothing on disk is deleted here, only config.json.
-
-    Only allowed once the harness's own state has already been cleared (`tempa clear`:
-    "epic" array emptied, last_auto_answer reset to 0) — otherwise closing the folder
-    would silently orphan in-progress epic/session tracking that still refers to it.
+    """Detach the active workspace (the Home page's "close working folder" icon) — lets
+    Tempa be pointed at a different project. Only the active-workspace pointer is cleared;
+    nothing on disk is deleted or modified. The workspace's own `.tempa/` folder
+    (config.json, epic/session state, logs, qa, specs) is left exactly as it was, so
+    reopening it later with `tempa init <same_path>` resumes right where it left off.
     """
-    config = load_config()
-    epic = config.get("epic") or []
-    if epic or config.get("last_auto_answer", 0):
-        log("ERROR: Run `tempa clear` first — the working folder can only be closed "
-            "once the \"epic\" array is empty and last_auto_answer is 0.")
-        sys.exit(1)
-
-    workspace = get_workspace(config)
-    workspace["root"] = ""
-    config["workspace"] = workspace
-    save_config(config)
-    log("Working folder closed — workspace.root cleared in config.json.")
+    clear_active_workspace_root()
+    log("Working folder closed — no workspace is active. Its .tempa/ folder "
+        "(config, logs, qa, specs) was left untouched; reopen it with `tempa init <path>`.")
 
 
 def run_init(args: argparse.Namespace) -> None:
-    """Initialize working folders: set workspace.root in config.json, then create the
-    default working folders on disk (docs, adr, specs, apps, infra, archive) under root,
-    plus every configured `sources` folder (prd, epics, clarifications, ...) so the
-    expected structure (e.g. specs/prd) exists upfront instead of only appearing once
-    clarify/implement first write to it.
+    """Point Tempa at a workspace and initialize its working folders.
+
+    Sets the active-workspace pointer to `root` FIRST, so every config.json access below
+    (load_config/save_config) resolves to that workspace's own `<root>/.tempa/config.json` —
+    not Tempa's install folder. If that workspace was used before, its existing config.json
+    is loaded as-is (epic/session history, models, etc. all resume unchanged); otherwise a
+    fresh default one is created there.
+
+    Then creates the default working folders on disk (docs, adr, specs, apps, infra, archive)
+    under root — `specs` lands under `<root>/.tempa/specs` (see resolve_workspace_paths) —
+    plus every configured `sources` folder (prd, epics, clarifications, ...) and the
+    `.tempa/logs`, `.tempa/qa`, `.tempa/verify` output folders, so the expected structure
+    exists upfront instead of only appearing once a session/QA/verify run first writes to it.
 
     Usage:
       tempa init <absolute_path>
@@ -251,6 +251,7 @@ def run_init(args: argparse.Namespace) -> None:
         log(f"ERROR: root must be an absolute path, not '{root}'")
         sys.exit(1)
 
+    set_active_workspace_root(root_path)
     config = load_config()
     workspace = get_workspace(config)
     workspace["root"] = str(root_path)
@@ -291,25 +292,35 @@ def run_init(args: argparse.Namespace) -> None:
             folder.mkdir(parents=True, exist_ok=True)
             log(f"Folder created: {folder}")
 
-    # Ensure the specs/ folder (working specifications — not meant to be version
-    # controlled) is git-ignored: create .gitignore if missing, append the entry if absent.
+    # Also create logs/qa/verify upfront (otherwise only created lazily on first
+    # session/QA/verify run) so `.tempa/` looks complete right after init.
+    for folder in (get_logs_dir(), get_qa_dir(), get_verify_dir()):
+        if folder.exists():
+            log(f"Folder already exists, skipping: {folder}")
+        else:
+            folder.mkdir(parents=True, exist_ok=True)
+            log(f"Folder created: {folder}")
+
+    # Ensure the .tempa/ folder (config.json, logs, qa, verify, specs — all Tempa-managed
+    # state, not meant to be version controlled) is git-ignored: create .gitignore if
+    # missing, append the entry if absent.
     gitignore_path = root_path / ".gitignore"
-    specs_entry = f"{workspace['specs']}/"
+    tempa_entry = ".tempa/"
     if not gitignore_path.exists():
         with open(gitignore_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(specs_entry + "\n")
+            f.write(tempa_entry + "\n")
         log(f".gitignore created: {gitignore_path}")
     else:
         existing_text = gitignore_path.read_text(encoding="utf-8")
         existing_lines = existing_text.splitlines()
-        if specs_entry in existing_lines or workspace["specs"] in existing_lines:
-            log(f".gitignore already ignores '{specs_entry}', skipping: {gitignore_path}")
+        if tempa_entry in existing_lines or ".tempa" in existing_lines:
+            log(f".gitignore already ignores '{tempa_entry}', skipping: {gitignore_path}")
         else:
             with open(gitignore_path, "a", encoding="utf-8", newline="\n") as f:
                 if existing_text and not existing_text.endswith("\n"):
                     f.write("\n")
-                f.write(specs_entry + "\n")
-            log(f"Added '{specs_entry}' to .gitignore: {gitignore_path}")
+                f.write(tempa_entry + "\n")
+            log(f"Added '{tempa_entry}' to .gitignore: {gitignore_path}")
 
     print_workspace(config)
 

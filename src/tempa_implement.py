@@ -14,8 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 from tempa_config import (
-    CONFIG_PATH, POLL_INTERVAL_SEC, QA_DIR, WORKING_DIR,
-    get_model, get_sources, load_config, save_config,
+    POLL_INTERVAL_SEC, WORKING_DIR,
+    get_config_path, get_model, get_qa_dir, get_sources, load_config, save_config,
 )
 from tempa_logging import _state, _banner, _init_process_log, log, process_log_path
 from tempa_prompts import (
@@ -69,13 +69,14 @@ def check_and_run(features_override: int | None = None) -> None:
                     save_config(config)
                     return
 
-                QA_DIR.mkdir(exist_ok=True)
+                qa_dir = get_qa_dir()
+                qa_dir.mkdir(parents=True, exist_ok=True)
                 qa_report_filename = session.get("qa_report_filename", "")
                 if qa_report_filename:
                     qa_output_file = Path(qa_report_filename)
                 else:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    qa_output_file = QA_DIR / f"{label}-qa-{timestamp}.md"
+                    qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
                     config["epic"][i]["qa_report_filename"] = str(qa_output_file)
 
                 prompt = build_qa_prompt(config, label, qa_output_file, is_continuation=True)
@@ -148,9 +149,10 @@ def check_and_run(features_override: int | None = None) -> None:
                     save_config(config)
                     return
 
-                QA_DIR.mkdir(exist_ok=True)
+                qa_dir = get_qa_dir()
+                qa_dir.mkdir(parents=True, exist_ok=True)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                qa_output_file = QA_DIR / f"{label}-qa-{timestamp}.md"
+                qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
 
                 config["epic"][i]["qa_status"] = "ongoing"
                 config["epic"][i]["qa_session_id"] = ""
@@ -333,7 +335,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
     _print_session_plan(load_config(), features_override)
 
     log(f"Agent runner started — working dir: {WORKING_DIR}", to_console=False)
-    log(f"Poll interval: {POLL_INTERVAL_SEC}s | Config: {CONFIG_PATH}", to_console=False)
+    log(f"Poll interval: {POLL_INTERVAL_SEC}s | Config: {get_config_path()}", to_console=False)
     if features_override is not None:
         log(f"features_per_session override: {features_override}", to_console=False)
 

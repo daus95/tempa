@@ -17,20 +17,74 @@ import copy
 import json
 from pathlib import Path
 
-# Modules live in src/, but the per-project state config.json and the runtime output
-# folders logs/ / qa/ / verify/ live one level up in the Tempa root folder — so anchor to
-# the parent of src/, not to src/ itself.
+# Modules live in src/, so anchor to the parent of src/ (the Tempa install root) for
+# Tempa's own bootstrap files.
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = SCRIPT_DIR / "config.json"
 WORKING_DIR = SCRIPT_DIR.parent
-LOGS_DIR = SCRIPT_DIR / "logs"
-VERIFY_DIR = SCRIPT_DIR / "verify"
-QA_DIR = SCRIPT_DIR / "qa"
 # Prompt templates are a resource shipped with the tool (like the dashboard's assets/), so
 # they live inside src/ — anchored to this module's own folder, not SCRIPT_DIR (the root).
 # One .md file per prompt (readable, editable); loaded via load_prompt() in tempa_prompts.
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 POLL_INTERVAL_SEC = 60
+
+# Tiny bootstrap pointer, at Tempa's own install root: one line holding the absolute path
+# of the currently active workspace, so Tempa knows which workspace's own config.json to
+# load BEFORE it can load any config.json (workspace.root itself lives inside that file).
+# Absent = no active workspace (fresh install, or after `close-folder`).
+ACTIVE_WORKSPACE_POINTER = SCRIPT_DIR / ".active-workspace"
+
+# Per-workspace state (config.json + logs/ + qa/ + verify/ + specs/) all live under this
+# hidden sub-folder, INSIDE the workspace being automated — not inside Tempa's own install —
+# so each workspace keeps its own config/history across switches. Until a workspace is
+# active, everything falls back to this same sub-folder inside Tempa's own install (SCRIPT_DIR),
+# purely as scratch space so commands like `set-model`/`test` still work pre-`init`.
+TEMPA_SUBDIR_NAME = ".tempa"
+
+
+def get_active_workspace_root() -> Path | None:
+    """Return the active workspace's absolute root path, or None if none is active."""
+    if not ACTIVE_WORKSPACE_POINTER.exists():
+        return None
+    text = ACTIVE_WORKSPACE_POINTER.read_text(encoding="utf-8").strip()
+    return Path(text) if text else None
+
+
+def set_active_workspace_root(root: Path) -> None:
+    """Point Tempa at `root` as the active workspace (used by `tempa init`)."""
+    ACTIVE_WORKSPACE_POINTER.write_text(str(root), encoding="utf-8")
+
+
+def clear_active_workspace_root() -> None:
+    """Drop the active-workspace pointer (used by `tempa close-folder`). The workspace's
+    own .tempa/ folder (config.json/logs/qa/verify/specs) is left untouched on disk —
+    only the pointer to it is removed, so reopening it later resumes where it left off."""
+    if ACTIVE_WORKSPACE_POINTER.exists():
+        ACTIVE_WORKSPACE_POINTER.unlink()
+
+
+def _tempa_dir() -> Path:
+    """The active workspace's `.tempa/` folder, or Tempa's own scratch `.tempa/` folder
+    when no workspace is active yet."""
+    root = get_active_workspace_root()
+    base = root if root is not None else SCRIPT_DIR
+    return base / TEMPA_SUBDIR_NAME
+
+
+def get_config_path() -> Path:
+    return _tempa_dir() / "config.json"
+
+
+def get_logs_dir() -> Path:
+    return _tempa_dir() / "logs"
+
+
+def get_qa_dir() -> Path:
+    return _tempa_dir() / "qa"
+
+
+def get_verify_dir() -> Path:
+    return _tempa_dir() / "verify"
+
 
 # Default working-folder layout. "root" MUST be an absolute path; every other
 # entry is a path RELATIVE to root. Stored under the "workspace" key in config.json.
@@ -111,18 +165,31 @@ DEFAULT_CONFIG = {
 
 def load_config() -> dict:
     """Load config.json, transparently creating it from DEFAULT_CONFIG if it doesn't
-    exist yet (e.g. deleted by hand, or a fresh clone) so every caller gets a usable
-    dict instead of a FileNotFoundError."""
-    if not CONFIG_PATH.exists():
+    exist yet (e.g. a brand-new workspace, or a fresh clone) so every caller gets a usable
+    dict instead of a FileNotFoundError. Resolved fresh on every call via get_config_path(),
+    so it always reflects whichever workspace is currently active (see
+    get_active_workspace_root()).
+
+    The default is only written to disk when a workspace is actually active. With no
+    active workspace (fresh install, or after `close-folder`), read-only callers like
+    `--help`/`status`/`dashboard` would otherwise recreate a useless config.json in
+    Tempa's own install folder just by being run. Commands that intentionally use that
+    folder as pre-init scratch space (`set-model`, `set-folders`, `test`) still persist
+    there fine — they call save_config() themselves once the user actually sets something."""
+    config_path = get_config_path()
+    if not config_path.exists():
         config = copy.deepcopy(DEFAULT_CONFIG)
-        save_config(config)
+        if get_active_workspace_root() is not None:
+            save_config(config)
         return config
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_config(config: dict) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    config_path = get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 
@@ -132,7 +199,7 @@ def read_config_safe() -> dict:
     missing/half-written config should degrade gracefully (e.g. the dashboard re-reading
     after workspace.root changes, so it reflects the new location without a restart)."""
     try:
-        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        config = json.loads(get_config_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return config if isinstance(config, dict) else {}
@@ -148,7 +215,9 @@ def get_workspace(config: dict) -> dict:
 
 def resolve_workspace_paths(config: dict) -> dict:
     """Resolve every workspace folder to an absolute path. `root` is returned as-is;
-    each other folder is joined onto root. Returns {} if root is not configured."""
+    `specs` is joined onto root/.tempa (it's Tempa-managed state, kept alongside
+    config.json/logs/qa/verify); every other folder is joined directly onto root.
+    Returns {} if root is not configured."""
     workspace = get_workspace(config)
     root = workspace.get("root", "")
     if not root:
@@ -158,7 +227,10 @@ def resolve_workspace_paths(config: dict) -> dict:
     for key in DEFAULT_WORKSPACE:
         if key == "root":
             continue
-        resolved[key] = str(root_path / workspace[key])
+        if key == "specs":
+            resolved[key] = str(root_path / TEMPA_SUBDIR_NAME / workspace[key])
+        else:
+            resolved[key] = str(root_path / workspace[key])
     return resolved
 
 
@@ -209,14 +281,15 @@ def get_sources(config: dict) -> dict:
 def resolve_specs_dir(config: dict) -> Path:
     """Return the absolute path of the specifications folder (workspace.specs).
 
-    Mirrors how the agent runner resolves relative paths: joined onto workspace.root
-    when configured, otherwise onto WORKING_DIR (where the agent is run), so `spec`
-    points at the same folder the rest of the pipeline reads/writes."""
+    Lives under workspace.root/.tempa (alongside config.json/logs/qa/verify) when root is
+    configured. Otherwise mirrors how the agent runner resolves relative paths: joined onto
+    WORKING_DIR (where the agent is run), so `spec` points at the same folder the rest of
+    the pipeline reads/writes."""
     workspace = get_workspace(config)
     specs_rel = workspace.get("specs") or "specs"
     root = workspace.get("root")
     if root:
-        return Path(root) / specs_rel
+        return Path(root) / TEMPA_SUBDIR_NAME / specs_rel
     specs_path = Path(specs_rel)
     return specs_path if specs_path.is_absolute() else WORKING_DIR / specs_rel
 

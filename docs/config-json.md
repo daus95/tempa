@@ -2,6 +2,13 @@
 
 See [README.md](../README.md) for a summary. Full reference for every key in `config.json`.
 
+`config.json` lives inside the **active workspace**, at `<workspace_root>/.tempa/config.json` —
+not inside Tempa's own install folder. Each workspace keeps its own copy, so switching
+workspaces (`tempa close-folder` + `tempa init <other_path>`) never overwrites another
+workspace's settings/history. Before any workspace is active, Tempa falls back to a scratch
+copy at `<tempa_install>/.tempa/config.json`. See
+[folders-and-paths.md](folders-and-paths.md) for the full mechanism.
+
 | Key | Purpose |
 |-----|--------|
 | `workspace` | Working folder (root + docs/adr/specs/apps/infra/archive) — see [folders-and-paths.md](folders-and-paths.md) |

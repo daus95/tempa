@@ -68,18 +68,18 @@ tempa show-folders            # active working folder
 tempa implement --reset          # epic on_progress → pending (clears session_id)
 tempa implement --reset-failed   # all failed epics → pending
 tempa implement --reset-qa       # force re-QA for every done epic
-tempa implement --clear      # delete ALL files in qa/ and logs/ (QA reports + session logs)
-tempa implement --clear-plan # clear plan: wipes specs/pbi contents + empties the "epic" array
-tempa clarify --clear        # clear clarifications: deletes files in specs/clarifications (except claude.md)
+tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)
+tempa implement --clear-plan # clear plan: wipes .tempa/specs/pbi contents + empties the "epic" array
+tempa clarify --clear        # clear clarifications: deletes files in .tempa/specs/clarifications (except claude.md)
 tempa clear                  # runs all three clear commands above, behind one confirmation
 ```
 
 > `implement --clear`, `implement --clear-plan`, `clarify --clear` (and the combined
 > `clear`) are **destructive**:
-> - `implement --clear` deletes ALL files in `qa/` and `logs/` (config.json is left untouched).
-> - `implement --clear-plan` deletes the ENTIRE contents of the `specs/pbi` folder (including
+> - `implement --clear` deletes ALL files in `.tempa/qa/` and `.tempa/logs/` (config.json is left untouched).
+> - `implement --clear-plan` deletes the ENTIRE contents of the `.tempa/specs/pbi` folder (including
 >   `README.md`/`findings.md`/`workplan.md`) and empties the `epic` array in config.json.
-> - `clarify --clear` deletes all contents of the `specs/clarifications` folder EXCEPT
+> - `clarify --clear` deletes all contents of the `.tempa/specs/clarifications` folder EXCEPT
 >   `claude.md` (config.json is left untouched).
 >
 > All of them ask for confirmation (`type "yes"`) before deleting; add `--yes` to skip the
@@ -87,7 +87,7 @@ tempa clear                  # runs all three clear commands above, behind one c
 
 ## Manual verification
 
-Manually verify a single epic (produces a report in `verify/`):
+Manually verify a single epic (produces a report in `.tempa/verify/`):
 
 ```bash
 tempa verify EPIC-05
