@@ -8,11 +8,9 @@ _resolve_within."""
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
-import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -30,7 +28,12 @@ from dashboard_clarify_render import _render_blocks_html
 from dashboard_runs import (
     _epic_sessions, _start_clarify_run, _start_implement_run, _stop_implement_run,
 )
-from dashboard_winui import _bring_window_to_front, _find_explorer_window, _pick_folder_dialog
+if sys.platform == "win32":
+    from dashboard_winui import _open_and_focus_folder, _pick_folder_dialog
+elif sys.platform == "darwin":
+    from dashboard_macui import _open_and_focus_folder, _pick_folder_dialog
+else:
+    _pick_folder_dialog = _open_and_focus_folder = None
 
 
 def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
@@ -483,7 +486,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         run `tempa.py init <folder>` (same as the CLI) to make it the active workspace —
         pointing Tempa at `<folder>/.tempa/config.json` (created fresh, or loaded as-is if
         this folder was used before) — and scaffold the default working folders under it."""
-        root = _pick_folder_dialog()
+        if _pick_folder_dialog is None:
+            self._send_json(200, {
+                "ok": False,
+                "error": "The folder picker isn't available on this platform. Run "
+                         "`tempa init <path>` from the CLI, then reload the dashboard.",
+            })
+            return
+        try:
+            root = _pick_folder_dialog()
+        except RuntimeError as e:
+            self._send_json(200, {"ok": False, "error": str(e)})
+            return
         if root is None:
             self._send_json(200, {"ok": False, "cancelled": True})
             return
@@ -511,27 +525,25 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "root": root, "output": output})
 
     def _handle_workspace_open(self) -> None:
-        """Open workspace.root in Windows Explorer — used by the path label on the
-        Home page's working-folder panel. Also tries to bring the resulting window to
-        the foreground: since this request is served by a background HTTP server
-        process rather than the user's active foreground app, Explorer's window would
-        otherwise open silently behind the browser (see _bring_window_to_front)."""
+        """Open workspace.root in the OS file manager (Explorer/Finder) and bring it to
+        the front — used by the path label on the Home page's working-folder panel.
+        Windows and macOS only; Linux has no single native equivalent, so the button is
+        disabled there (see _open_and_focus_folder)."""
         root = _workspace_root()
         if not root or not Path(root).is_dir():
             self._send_json(404, {"ok": False, "error": "Working folder not found on disk."})
             return
+        if _open_and_focus_folder is None:
+            self._send_json(200, {
+                "ok": False,
+                "error": "Opening the working folder in a file manager is only supported on Windows and macOS.",
+            })
+            return
         try:
-            os.startfile(root)  # noqa: S606 - local-only dashboard, opens the user's own configured folder
-        except OSError as e:
+            _open_and_focus_folder(root)
+        except (OSError, RuntimeError) as e:
             self._send_json(500, {"ok": False, "error": f"Could not open folder: {e}"})
             return
-        folder_name = Path(root).name or root
-        for _ in range(20):
-            time.sleep(0.15)
-            hwnd = _find_explorer_window(folder_name)
-            if hwnd:
-                _bring_window_to_front(hwnd)
-                break
         self._send_json(200, {"ok": True})
 
     def _handle_workspace_close(self) -> None:
