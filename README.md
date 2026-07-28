@@ -166,9 +166,9 @@ as `tempa close-folder` on the CLI) — no files are deleted, it just drops the 
 point Tempa at a different project next. The current project's config/history stays in its
 own `.tempa/` folder, ready to resume if you point Tempa back at it later.
 
-> The folder picker, "open in explorer", and the **✕** icon are Windows-only conveniences.
-> On macOS/Linux, set the working folder with `tempa init <path>` (CLI) first, then use the
-> dashboard normally for the rest of the workflow.
+> The folder picker and "open in explorer" work natively on Windows and macOS. On Linux, set
+> the working folder with `tempa init <path>` (CLI) first, then use the dashboard normally for
+> the rest of the workflow — the **✕** icon works there too.
 
 ---
 

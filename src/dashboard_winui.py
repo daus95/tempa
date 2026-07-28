@@ -1,12 +1,16 @@
 """Windows-only desktop conveniences (ctypes / PowerShell).
 
 Native folder-picker dialog and bring-Explorer-window-to-front helpers used by the Home
-page's working-folder actions. Windows-specific by nature; other platforms use the CLI."""
+page's working-folder actions. Windows-specific by nature; other platforms use
+dashboard_macui or the CLI."""
 
 from __future__ import annotations
 
 import ctypes
+import os
 import subprocess
+import time
+from pathlib import Path
 
 
 def _pick_folder_dialog() -> str | None:
@@ -14,7 +18,10 @@ def _pick_folder_dialog() -> str | None:
     path, or None if the user cancelled. Shelled out to PowerShell (WinForms'
     FolderBrowserDialog needs an STA apartment) rather than opened in-process, since
     ThreadingHTTPServer handles each request on its own worker thread and GUI toolkits
-    aren't safe to drive from there."""
+    aren't safe to drive from there.
+
+    Raises RuntimeError if PowerShell itself isn't available, so the caller can surface
+    a real error instead of treating an unusable dialog the same as a user cancelling."""
     script = (
         "Add-Type -AssemblyName System.Windows.Forms | Out-Null; "
         "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
@@ -28,7 +35,9 @@ def _pick_folder_dialog() -> str | None:
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", timeout=300,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except FileNotFoundError as e:
+        raise RuntimeError("PowerShell was not found; cannot open the folder picker.") from e
+    except subprocess.TimeoutExpired:
         return None
     path = (result.stdout or "").strip()
     return path or None
@@ -80,3 +89,22 @@ def _bring_window_to_front(hwnd: int) -> None:
     user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE)
     user32.BringWindowToTop(hwnd)
     user32.SetForegroundWindow(hwnd)
+
+
+def _open_and_focus_folder(root: str) -> None:
+    """Open `root` in Windows Explorer and bring the resulting window to the front —
+    used by the path label on the Home page's working-folder panel. Explorer opens
+    silently behind the browser otherwise, since this request is served by a background
+    HTTP server process rather than the user's active foreground app.
+
+    Raises OSError (propagated from os.startfile) if the folder couldn't be opened at
+    all; degrades silently if no matching Explorer window is found within ~3s (the
+    folder still opened, just not brought to the foreground)."""
+    os.startfile(root)  # noqa: S606 - local-only dashboard, opens the user's own configured folder
+    folder_name = Path(root).name or root
+    for _ in range(20):
+        time.sleep(0.15)
+        hwnd = _find_explorer_window(folder_name)
+        if hwnd:
+            _bring_window_to_front(hwnd)
+            break
