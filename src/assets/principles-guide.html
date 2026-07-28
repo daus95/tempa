@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture Principles — Tempa</title>
+<style>/*__CSS__*/</style>
+<style>
+  /* The dashboard's stylesheet is built for a fixed-height app shell; this is a plain
+     scrolling document, so undo the shell-specific rules. */
+  html, body { height: auto; }
+  body { overflow: auto; }
+  .guide { max-width: 860px; margin: 0 auto; padding: 32px 24px 96px; }
+  .guide-lede { font-size: 1.05rem; color: var(--muted); margin: 0 0 8px; }
+  .callout { border: 1px solid var(--border-strong); border-left: 4px solid var(--accent);
+    border-radius: 8px; background: var(--panel); padding: 14px 18px; margin: 1.4em 0; }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  .good, .bad { font-weight: 700; }
+  .good { color: var(--ok); }
+  .bad { color: var(--danger); }
+</style>
+</head>
+<body>
+<div class="guide markdown-body">
+
+<h1>Architecture Principles</h1>
+
+<p class="guide-lede">The rules your project always follows — written once, applied by Tempa to
+every single thing it does.</p>
+
+<h2>What they are</h2>
+
+<p>Architecture Principles are the standing decisions that apply to your whole project, not to
+one feature. Things like <em>which database you use</em>, <em>whether you allow an ORM</em>,
+<em>how errors are returned from an API</em>, or <em>what has to be true before code is
+considered done</em>.</p>
+
+<p>They are the answers you would otherwise have to repeat in every conversation. Instead of
+explaining "remember, we don't use an ORM" in each specification, you write it down once here,
+and Tempa carries it into every stage on its own.</p>
+
+<h2>Why they matter in Tempa</h2>
+
+<p>Tempa runs your project through several separate AI sessions: clarification, applying answers,
+planning epics, implementing features, QA, and verification. Each one is a fresh session — it
+does not remember the previous one.</p>
+
+<p>Your Architecture Principles are prepended to <strong>every one of those prompts</strong>,
+automatically. That is the whole point: the same rules are in force whether Tempa is asking you a
+clarifying question, drafting a plan, writing code, or reviewing that code in QA. Without them,
+each stage falls back on generic defaults, and you get an application that is internally
+inconsistent — one service using an ORM, another hand-writing SQL, because nobody ever said which
+one to use.</p>
+
+<div class="callout">
+<p><strong>They are treated as non-negotiable.</strong> Tempa tells the AI that these principles
+outrank convention, convenience, and its own defaults — and that if a principle conflicts with
+your specification, it must stop and report the conflict rather than quietly pick a side. That
+means a bad principle is enforced just as strictly as a good one, so it is worth writing them
+carefully.</p>
+</div>
+
+<h2>Completely optional</h2>
+
+<p>You can leave this empty and go straight to Step 1 (Upload Specification). Tempa works exactly
+as it did before — nothing is injected, and no prompt changes. Add principles when you have
+project-wide decisions worth locking in.</p>
+
+<h2>What belongs here — and what doesn't</h2>
+
+<table>
+<thead><tr><th>Belongs here</th><th>Does not belong here</th></tr></thead>
+<tbody>
+<tr>
+  <td>Rules that hold true for the entire project</td>
+  <td>Requirements for one specific feature — those go in the specification</td>
+</tr>
+<tr>
+  <td>Technology choices and versions you have committed to</td>
+  <td>Things you are still undecided about — leave those to clarification</td>
+</tr>
+<tr>
+  <td>Quality bars that every change must clear</td>
+  <td>A task list or roadmap — Tempa generates those from the specification</td>
+</tr>
+<tr>
+  <td>Constraints that come from outside the code (compliance, contracts, existing systems)</td>
+  <td>Long background essays or business context — that is specification material</td>
+</tr>
+<tr>
+  <td>Conventions that would otherwise drift between sessions</td>
+  <td>Anything that changes every sprint — principles should be stable</td>
+</tr>
+</tbody>
+</table>
+
+<h2>How to write good ones</h2>
+
+<h3>1. Be specific enough to check</h3>
+<p>A principle should be something you could point at a pull request and say "this passes" or
+"this fails".</p>
+<p><span class="bad">Too vague:</span> Write clean, high-quality code.<br>
+<span class="good">Checkable:</span> No function longer than 50 lines. No file longer than 400
+lines. Extract rather than nest past 3 levels of indentation.</p>
+
+<h3>2. Say what to do, not just what to avoid</h3>
+<p>A prohibition leaves the alternative undefined, and the AI will invent one.</p>
+<p><span class="bad">Incomplete:</span> Don't use an ORM.<br>
+<span class="good">Complete:</span> Don't use an ORM. All database access goes through
+hand-written SQL in a repository class, one file per aggregate.</p>
+
+<h3>3. Include the reason when it isn't obvious</h3>
+<p>A stated reason lets the AI judge edge cases instead of applying the rule mechanically — and
+tells it when to flag a conflict rather than guess.</p>
+<p><span class="good">Better:</span> All timestamps are stored in UTC and converted only at the
+presentation layer. We operate in three time zones and have been burned by mixed-offset data
+before.</p>
+
+<h3>4. Keep them stable</h3>
+<p>If a rule will change next month, it is a task, not a principle. Principles are what you would
+still say a year from now.</p>
+
+<h3>5. Keep the list short</h3>
+<p>Ten to thirty sharp principles beat a hundred vague ones. A long list dilutes the important
+rules and increases the chance of two principles contradicting each other.</p>
+
+<h3>6. Don't contradict yourself</h3>
+<p>Tempa enforces every principle. Two rules that cannot both be satisfied will produce a stream
+of reported conflicts instead of progress. Read the list end-to-end after editing it.</p>
+
+<h2>Examples by category</h2>
+
+<p>Use these as a starting point — copy what fits, delete what doesn't, and replace the specifics
+with your own.</p>
+
+<h3>Technology stack</h3>
+<ul>
+  <li>Backend is Python 3.12 with FastAPI. Do not introduce a second web framework.</li>
+  <li>Frontend is React 19 with TypeScript in strict mode. No new JavaScript files.</li>
+  <li>PostgreSQL 16 is the only datastore. Do not add Redis, Elasticsearch, or a message queue
+      without flagging it first.</li>
+  <li>Package management is <code>uv</code> for Python and <code>pnpm</code> for Node. Do not
+      commit a <code>package-lock.json</code> or <code>requirements.txt</code>.</li>
+  <li>No new third-party dependency for something the standard library already does well.</li>
+</ul>
+
+<h3>Code organization</h3>
+<ul>
+  <li>Each service lives in its own folder under <code>apps/</code> and owns its own database
+      schema. Services never read each other's tables — they call each other's APIs.</li>
+  <li>Business logic lives in the domain layer and must be testable without a database or an HTTP
+      server.</li>
+  <li>No circular imports between modules. If two modules need each other, the shared piece moves
+      to a third module.</li>
+  <li>One public class or function per file for anything over 50 lines.</li>
+</ul>
+
+<h3>Data and persistence</h3>
+<ul>
+  <li>Every schema change ships as a numbered, forward-only migration. Never edit a migration that
+      has already been merged.</li>
+  <li>All database access goes through a repository class. No SQL in route handlers or in the
+      domain layer.</li>
+  <li>Timestamps are <code>TIMESTAMPTZ</code> and always stored in UTC.</li>
+  <li>Money is stored as integer minor units (cents), never as a float.</li>
+  <li>Deletes are soft by default: set <code>deleted_at</code>, don't remove the row.</li>
+</ul>
+
+<h3>API design</h3>
+<ul>
+  <li>REST with JSON. Resource paths are plural nouns; actions are HTTP verbs, not path
+      segments.</li>
+  <li>Errors always return the same shape:
+      <code>{"error": {"code": "...", "message": "...", "details": {...}}}</code>. Never leak a
+      stack trace or a raw database error.</li>
+  <li>Every list endpoint is paginated with <code>limit</code> and <code>cursor</code>. There is no
+      unbounded list endpoint.</li>
+  <li>Breaking changes require a new version prefix. Existing endpoints stay
+      backward-compatible.</li>
+  <li>Every request and response body is validated against an explicit schema at the boundary.</li>
+</ul>
+
+<h3>Security</h3>
+<ul>
+  <li>No secret is ever committed, logged, or included in an error message. Secrets come from
+      environment variables only.</li>
+  <li>Every endpoint is authenticated by default. A public endpoint must be explicitly marked and
+      justified in a comment.</li>
+  <li>Authorization is checked at the service layer, not only in the UI or the route.</li>
+  <li>All user input is validated and parameterized. No string-concatenated SQL, ever.</li>
+  <li>Personal data is never written to application logs.</li>
+</ul>
+
+<h3>Testing</h3>
+<ul>
+  <li>Every endpoint has at least one integration test that hits a real database — mocked database
+      tests do not count as coverage.</li>
+  <li>Every bug fix starts with a failing test that reproduces the bug.</li>
+  <li>Tests must be independent and runnable in any order. No test depends on another test's
+      leftover data.</li>
+  <li>A feature is not "done" until its tests pass locally.</li>
+</ul>
+
+<h3>Performance</h3>
+<ul>
+  <li>No N+1 queries. Loading a list of N items must not issue N additional queries.</li>
+  <li>Every foreign key and every column used in a <code>WHERE</code> clause is indexed.</li>
+  <li>Anything that could take longer than 5 seconds runs as a background job, not inside a
+      request.</li>
+  <li>Don't add a cache to hide a slow query — fix the query first.</li>
+</ul>
+
+<h3>Observability and operations</h3>
+<ul>
+  <li>Logs are structured JSON with a request id. No bare <code>print</code> statements.</li>
+  <li>Every external call has an explicit timeout and a defined failure behaviour.</li>
+  <li>Configuration comes from environment variables with documented defaults. No hardcoded
+      hostnames, ports, or paths.</li>
+  <li>Every service exposes a health endpoint that actually checks its dependencies.</li>
+</ul>
+
+<h3>Process and documentation</h3>
+<ul>
+  <li>Any decision that is hard to reverse gets an ADR in <code>adr/</code> before the code is
+      written.</li>
+  <li>Update the docs in the same change as the code, not afterwards.</li>
+  <li>Comments explain <em>why</em>, never <em>what</em>. Delete a comment that only restates the
+      code.</li>
+</ul>
+
+<h2>A complete example</h2>
+
+<p>This is what a real, usable principles document looks like — short, specific, and opinionated.
+Yours does not need to be longer than this.</p>
+
+<pre><code># Architecture Principles — Clinic Back-Office
+
+## Stack
+- Python 3.12 + FastAPI for all backend services. No second framework.
+- PostgreSQL 16 is the only datastore. Flag any proposal to add another.
+- React 19 + TypeScript strict mode on the frontend.
+- No new dependency for something the standard library handles well.
+
+## Structure
+- One service per folder under apps/. A service owns its own tables and
+  never reads another service's tables directly.
+- Business logic lives in the domain layer and is testable without a
+  database or an HTTP server.
+- Database access only through repository classes. No SQL in route handlers.
+
+## Data
+- All timestamps are TIMESTAMPTZ stored in UTC. We operate across three
+  time zones and have been burned by mixed offsets before.
+- Money is stored as integer cents, never as a float.
+- Schema changes ship as numbered forward-only migrations. Never edit a
+  merged migration.
+- Deletes are soft: set deleted_at.
+
+## API
+- REST + JSON. Plural resource nouns, actions expressed as HTTP verbs.
+- Errors always return {"error": {"code", "message", "details"}}. Never
+  leak a stack trace or raw database error to a client.
+- Every list endpoint is paginated (limit + cursor). No unbounded lists.
+
+## Security
+- Every endpoint is authenticated unless explicitly marked public with a
+  justifying comment.
+- Authorization is enforced in the service layer, not just the route.
+- Secrets come from environment variables. Never committed, never logged.
+- Patient data must never appear in application logs. This is a
+  regulatory requirement, not a preference.
+
+## Quality
+- Every endpoint has an integration test against a real database.
+  Mocked-database tests do not count.
+- Every bug fix begins with a failing test that reproduces it.
+- No function over 50 lines, no file over 400 lines.
+- Comments explain why, not what.
+</code></pre>
+
+<h2>Common mistakes</h2>
+
+<ul>
+  <li><strong>Writing the specification here.</strong> Principles are how the project is built;
+      the specification is what is being built. Feature requirements belong in the PRD.</li>
+  <li><strong>Being too vague to enforce.</strong> "Follow best practices" changes nothing — the
+      AI already thinks it is doing that. Name the practice.</li>
+  <li><strong>Contradicting yourself.</strong> "Keep it simple" plus "abstract every external
+      dependency behind an interface" will collide constantly. Decide which one wins.</li>
+  <li><strong>Writing a hundred rules.</strong> The important ones get lost. Start with the ten
+      you would actually reject a pull request over.</li>
+  <li><strong>Locking in something you are unsure about.</strong> If you have not decided yet,
+      leave it out and let clarification surface the question.</li>
+  <li><strong>Never revisiting them.</strong> When a principle stops being true, change it — a
+      stale principle is enforced just as strictly as a current one.</li>
+</ul>
+
+<h2>Where they are stored</h2>
+
+<p>Your principles are saved as a plain Markdown file inside the working folder you selected:</p>
+
+<pre><code>&lt;your-working-folder&gt;/.tempa/architecture-principles.md</code></pre>
+
+<p>They are per-project, so each working folder has its own set. The file survives
+<strong>Clear All</strong> — clearing removes plans, QA reports, logs, and clarification results,
+never your principles. You can also read the current value from the terminal:</p>
+
+<pre><code>tempa show-principles</code></pre>
+
+<p>Editing is done here in the dashboard.</p>
+
+</div>
+</body>
+</html>

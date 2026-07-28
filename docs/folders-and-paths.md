@@ -88,15 +88,16 @@ explicit `sources.<key>` always overrides its computed default.
 
 ## The workspace's `.tempa/` folder
 
-Unlike the folders above, `config.json`, `logs/`, `qa/`, `verify/`, and `specs/` are NOT
-scattered across the workspace root or Tempa's own install — they all live together under one
-hidden folder **inside the active workspace**: `<workspace_root>/.tempa/`. That keeps every
-workspace's state self-contained, so switching to a different workspace and back never loses
-or overwrites anything.
+Unlike the folders above, `config.json`, `architecture-principles.md`, `logs/`, `qa/`,
+`verify/`, and `specs/` are NOT scattered across the workspace root or Tempa's own install —
+they all live together under one hidden folder **inside the active workspace**:
+`<workspace_root>/.tempa/`. That keeps every workspace's state self-contained, so switching to a
+different workspace and back never loses or overwrites anything.
 
 | Folder/file | Contents |
 |--------|-----|
 | `.tempa/config.json` | this workspace's config — epic/session history, models, workspace/sources overrides, etc. |
+| `.tempa/architecture-principles.md` | optional project-wide rules, prepended to every stage's prompt (see [architecture-principles.md](architecture-principles.md)). Absent = unset |
 | `.tempa/logs/` | logs for every Claude session + the runner process log |
 | `.tempa/qa/` | QA reports per epic |
 | `.tempa/verify/` | manual verification reports (`verify`) |

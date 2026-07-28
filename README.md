@@ -57,6 +57,9 @@ C:\tools\tempa\           (Tempa folder — separate)
 ├─ tempa.py               (launcher / entry point)
 ├─ tempa.cmd              (Windows launcher)
 ├─ tempa                  (macOS/Linux launcher)
+├─ Open Dashboard.cmd     (Windows: double-click to open the dashboard, no terminal needed)
+├─ Open Dashboard.command (macOS: double-click to open the dashboard, no terminal needed)
+├─ Open Dashboard.sh      (Linux: double-click to open the dashboard, no terminal needed)
 ├─ config.json            (per-project settings — edited by you)
 └─ src\                   (everything the tool ships with)
    ├─ tempa_cli.py           (CLI dispatch)
@@ -77,14 +80,40 @@ Add that Tempa folder to your `PATH` so the `tempa` command works from anywhere:
   the `tempa` script, which calls `python3 tempa.py <command>` internally — no `chmod` needed,
   the executable bit is already set in the repo.
 
-Prefer not to touch `PATH`? Run it directly instead, from inside the Tempa folder:
-`./tempa.cmd <command>` (Windows) or `./tempa <command>` (macOS/Linux).
-
-Quickly check everything is ready before moving to the next step:
+Prefer not to touch `PATH`? Run it directly from inside the Tempa folder instead. Every
+`tempa <command>` in the rest of this README means one of these three — pick the line for your
+setup:
 
 ```bash
-tempa test            # verifies the Claude CLI can Write/Read/Delete a file
+tempa <command>            # PATH set (any OS)
+./tempa.cmd <command>      # Windows, without PATH
+./tempa <command>          # macOS/Linux, without PATH
 ```
+
+Quickly check everything is ready before moving to the next step — it verifies the Claude CLI can
+Write/Read/Delete a file:
+
+```bash
+tempa test                 # PATH set (any OS)
+./tempa.cmd test           # Windows, without PATH
+./tempa test               # macOS/Linux, without PATH
+```
+
+### No terminal? Double-click to open the dashboard
+
+If you found the Tempa folder in Windows Explorer / macOS Finder / a Linux file manager and
+would rather not open a terminal at all, double-click the launcher for your OS instead of
+running `tempa dashboard`:
+
+| OS | File | Notes |
+|---|---|---|
+| Windows | `Open Dashboard.cmd` | Double-click. A console window opens with the dashboard's log — that's normal, not an error. |
+| macOS | `Open Dashboard.command` | Double-click. First run: right-click → **Open** once (Gatekeeper blocks unsigned scripts on a plain double-click), then double-click normally afterwards. |
+| Linux | `Open Dashboard.sh` | Most file managers require marking it executable first — right-click → **Properties → Permissions → Allow executing** (or run `chmod +x "Open Dashboard.sh"` once from a terminal) — then double-click, or **Run** if prompted. |
+
+Each one does exactly what `tempa dashboard` does and opens your browser to it. **Keep the
+window that opens alongside your browser open** — that's the server; closing it stops the
+dashboard. If Python isn't installed, the window explains that and waits so you can read it.
 
 ---
 
@@ -98,16 +127,24 @@ flow as the CLI, but with buttons, inline file editing, and live progress instea
 memorizing commands and flags. Start it with:
 
 ```bash
-tempa dashboard
+tempa dashboard            # PATH set (any OS)
+./tempa.cmd dashboard      # Windows, without PATH
+./tempa dashboard          # macOS/Linux, without PATH
 ```
 
 This opens `http://127.0.0.1:<port>/` in your browser (`Ctrl+C` in the terminal stops the
 server). If the project hasn't been set up yet, the **Home** page tells you to run
 `tempa init <path>` first (Workflow Step 1 below) — that one step still needs the CLI.
 
-The Home page is a 3-step checklist; each step unlocks once the one before it is satisfied:
+The Home page is a 3-step checklist; each step unlocks once the one before it is satisfied.
+Above it sits one optional card you can ignore entirely:
 
 ```
+┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐
+╎  Architecture Principles   ╎  (optional — skip straight to step 1)
+└╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌┘
+              │
+              ▼
 ┌───────────────────────────┐
 │  1. Upload Specification    │
 └─────────────┬──────────────┘
@@ -122,6 +159,22 @@ The Home page is a 3-step checklist; each step unlocks once the one before it is
 │  3. Start Implementation    │
 └───────────────────────────┘
 ```
+
+### Architecture Principles (optional)
+
+Tempa runs your project through several separate Claude sessions — clarification, planning,
+implementation, QA, verification — and none of them remembers the previous one. **Architecture
+Principles** is where you write the rules that should hold across all of them: which database you
+use, whether an ORM is allowed, how API errors are shaped, what has to be true before code counts
+as done. Tempa prepends them to *every* prompt it sends, so the same rules stay in force
+everywhere instead of each session falling back on generic defaults.
+
+Click **Set / View Principles** on the card (or the sidebar entry) to open a free-form Markdown
+editor, plus a **Learn more** page with worked examples and the mistakes to avoid. Saving an empty
+box removes the principles again.
+
+This is entirely optional — leave it empty and Tempa behaves exactly as it did before, with
+nothing injected. Full reference: [docs/architecture-principles.md](docs/architecture-principles.md).
 
 ### Step 1 — Upload Specification
 
@@ -225,6 +278,14 @@ What you need to know at this point: **put your new specification in the `specs`
 structure and AI model configuration are in
 [docs/folders-and-paths.md](docs/folders-and-paths.md) and
 [docs/ai-models.md](docs/ai-models.md) — not required reading to get started.
+
+Optionally, set your project's **Architecture Principles** — rules Tempa applies to every stage
+that follows (see [Architecture Principles](#architecture-principles-optional) above). They're
+edited in the dashboard; from the CLI you can read the current value with:
+
+```bash
+tempa show-principles
+```
 
 ### Step 2 — Write the specification
 
@@ -332,6 +393,8 @@ recovering from problems, manual verification): see
 
 - **Folder & Path Structure** — what a working folder is, `workspace.*`, `sources.*`:
   [docs/folders-and-paths.md](docs/folders-and-paths.md)
+- **Architecture Principles** — project-wide rules injected into every stage, how to write them:
+  [docs/architecture-principles.md](docs/architecture-principles.md)
 - **AI Model per Stage** — why it's differentiated per stage, default table, how to change it:
   [docs/ai-models.md](docs/ai-models.md)
 - **Command Reference** — full list of every command:

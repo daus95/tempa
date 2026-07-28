@@ -24,6 +24,7 @@ from dashboard_clarify_parse import (
     file_answer_status, parse_file, _clarify_files_overview,
     _clarify_finalize_status, _live_clarification_findings,
 )
+from dashboard_assets import principles_guide_page
 from dashboard_clarify_render import _render_blocks_html
 from dashboard_runs import (
     _epic_sessions, _start_clarify_run, _start_implement_run, _stop_implement_run,
@@ -102,6 +103,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if route in ("/", ""):
             self._send(200, "text/html; charset=utf-8",
                        self.server.page_html.encode("utf-8"))
+        elif route == "/architecture-principles":
+            self._send(200, "text/html; charset=utf-8",
+                       principles_guide_page().encode("utf-8"))
         elif route == "/api/tree":
             unanswered, answered = _clarify_files_overview(self.server.clar_dir)
             findings = _live_clarification_findings(unanswered + answered)
@@ -113,6 +117,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
                             "finalize": _clarify_finalize_status(findings)},
+                "principles": {"set": bool(tempa_config.read_principles())},
             })
         elif route == "/api/spec/file":
             self._handle_spec_file(parse_qs(parsed.query))
@@ -124,6 +129,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_implement_run_status(parse_qs(parsed.query))
         elif route == "/api/config":
             self._handle_config_get()
+        elif route == "/api/principles":
+            self._send_json(200, {"ok": True, "content": tempa_config.read_principles()})
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -265,6 +272,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_workspace_close()
         elif parsed.path == "/api/config/save":
             self._handle_config_save()
+        elif parsed.path == "/api/principles/save":
+            self._handle_principles_save()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -632,3 +641,30 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": max_clarification_run,
             },
         })
+
+    def _handle_principles_save(self) -> None:
+        """Save the Architecture Principles document. Blank content deletes the file, which
+        is how the principles are unset (an absent file means nothing is injected)."""
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        content = payload.get("content", "")
+        if not isinstance(content, str):
+            self._send_json(400, {"ok": False, "error": "Content must be text."})
+            return
+        content = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+        target = tempa_config.get_principles_path()
+        try:
+            if not content:
+                target.unlink(missing_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # newline="\n" so Windows text mode doesn't reintroduce \r\n.
+                with open(target, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(content + "\n")
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not save the principles: {e}"})
+            return
+        print("[principles] " + ("cleared" if not content else "saved"))
+        self._send_json(200, {"ok": True, "content": content})

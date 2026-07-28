@@ -18,3 +18,15 @@ to customize harness behavior.
 
 **Placeholders** substituted at runtime (depending on the prompt): `${epic}`, `${sources}`,
 `${sources.<key>}`, `${config_path}`, `${output_file}`, `${qa_output_file}`.
+
+## Architecture principles are prepended automatically
+
+If the workspace has an [Architecture Principles](architecture-principles.md) document
+(`.tempa/architecture-principles.md`), its content is prepended to **every** template above —
+framed as non-negotiable rules — before the placeholders are substituted. That happens in
+`build_prompt()` in `src/tempa_prompts.py`, the one function all ten prompts are built through, so
+the same rules apply to clarification, planning, implementation, QA, and verification alike.
+
+There is no placeholder for it: injection is unconditional, so a `${...}` would duplicate the
+block. An absent or blank file injects nothing, leaving the templates exactly as written. Read the
+current value with `tempa show-principles`; edit it in the dashboard.

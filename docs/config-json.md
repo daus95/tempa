@@ -22,3 +22,6 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `epic` | Array of state for every epic (status, features, QA, session_id, etc.) |
 
 Prompt templates are **no longer** in config.json — see [prompt-templates.md](prompt-templates.md).
+Architecture principles aren't in config.json either: they live in
+`.tempa/architecture-principles.md` — see
+[architecture-principles.md](architecture-principles.md).

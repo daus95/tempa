@@ -86,6 +86,21 @@ def get_verify_dir() -> Path:
     return _tempa_dir() / "verify"
 
 
+def get_principles_path() -> Path:
+    """The workspace's architecture principles document — project-wide rules the user writes
+    once, injected into every stage's prompt (see tempa_prompts.build_prompt). Optional:
+    an absent file simply means no principles are applied."""
+    return _tempa_dir() / "architecture-principles.md"
+
+
+def read_principles() -> str:
+    """Return the architecture principles text, or "" if unset/blank/unreadable."""
+    try:
+        return get_principles_path().read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
 # Default working-folder layout. "root" MUST be an absolute path; every other
 # entry is a path RELATIVE to root. Stored under the "workspace" key in config.json.
 DEFAULT_WORKSPACE = {

@@ -2,15 +2,16 @@
 
 Loads the `.md` templates from PROMPT_DIR and builds the full prompt string sent to Claude
 for each harness stage (implementation, QA, clarification, apply, auto-answer, plan-epics,
-review-epics). `build_prompt` does the `${...}` placeholder substitution; the higher-level
-`build_*_prompt` functions assemble the per-stage substitution parameters.
+review-epics). `build_prompt` does the `${...}` placeholder substitution and prepends the
+workspace's architecture principles; the higher-level `build_*_prompt` functions assemble the
+per-stage substitution parameters.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from tempa_config import PROMPT_DIR, get_config_path, get_sources
+from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
 from tempa_logging import log
 
 
@@ -30,11 +31,41 @@ def load_prompt(name: str, fallback: str = "") -> str:
     return ""
 
 
-def build_prompt(template: str, parameters: dict) -> str:
+def _substitute(template: str, parameters: dict) -> str:
     result = template
     for key, value in parameters.items():
         result = result.replace(f"${{{key}}}", value)
     return result
+
+
+def _principles_block() -> str:
+    """The workspace's architecture principles, framed as binding rules — or "" if unset."""
+    principles = read_principles()
+    if not principles:
+        return ""
+    return (
+        "=== ARCHITECTURE PRINCIPLES — NON-NEGOTIABLE ===\n"
+        "These principles are defined for this project and apply to EVERY decision you make in\n"
+        "this session: the questions you raise, the answers you give, the plans you produce, the\n"
+        "code you write, and the QA you perform. They outrank convention, convenience, and your\n"
+        "own defaults.\n"
+        "If a principle conflicts with anything else in this prompt or in the specification, do\n"
+        "NOT silently pick a side — report the conflict explicitly and stop.\n"
+        "\n"
+        f"{principles}\n"
+        "=== END ARCHITECTURE PRINCIPLES ===\n"
+        "\n"
+    )
+
+
+def build_prompt(template: str, parameters: dict) -> str:
+    """Substitute ${...} placeholders, prefixed with the architecture principles block.
+
+    Every stage's prompt (clarify, apply, auto-answer, plan, review, implementation, QA, verify)
+    is built through this one function, so prepending here is what makes the principles apply
+    consistently everywhere instead of per-stage.
+    """
+    return _principles_block() + _substitute(template, parameters)
 
 
 def _resolve_template_params(config: dict, epic_name: str) -> dict:
