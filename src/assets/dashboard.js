@@ -164,6 +164,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),
   homeStep1 = $("homeStep1"), homeStep2 = $("homeStep2"), homeStep3 = $("homeStep3"),
   homeStep1Status = $("homeStep1Status"), homeStep2Status = $("homeStep2Status"), homeStep3Status = $("homeStep3Status"),
+  homeStep2FileList = $("homeStep2FileList"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
@@ -391,6 +392,21 @@ function renderHomeWorkflow() {
       : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).`;
 
   const findings = state.clarifyFindings;
+  const needsClarification = !step2Locked && (findings.critical > 0 || findings.major > 0);
+  const filesToAnswer = state.clarifyUnanswered.filter((f) => f.total > f.answered);
+  homeStep2FileList.classList.toggle("hidden", !needsClarification || !filesToAnswer.length);
+  if (needsClarification && filesToAnswer.length) {
+    homeStep2FileList.innerHTML = "";
+    for (const file of filesToAnswer) {
+      const li = document.createElement("li");
+      li.className = "home-step2-file-item";
+      li.innerHTML = `<span class="home-step2-file-name">${escapeHtml(file.name)}</span>` +
+        `<span class="file-status">${file.answered}/${file.total}</span>`;
+      li.addEventListener("click", () => openClarifyFile(file));
+      homeStep2FileList.appendChild(li);
+    }
+  }
+
   const findingsClean = findings.critical === 0 && findings.major === 0;
   const step3Locked = step2Locked || !findingsClean;
   homeStep3.classList.toggle("locked", step3Locked);
