@@ -13,6 +13,7 @@ tempa.py imports dashboard_ui).
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -93,7 +94,29 @@ MODEL_ALIASES = {
 }
 
 
+# Fresh-install / deleted-file fallback for load_config() below. Mirrors the shape
+# documented in docs/config-json.md — every key a brand-new config.json should have,
+# with no workspace linked yet (empty root) and no run history.
+DEFAULT_CONFIG = {
+    "models": dict(DEFAULT_MODELS),
+    "features_per_session": None,
+    "max_session_run": 30,
+    "max_clarification_run": 10,
+    "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
+    "last_auto_answer": 0,
+    "epic": [],
+    "workspace": dict(DEFAULT_WORKSPACE),
+}
+
+
 def load_config() -> dict:
+    """Load config.json, transparently creating it from DEFAULT_CONFIG if it doesn't
+    exist yet (e.g. deleted by hand, or a fresh clone) so every caller gets a usable
+    dict instead of a FileNotFoundError."""
+    if not CONFIG_PATH.exists():
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        save_config(config)
+        return config
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
