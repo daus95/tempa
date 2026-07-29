@@ -2,3 +2,6 @@
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["src"]

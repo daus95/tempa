@@ -71,7 +71,9 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-CI (`.github/workflows/tests.yml`) runs the same suite on every push/PR to `main`.
+CI (`.github/workflows/tests.yml`) runs the same suite on every push/PR to `main`, plus
+a coverage report (`--cov=src --cov-report=term-missing`) — run that flag locally too if
+you want to see which lines a change still needs a test for.
 
 Tests are isolated from your local Tempa install and any active workspace via an
 autouse fixture in `tests/conftest.py` that redirects Tempa's path constants into a

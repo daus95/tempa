@@ -115,6 +115,21 @@ def test_parse_file_title_from_heading_and_fallback():
     assert items2[0].title == "Finding 42"
 
 
+def test_parse_file_missing_optional_label_defaults_to_empty_string():
+    # "Recommendation" omitted entirely (only Where/Question/Your answer present) —
+    # seg_text() must return "" for it rather than raising a KeyError.
+    text = (
+        '<!-- clarify:item id="1" severity="minor" -->\n'
+        "**Where:** w\n**Question:** q\n"
+        "**Your answer:** <!-- clarify:answer-start -->\n<!-- clarify:answer-end -->\n"
+        "<!-- clarify:enditem -->\n"
+    )
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].recommendation == ""
+    assert items[0].where == "w"
+    assert items[0].question == "q"
+
+
 def test_parse_file_text_blocks_preserved_in_order():
     text = "Intro text\n" + _item("1", "critical", "T", "w", "q", "r", "") + "Trailing text\n"
     items, blocks = dcp.parse_file(Path("f.md"), text, 0)

@@ -205,6 +205,13 @@ def test_reset_qa_state_resets_matching_epics(isolate_tempa_paths):
     assert saved["epic"][1] == {"epic_name": "e2", "status": "pending"}
 
 
+def test_reset_qa_state_no_matching_epics_noop(isolate_tempa_paths):
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "pending"}]})
+    tm._reset_qa_state()
+    saved = tempa_config.load_config()
+    assert saved["epic"][0] == {"epic_name": "e1", "status": "pending"}
+
+
 def test_reset_on_progress_epics_resets_matching(isolate_tempa_paths):
     tempa_config.save_config({"epic": [
         {"epic_name": "e1", "status": "on_progress", "claude_session_id": "abc"},
@@ -215,6 +222,13 @@ def test_reset_on_progress_epics_resets_matching(isolate_tempa_paths):
     assert saved["epic"][0]["status"] == "pending"
     assert "claude_session_id" not in saved["epic"][0]
     assert saved["epic"][1]["status"] == "pending"
+
+
+def test_reset_on_progress_epics_no_matching_epics_noop(isolate_tempa_paths):
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "pending"}]})
+    tm._reset_on_progress_epics()
+    saved = tempa_config.load_config()
+    assert saved["epic"][0] == {"epic_name": "e1", "status": "pending"}
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +274,14 @@ def test_run_clarify_clear_with_yes_deletes_files(tmp_path, isolate_tempa_paths,
     assert list(clar_dir.iterdir()) == []
 
 
-def test_run_plan_clear_missing_sources_exits_1(isolate_tempa_paths):
-    tempa_config.save_config({"workspace": {"root": ""}, "sources": {"epics": ""}})
+def test_run_plan_clear_missing_sources_exits_1(isolate_tempa_paths, monkeypatch):
+    # As in test_run_clarify_clear_missing_sources_exits_1: get_sources() always
+    # synthesizes a non-empty default, so the guard can't be triggered through config
+    # alone — stub get_sources() directly to exercise it. (A config-only attempt here
+    # previously "passed" for the wrong reason: it fell through to a later crash/abort
+    # that also exits 1 but isn't the guard this test claims to cover.)
+    tempa_config.save_config({"workspace": {"root": ""}})
+    monkeypatch.setattr(tm, "get_sources", lambda config: {"epics": ""})
     with pytest.raises(SystemExit) as exc:
         tm.run_plan_clear()
     assert exc.value.code == 1
