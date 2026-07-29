@@ -1,0 +1,345 @@
+"""Tests for tempa_config.py — config load/save, workspace/sources/model resolution,
+and the active-workspace pointer. All isolated from the real dev machine via the
+autouse `isolate_tempa_paths` fixture in conftest.py."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+import tempa_config
+
+
+# ---------------------------------------------------------------------------
+# load_config / save_config / read_config_safe
+# ---------------------------------------------------------------------------
+
+def test_load_config_no_file_no_workspace_returns_default(isolate_tempa_paths):
+    config = tempa_config.load_config()
+    assert config == tempa_config.DEFAULT_CONFIG
+    assert not tempa_config.get_config_path().exists()
+
+
+def test_load_config_no_file_active_workspace_persists_default(tmp_path, isolate_tempa_paths):
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    tempa_config.set_active_workspace_root(workspace_root)
+
+    config = tempa_config.load_config()
+
+    assert config == tempa_config.DEFAULT_CONFIG
+    assert tempa_config.get_config_path().exists()
+    on_disk = json.loads(tempa_config.get_config_path().read_text(encoding="utf-8"))
+    assert on_disk == tempa_config.DEFAULT_CONFIG
+
+
+def test_load_config_existing_file_returned_verbatim(isolate_tempa_paths):
+    custom = {"models": {"clarify": "custom-model"}, "epic": [{"epic_name": "x"}]}
+    tempa_config.save_config(custom)
+
+    assert tempa_config.load_config() == custom
+
+
+def test_save_config_creates_parent_dirs(isolate_tempa_paths):
+    assert not tempa_config.get_config_path().parent.exists()
+    tempa_config.save_config({"a": 1})
+    assert tempa_config.get_config_path().exists()
+    assert json.loads(tempa_config.get_config_path().read_text(encoding="utf-8")) == {"a": 1}
+
+
+def test_read_config_safe_missing_file_returns_empty_dict(isolate_tempa_paths):
+    assert tempa_config.read_config_safe() == {}
+
+
+def test_read_config_safe_invalid_json_returns_empty_dict(isolate_tempa_paths):
+    path = tempa_config.get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json", encoding="utf-8")
+    assert tempa_config.read_config_safe() == {}
+
+
+def test_read_config_safe_non_dict_json_returns_empty_dict(isolate_tempa_paths):
+    path = tempa_config.get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[1, 2, 3]", encoding="utf-8")
+    assert tempa_config.read_config_safe() == {}
+
+
+def test_read_config_safe_valid_dict_returned_unchanged(isolate_tempa_paths):
+    tempa_config.save_config({"foo": "bar"})
+    assert tempa_config.read_config_safe() == {"foo": "bar"}
+
+
+# ---------------------------------------------------------------------------
+# get_workspace
+# ---------------------------------------------------------------------------
+
+def test_get_workspace_no_key_returns_default():
+    assert tempa_config.get_workspace({}) == tempa_config.DEFAULT_WORKSPACE
+
+
+def test_get_workspace_partial_override_merges_defaults():
+    workspace = tempa_config.get_workspace({"workspace": {"root": "/some/root"}})
+    assert workspace["root"] == "/some/root"
+    assert workspace["docs"] == tempa_config.DEFAULT_WORKSPACE["docs"]
+    assert workspace["apps"] == tempa_config.DEFAULT_WORKSPACE["apps"]
+
+
+# ---------------------------------------------------------------------------
+# resolve_workspace_paths
+# ---------------------------------------------------------------------------
+
+def test_resolve_workspace_paths_empty_root_returns_empty_dict():
+    assert tempa_config.resolve_workspace_paths({}) == {}
+    assert tempa_config.resolve_workspace_paths({"workspace": {"root": ""}}) == {}
+
+
+def test_resolve_workspace_paths_joins_onto_root(tmp_path):
+    root = tmp_path / "myproject"
+    config = {"workspace": {"root": str(root)}}
+    resolved = tempa_config.resolve_workspace_paths(config)
+
+    assert resolved["root"] == str(root)
+    assert resolved["docs"] == str(root / "docs")
+    assert resolved["apps"] == str(root / "src")
+    assert resolved["infra"] == str(root / "infra")
+    assert resolved["archive"] == str(root / "archive")
+    # specs is the one asymmetric key: nested under root/.tempa/<specs-rel>
+    assert resolved["specs"] == str(root / ".tempa" / "specs")
+
+
+# ---------------------------------------------------------------------------
+# resolve_source_path
+# ---------------------------------------------------------------------------
+
+def test_resolve_source_path_empty_value_returned_unchanged():
+    assert tempa_config.resolve_source_path({}, "") == ""
+
+
+def test_resolve_source_path_absolute_value_returned_as_is(tmp_path):
+    abs_path = str(tmp_path / "abs" / "dir")
+    config = {"workspace": {"root": str(tmp_path / "other_root")}}
+    assert tempa_config.resolve_source_path(config, abs_path) == abs_path
+
+
+def test_resolve_source_path_relative_with_root_joined(tmp_path):
+    root = tmp_path / "root"
+    config = {"workspace": {"root": str(root)}}
+    assert tempa_config.resolve_source_path(config, "sub/dir") == str(root / "sub/dir")
+
+
+def test_resolve_source_path_relative_without_root_returned_unchanged():
+    config = {"workspace": {"root": ""}}
+    assert tempa_config.resolve_source_path(config, "sub/dir") == "sub/dir"
+
+
+# ---------------------------------------------------------------------------
+# get_sources
+# ---------------------------------------------------------------------------
+
+def test_get_sources_defaults_derived_from_workspace(tmp_path):
+    root = tmp_path / "root"
+    config = {"workspace": {"root": str(root)}}
+    sources = tempa_config.get_sources(config)
+
+    specs_dir = tempa_config.resolve_specs_dir(config)
+    assert sources["docs"] == str(root / "docs")
+    assert sources["apps"] == str(root / "src")
+    assert sources["prd"] == str(specs_dir / "prd")
+    assert sources["epics"] == str(specs_dir / "pbi/epics")
+    assert sources["clarifications"] == str(specs_dir / "clarifications")
+
+
+def test_get_sources_explicit_override_resolved(tmp_path):
+    root = tmp_path / "root"
+    config = {"workspace": {"root": str(root)}, "sources": {"prd": "custom/prd"}}
+    sources = tempa_config.get_sources(config)
+    assert sources["prd"] == str(root / "custom/prd")
+
+
+def test_get_sources_falsy_override_falls_back_to_default(tmp_path):
+    root = tmp_path / "root"
+    config = {"workspace": {"root": str(root)}, "sources": {"epics": ""}}
+    sources = tempa_config.get_sources(config)
+    specs_dir = tempa_config.resolve_specs_dir(config)
+    assert sources["epics"] == str(specs_dir / "pbi/epics")
+
+
+# ---------------------------------------------------------------------------
+# resolve_specs_dir
+# ---------------------------------------------------------------------------
+
+def test_resolve_specs_dir_root_configured(tmp_path):
+    root = tmp_path / "root"
+    config = {"workspace": {"root": str(root), "specs": "myspecs"}}
+    assert tempa_config.resolve_specs_dir(config) == root / ".tempa" / "myspecs"
+
+
+def test_resolve_specs_dir_no_root_relative_uses_working_dir(isolate_tempa_paths):
+    config = {"workspace": {"specs": "myspecs"}}
+    assert tempa_config.resolve_specs_dir(config) == tempa_config.WORKING_DIR / "myspecs"
+
+
+def test_resolve_specs_dir_no_root_absolute_returned_as_is(tmp_path):
+    abs_specs = tmp_path / "abs_specs"
+    config = {"workspace": {"specs": str(abs_specs)}}
+    assert tempa_config.resolve_specs_dir(config) == abs_specs
+
+
+def test_resolve_specs_dir_missing_specs_key_falls_back_to_literal(isolate_tempa_paths):
+    config = {"workspace": {}}
+    assert tempa_config.resolve_specs_dir(config) == tempa_config.WORKING_DIR / "specs"
+
+
+# ---------------------------------------------------------------------------
+# resolve_prd_dir / resolve_clar_dir
+# ---------------------------------------------------------------------------
+
+def test_resolve_prd_dir(tmp_path):
+    config = {"workspace": {"root": str(tmp_path)}}
+    from pathlib import Path
+    assert tempa_config.resolve_prd_dir(config) == Path(tempa_config.get_sources(config)["prd"])
+
+
+def test_resolve_clar_dir(tmp_path):
+    config = {"workspace": {"root": str(tmp_path)}}
+    from pathlib import Path
+    assert tempa_config.resolve_clar_dir(config) == Path(tempa_config.get_sources(config)["clarifications"])
+
+
+# ---------------------------------------------------------------------------
+# _resolve_model_alias
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("alias,expected", [
+    ("opus-5", "claude-opus-5"),
+    ("opus", "claude-opus-5"),
+    ("sonnet-5", "claude-sonnet-5"),
+    ("sonnet", "claude-sonnet-5"),
+    ("haiku-4.5", "claude-haiku-4-5-20251001"),
+    ("haiku", "claude-haiku-4-5-20251001"),
+    ("fable-5", "claude-fable-5"),
+    ("fable", "claude-fable-5"),
+])
+def test_resolve_model_alias_known(alias, expected):
+    assert tempa_config._resolve_model_alias(alias) == expected
+
+
+def test_resolve_model_alias_whitespace_and_case_insensitive():
+    assert tempa_config._resolve_model_alias(" Opus-5 ") == "claude-opus-5"
+
+
+def test_resolve_model_alias_unknown_returned_unchanged():
+    assert tempa_config._resolve_model_alias("some-custom-model-id") == "some-custom-model-id"
+
+
+# ---------------------------------------------------------------------------
+# get_models / get_model
+# ---------------------------------------------------------------------------
+
+def test_get_models_empty_config_returns_defaults():
+    assert tempa_config.get_models({}) == tempa_config.DEFAULT_MODELS
+
+
+def test_get_models_partial_override_merges():
+    models = tempa_config.get_models({"models": {"implement": "custom"}})
+    assert models["implement"] == "custom"
+    assert models["clarify"] == tempa_config.DEFAULT_MODELS["clarify"]
+    assert models["plan"] == tempa_config.DEFAULT_MODELS["plan"]
+
+
+def test_get_model_stage_present():
+    config = {"models": {"implement": "custom-model"}}
+    assert tempa_config.get_model(config, "implement") == "custom-model"
+
+
+def test_get_model_stage_absent_from_models_dict_falls_back_to_default():
+    config = {"models": {}}
+    assert tempa_config.get_model(config, "clarify") == tempa_config.DEFAULT_MODELS["clarify"]
+
+
+def test_get_model_unknown_stage_falls_back_to_hardcoded_default():
+    assert tempa_config.get_model({}, "nonexistent-stage") == "claude-sonnet-5"
+
+
+# ---------------------------------------------------------------------------
+# active-workspace pointer
+# ---------------------------------------------------------------------------
+
+def test_get_active_workspace_root_absent_returns_none(isolate_tempa_paths):
+    assert tempa_config.get_active_workspace_root() is None
+
+
+def test_get_active_workspace_root_blank_pointer_returns_none(isolate_tempa_paths):
+    tempa_config.ACTIVE_WORKSPACE_POINTER.write_text("   \n", encoding="utf-8")
+    assert tempa_config.get_active_workspace_root() is None
+
+
+def test_get_active_workspace_root_real_path(tmp_path, isolate_tempa_paths):
+    from pathlib import Path
+    target = tmp_path / "some_workspace"
+    tempa_config.ACTIVE_WORKSPACE_POINTER.write_text(str(target), encoding="utf-8")
+    assert tempa_config.get_active_workspace_root() == Path(str(target))
+
+
+def test_set_active_workspace_root_round_trips(tmp_path, isolate_tempa_paths):
+    target = tmp_path / "some_workspace"
+    tempa_config.set_active_workspace_root(target)
+    assert tempa_config.get_active_workspace_root() == target
+
+
+def test_clear_active_workspace_root_removes_pointer(tmp_path, isolate_tempa_paths):
+    tempa_config.set_active_workspace_root(tmp_path / "w")
+    tempa_config.clear_active_workspace_root()
+    assert not tempa_config.ACTIVE_WORKSPACE_POINTER.exists()
+    assert tempa_config.get_active_workspace_root() is None
+
+
+def test_clear_active_workspace_root_idempotent(isolate_tempa_paths):
+    # Absent already — must not raise.
+    tempa_config.clear_active_workspace_root()
+
+
+# ---------------------------------------------------------------------------
+# read_principles
+# ---------------------------------------------------------------------------
+
+def test_read_principles_absent_returns_empty_string(isolate_tempa_paths):
+    assert tempa_config.read_principles() == ""
+
+
+def test_read_principles_strips_whitespace(isolate_tempa_paths):
+    path = tempa_config.get_principles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("  \n  Some principles.  \n\n", encoding="utf-8")
+    assert tempa_config.read_principles() == "Some principles."
+
+
+def test_read_principles_undecodable_returns_empty_string(isolate_tempa_paths):
+    path = tempa_config.get_principles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Invalid UTF-8 byte sequence.
+    path.write_bytes(b"\xff\xfe\x00\x00invalid")
+    assert tempa_config.read_principles() == ""
+
+
+# ---------------------------------------------------------------------------
+# path getters (_tempa_dir-derived), parametrized over workspace active/inactive
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("workspace_active", [False, True])
+def test_path_getters_resolve_under_tempa_dir(tmp_path, isolate_tempa_paths, workspace_active):
+    if workspace_active:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        tempa_config.set_active_workspace_root(root)
+        base = root
+    else:
+        base = isolate_tempa_paths["script_dir"]
+
+    assert tempa_config.get_config_path() == base / ".tempa" / "config.json"
+    assert tempa_config.get_logs_dir() == base / ".tempa" / "logs"
+    assert tempa_config.get_qa_dir() == base / ".tempa" / "qa"
+    assert tempa_config.get_verify_dir() == base / ".tempa" / "verify"
+    assert tempa_config.get_principles_path() == base / ".tempa" / "architecture-principles.md"

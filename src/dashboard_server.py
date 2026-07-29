@@ -17,7 +17,8 @@ from urllib.parse import urlparse, parse_qs
 
 import tempa_config
 from dashboard_config import (
-    _resolve_source_dir, _workspace_can_close, _workspace_initialized, _workspace_root,
+    _load_clarify_applied_hashes, _load_dashboard_config, _resolve_source_dir,
+    _workspace_can_close, _workspace_initialized, _workspace_root,
 )
 from dashboard_spec import MARKDOWN_EXTENSIONS, build_tree, _is_text_file, _resolve_within
 from dashboard_clarify_parse import (
@@ -107,8 +108,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, "text/html; charset=utf-8",
                        principles_guide_page().encode("utf-8"))
         elif route == "/api/tree":
-            unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+            unanswered, answered = _clarify_files_overview(
+                self.server.clar_dir, _load_clarify_applied_hashes()
+            )
             findings = _live_clarification_findings(unanswered + answered)
+            last_action = _load_dashboard_config().get("last_clarification_action")
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -116,7 +120,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "spec": {"tree": build_tree(self.server.prd_dir)},
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
-                            "finalize": _clarify_finalize_status(findings)},
+                            "finalize": _clarify_finalize_status(findings, last_action)},
                 "principles": {"set": bool(tempa_config.read_principles())},
             })
         elif route == "/api/spec/file":
@@ -425,9 +429,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
-        unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+        unanswered, answered = _clarify_files_overview(
+            self.server.clar_dir, _load_clarify_applied_hashes()
+        )
         findings = _live_clarification_findings(unanswered + answered)
-        if mode == "finalize" and not _clarify_finalize_status(findings)["ready"]:
+        last_action = _load_dashboard_config().get("last_clarification_action")
+        if mode == "finalize" and not _clarify_finalize_status(findings, last_action)["ready"]:
             # Server-side gate, not just a disabled button client-side — mirrors the
             # implement gate below. `tempa clarify --finalize` itself has no awareness
             # of this precondition and would happily run regardless.
@@ -446,7 +453,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # Server-side gate, not just a disabled button client-side — tempa.py's
         # `implement` itself has no awareness of clarification findings and will
         # happily start regardless, so this is the only thing actually enforcing it.
-        unanswered, answered = _clarify_files_overview(self.server.clar_dir)
+        unanswered, answered = _clarify_files_overview(
+            self.server.clar_dir, _load_clarify_applied_hashes()
+        )
         findings = _live_clarification_findings(unanswered + answered)
         if findings["critical"] or findings["major"]:
             self._send_json(409, {

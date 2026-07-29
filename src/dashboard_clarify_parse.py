@@ -11,8 +11,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from dashboard_config import _load_clarify_applied_hashes, _load_dashboard_config
-
 
 # ---------------------------------------------------------------------------
 # Clarification answering — ported from the former clarify_ui.py.
@@ -202,7 +200,7 @@ def _live_clarification_findings(files: list[dict]) -> dict:
     return totals
 
 
-def _clarify_finalize_status(findings: dict) -> dict:
+def _clarify_finalize_status(findings: dict, last_action: str | None) -> dict:
     """Whether "Finalized Clarification" is currently allowed to run.
 
     Requires all of:
@@ -216,11 +214,11 @@ def _clarify_finalize_status(findings: dict) -> dict:
         from _live_clarification_findings — the actual tag count, not a
         self-reported opinion)
 
-    config.json's "last_clarification_action" is stamped by tempa.py right after each
-    `clarify` (evaluate) / `clarify --apply` (apply) / `clarify --finalize` (both,
-    alternating) run — see run_clarify_once(), _run_apply_step(), and
-    run_clarify_finalize() there."""
-    last_action = _load_dashboard_config().get("last_clarification_action")
+    `last_action` is config.json's "last_clarification_action" (caller's
+    responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
+    stamped by tempa.py right after each `clarify` (evaluate) / `clarify --apply`
+    (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
+    _run_apply_step(), and run_clarify_finalize() there."""
     fresh_evaluate = last_action == "evaluate"
     ready = fresh_evaluate and findings["critical"] == 0
     return {
@@ -231,18 +229,18 @@ def _clarify_finalize_status(findings: dict) -> dict:
     }
 
 
-def _clarify_files_overview(clar_dir: Path) -> tuple[list[dict], list[dict]]:
+def _clarify_files_overview(clar_dir: Path, applied_hashes: dict) -> tuple[list[dict], list[dict]]:
     """Every clarification result file (flat, excluding claude.md) with recognized
     findings, split into (unanswered, fully_answered), each sorted by name. Fully
     answered files also get an "applied" bool: whether their current content (i.e.
     current answers) matches what was last applied to the PRD/spec, per
-    config.json's clarify_applied_hashes — so the dashboard knows whether an
-    "Apply Answer(s)" action is actually needed or would be a no-op."""
+    `applied_hashes` (caller's responsibility to load it, e.g. via
+    dashboard_config._load_clarify_applied_hashes()) — so the dashboard knows
+    whether an "Apply Answer(s)" action is actually needed or would be a no-op."""
     unanswered: list[dict] = []
     answered: list[dict] = []
     if not clar_dir.exists():
         return unanswered, answered
-    applied_hashes = _load_clarify_applied_hashes()
     for p in sorted(clar_dir.glob("*.md")):
         if p.name.lower() == "claude.md":
             continue

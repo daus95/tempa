@@ -13,7 +13,9 @@ from pathlib import Path
 
 import tempa_config
 
-from dashboard_config import _workspace_can_close, _workspace_initialized, _workspace_root
+from dashboard_config import (
+    _load_dashboard_config, _workspace_can_close, _workspace_initialized, _workspace_root,
+)
 from dashboard_clarify_parse import _clarify_finalize_status, _live_clarification_findings
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
@@ -52,7 +54,10 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     principles_set_json = json.dumps(bool(tempa_config.read_principles()))
     live_findings = _live_clarification_findings(clarify_unanswered + clarify_answered)
     clarify_findings_json = json.dumps(live_findings, ensure_ascii=False)
-    clarify_finalize_json = json.dumps(_clarify_finalize_status(live_findings), ensure_ascii=False)
+    last_action = _load_dashboard_config().get("last_clarification_action")
+    clarify_finalize_json = json.dumps(
+        _clarify_finalize_status(live_findings, last_action), ensure_ascii=False
+    )
     return (
         _page_template()
         .replace("/*__SPEC_TREE__*/null", tree_json)
