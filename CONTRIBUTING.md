@@ -43,17 +43,18 @@ clear at a glance which side of the tool (CLI vs. dashboard) it belongs to.
 
 - Keep pull requests focused — one behavior change or fix per PR is much easier to review
   than a bundle of unrelated tweaks.
-- There is currently no automated test suite or CI (see
-  [Testing](#testing) below), so manual verification is the review bar for now:
-  describe in your PR description exactly what you ran and what you observed (CLI output,
-  dashboard screenshots, etc.).
+- Run the test suite (see [Testing](#testing) below) before opening a PR, and add tests
+  for new pure-logic behavior where practical. Code that shells out to the `claude` CLI or
+  serves the dashboard isn't covered by tests yet, so for changes there, describe in your
+  PR description exactly what you ran and what you observed (CLI output, dashboard
+  screenshots, etc.).
 - If your change affects user-facing behavior (a command, a config key, dashboard flow),
   update the relevant file in `docs/` and/or `README.md` in the same PR.
 - If your change affects a prompt template in `src/prompt/`, mention which stage(s) you
   tested it against (clarify, plan, implement, QA, verify).
-- No linter/formatter is enforced yet — just follow the style of the surrounding code
-  (this will likely tighten up as the project grows; see the open items tracked in
-  [SECURITY.md](SECURITY.md) and the project's issue tracker for where things are headed).
+- Run `ruff check .` before opening a PR — CI enforces it (`.github/workflows/tests.yml`,
+  `lint` job) and will fail the build on any violation. Config lives in `pyproject.toml`
+  under `[tool.ruff]`.
 
 ## Testing
 

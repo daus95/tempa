@@ -8,8 +8,6 @@ pointer (which, outside tests, may point at a real, unrelated workspace)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 

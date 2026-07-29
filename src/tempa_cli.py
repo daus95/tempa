@@ -16,20 +16,37 @@ from __future__ import annotations
 import argparse
 import sys
 
-from tempa_config import POLL_INTERVAL_SEC, WORKING_DIR, get_config_path, get_qa_dir, load_config
-from tempa_implement import main
 from tempa_clarify import (
-    run_answer_command, run_clarify_answer, run_clarify_apply,
-    run_clarify_finalize, run_clarify_once,
-)
-from tempa_maintenance import (
-    run_clarify_clear, run_clear_all, run_implement_clear, run_plan_clear,
-    _reset_failed_epics, _reset_on_progress_epics, _reset_qa_state,
+    run_answer_command,
+    run_clarify_answer,
+    run_clarify_apply,
+    run_clarify_finalize,
+    run_clarify_once,
 )
 from tempa_commands import (
-    print_models, print_principles, print_status, print_workspace, run_close_folder,
-    run_dashboard_command, run_init, run_spec_show, run_test, run_verify,
-    set_models, set_working_folders,
+    print_models,
+    print_principles,
+    print_status,
+    print_workspace,
+    run_close_folder,
+    run_dashboard_command,
+    run_init,
+    run_spec_show,
+    run_test,
+    run_verify,
+    set_models,
+    set_working_folders,
+)
+from tempa_config import POLL_INTERVAL_SEC, WORKING_DIR, get_config_path, get_qa_dir, load_config
+from tempa_implement import main
+from tempa_maintenance import (
+    _reset_failed_epics,
+    _reset_on_progress_epics,
+    _reset_qa_state,
+    run_clarify_clear,
+    run_clear_all,
+    run_implement_clear,
+    run_plan_clear,
 )
 
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages

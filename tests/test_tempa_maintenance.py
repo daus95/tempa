@@ -13,7 +13,6 @@ import pytest
 import tempa_config
 import tempa_maintenance as tm
 
-
 # ---------------------------------------------------------------------------
 # _safety_check_clear_target
 # ---------------------------------------------------------------------------

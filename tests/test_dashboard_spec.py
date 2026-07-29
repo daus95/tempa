@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 import dashboard_spec as ds
-
 
 # ---------------------------------------------------------------------------
 # _is_text_file
@@ -129,6 +129,10 @@ def test_resolve_within_rejects_backslash_traversal(tmp_path):
     assert ds._resolve_within(tmp_path, "..\\..\\secrets.txt") is None
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="a 'C:/...' string is only an absolute (root-replacing) path on Windows",
+)
 def test_resolve_within_rejects_drive_letter_absolute_path(tmp_path):
     # A Windows drive-rooted path replaces the join entirely, so it lands outside
     # root — this is the real, non-obvious escape vector to lock down.

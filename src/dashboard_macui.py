@@ -22,7 +22,7 @@ def _pick_folder_dialog() -> str | None:
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=300,
         )
     except FileNotFoundError as e:

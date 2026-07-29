@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .coverage
+.ruff_cache/
 
 # Active-workspace pointer + scratch config/logs/qa/verify used before a workspace is
 # selected (or after `close-folder`) — the real per-workspace state lives in

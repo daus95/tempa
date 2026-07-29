@@ -16,12 +16,12 @@ from datetime import datetime
 from pathlib import Path
 
 from dashboard_ui import file_answer_status, run_dashboard
-
 from tempa_config import get_model, get_sources, load_config, save_config
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
-from tempa_logging import _state, _banner, _hyperlink, _init_process_log, log
+from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
 from tempa_prompts import (
-    build_apply_clarification_prompt, build_auto_answer_prompt,
+    build_apply_clarification_prompt,
+    build_auto_answer_prompt,
     build_clarification_prompt,
 )
 from tempa_session import run_apply_clarification_session, run_clarification_session
@@ -252,7 +252,7 @@ def run_clarify_finalize() -> None:
         config["last_clarification_action"] = "apply"
         save_config(config)
 
-        log(f"Resolutions applied. Running re-evaluation...")
+        log("Resolutions applied. Running re-evaluation...")
 
     log(f"Clarify (finalize) reached the {max_run}-run limit. Stopping.")
     sys.exit(1)

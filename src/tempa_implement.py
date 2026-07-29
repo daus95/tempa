@@ -14,12 +14,20 @@ from datetime import datetime
 from pathlib import Path
 
 from tempa_config import (
-    POLL_INTERVAL_SEC, WORKING_DIR,
-    get_config_path, get_model, get_qa_dir, get_sources, load_config, save_config,
+    POLL_INTERVAL_SEC,
+    WORKING_DIR,
+    get_config_path,
+    get_model,
+    get_qa_dir,
+    get_sources,
+    load_config,
+    save_config,
 )
-from tempa_logging import _state, _banner, _init_process_log, log, process_log_path
+from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
 from tempa_prompts import (
-    build_plan_epics_prompt, build_qa_prompt, build_review_epics_prompt,
+    build_plan_epics_prompt,
+    build_qa_prompt,
+    build_review_epics_prompt,
     build_session_prompt,
 )
 from tempa_session import _run_oneshot_session, run_qa_session, run_session

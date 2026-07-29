@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 TEXT_EXTENSIONS = {
     ".md", ".markdown", ".txt", ".text", ".rst",
     ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env",
