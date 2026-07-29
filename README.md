@@ -24,6 +24,15 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
 ---
 
+## Contents
+
+- [Setup (One-Time Only)](#setup-one-time-only)
+- [Dashboard (Recommended)](#dashboard-recommended)
+- [Command Line Interface (CLI)](#command-line-interface-cli)
+- [Further Reference](#further-reference)
+
+---
+
 ## Setup (One-Time Only)
 
 > Done once per machine. Once this is done, the recommended way to do the recurring work
@@ -165,6 +174,13 @@ Above it sits one optional card you can ignore entirely:
 │  3. Start Implementation    │
 └───────────────────────────┘
 ```
+
+| Dashboard step | Equivalent CLI step |
+|---|---|
+| *(prerequisite, not shown above)* | [Step 1 — Initial Setup](#step-1--initial-setup) (`tempa init <path>`) |
+| [Step 1 — Upload Specification](#step-1--upload-specification) | [Step 2 — Write the specification](#step-2--write-the-specification) |
+| [Step 2 — Clarification](#step-2--clarification) | [Step 3 — Answer clarifications](#step-3--answer-clarifications-clarify) (`tempa clarify`) |
+| [Step 3 — Start Implementation](#step-3--start-implementation) | [Step 4 — Run implementation](#step-4--run-implementation-implement) (`tempa implement`) |
 
 ### Architecture Principles (optional)
 
