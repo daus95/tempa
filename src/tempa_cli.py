@@ -117,7 +117,7 @@ CONFIG OPTIONS (config.json)
   workspace.adr                   Architecture decision record folder (default: adr)
   workspace.specs                 NEW specification folder to be worked on (default: specs, stored
                                       under <root>/.tempa/ rather than directly under root)
-  workspace.apps                  Application implementation folder (default: apps)
+  workspace.apps                  Application implementation folder (default: src)
   workspace.infra                 Infrastructure scripts folder, e.g. docker compose (default: infra)
   workspace.archive                Archive folder for old, unused specifications (default: archive)
   sources.*                       DERIVED from workspace.* by default (see below); set a key here to override it

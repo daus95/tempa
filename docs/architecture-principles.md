@@ -105,7 +105,7 @@ you haven't made yet (leave those for clarification to surface), roadmaps, or bu
 - PostgreSQL 16 is the only datastore. Flag any proposal to add another.
 
 ## Structure
-- One service per folder under apps/. A service owns its own tables and never
+- One service per folder under src/. A service owns its own tables and never
   reads another service's tables directly.
 - Database access only through repository classes. No SQL in route handlers.
 

@@ -36,7 +36,7 @@ throughout the config.
 | `docs` | **current** application documentation | `docs` |
 | `adr` | Architecture Decision Records | `adr` |
 | `specs` | **new** specifications to be worked on | `.tempa/specs` (Tempa-managed, see below — kept alongside config/logs/qa/verify, unlike the other folders here which sit directly under root) |
-| `apps` | application implementation | `apps` |
+| `apps` | application implementation | `src` |
 | `infra` | infrastructure scripts (e.g. docker compose) | `infra` |
 | `archive` | archive of old specs no longer in use | `archive` |
 
@@ -73,7 +73,7 @@ To point any one of these somewhere else, set it explicitly under `sources` in `
 explicit `sources.<key>` always overrides its computed default.
 
 > **Multi-service monorepo.** The application consists of many services (e.g.
-> `apps/backend`, `apps/web`, …), each holding both its own source code **and** its own
+> `src/backend`, `src/web`, …), each holding both its own source code **and** its own
 > tests. That's why there's no `sources.implementation`/`sources.tests` pinned to a single
 > path — `sources.apps` is the one reference, and Claude opens whichever service is
 > relevant to the epic's spec.
@@ -107,7 +107,7 @@ different workspace and back never loses or overwrites anything.
 none of this is committed to the workspace's own repo.
 
 `init`/`close-folder` only ever touch `.active-workspace` (see above) and the contents of
-`.tempa/` — they never read or write anything under `docs/`, `adr/`, `apps/`, `infra/`, or
+`.tempa/` — they never read or write anything under `docs/`, `adr/`, `src/`, `infra/`, or
 `archive/`.
 
 ## Tempa's own folder (before any workspace is active)

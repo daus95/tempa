@@ -170,9 +170,9 @@ erDiagram
 ## 5. Tech Stack
 
 - **Frontend:** React (or an equivalent SPA framework), following Tempa's multi-service
-  layout under `apps/web`.
+  layout under `src/web`.
 - **Backend:** REST API service (e.g. Node.js/Express or an equivalent framework), under
-  `apps/backend`.
+  `src/backend`.
 - **Database:** relational database (e.g. PostgreSQL or MySQL) accessed via an ORM (e.g.
   Prisma) — this app **does access a database**, unlike the other two example scenarios.
 - **Auth:** username/password login, session or JWT-based, with role-based access control
