@@ -10,6 +10,7 @@ Keeping the modules in src/ (rather than as a package with relative imports) is 
 Tempa still run as a plain script — `py tempa.py <cmd>` — from any working directory.
 """
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -19,10 +20,8 @@ from pathlib import Path
 # by the dashboard. errors="replace" degrades to "?" instead of crashing if a console
 # still can't render a given character even in UTF-8 mode.
 for _stream in (sys.stdout, sys.stderr):
-    try:
+    with contextlib.suppress(AttributeError, ValueError):
         _stream.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):
-        pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import tempa_config
 import tempa_prompts as tp
 
@@ -105,7 +103,7 @@ def test_resolve_template_params_contains_expected_keys(tmp_path, isolate_tempa_
     config = _sample_config(tmp_path)
     params = tp._resolve_template_params(config, "my-epic")
 
-    from tempa_config import get_sources, get_config_path
+    from tempa_config import get_config_path, get_sources
     sources = get_sources(config)
     assert params["epic"] == "my-epic"
     assert params["sources"] == "\n".join(sources.values())

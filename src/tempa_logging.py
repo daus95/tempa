@@ -66,9 +66,8 @@ def _write_to_process_log(line: str) -> None:
     if _process_log_path is None:
         return
     try:
-        with _process_log_lock:
-            with open(_process_log_path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+        with _process_log_lock, open(_process_log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
     except Exception:
         pass
 

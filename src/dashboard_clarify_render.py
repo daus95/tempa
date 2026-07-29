@@ -8,7 +8,7 @@ from __future__ import annotations
 import html as html_lib
 import re
 
-from dashboard_clarify_parse import ClarificationItem, SEVERITY_LABELS
+from dashboard_clarify_parse import SEVERITY_LABELS, ClarificationItem
 
 
 def _md_inline(s: str) -> str:

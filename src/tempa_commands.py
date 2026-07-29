@@ -15,18 +15,31 @@ from datetime import datetime
 from pathlib import Path
 
 from dashboard_ui import run_dashboard
-
 from tempa_config import (
-    DEFAULT_WORKSPACE, WORKING_DIR, WORKSPACE_LABELS,
-    clear_active_workspace_root, get_logs_dir, get_model, get_models, get_principles_path,
-    get_qa_dir, get_sources, get_verify_dir, get_workspace, load_config, read_principles,
-    resolve_workspace_paths, save_config, set_active_workspace_root, _resolve_model_alias,
+    DEFAULT_WORKSPACE,
+    WORKING_DIR,
+    WORKSPACE_LABELS,
+    _resolve_model_alias,
+    clear_active_workspace_root,
+    get_logs_dir,
+    get_model,
+    get_models,
+    get_principles_path,
+    get_qa_dir,
+    get_sources,
+    get_verify_dir,
+    get_workspace,
+    load_config,
+    read_principles,
+    resolve_workspace_paths,
+    save_config,
+    set_active_workspace_root,
 )
-from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
-from tempa_logging import _state, _banner, _print_log_tail, log
-from tempa_prompts import build_prompt, load_prompt, _resolve_template_params
-from tempa_session import build_claude_cmd, _run_claude_session, _stream_claude_process
+from tempa_config import resolve_prd_dir as _resolve_prd_dir
+from tempa_logging import _banner, _print_log_tail, _state, log
+from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
+from tempa_session import _run_claude_session, _stream_claude_process, build_claude_cmd
 
 
 def run_test() -> None:
@@ -117,7 +130,7 @@ def run_verify(epic: str) -> None:
     if _state.auth_error_hit:
         sys.exit(3)
     if _state.usage_limit_hit:
-        log(f"Verification stopped — Claude usage limit reached.")
+        log("Verification stopped — Claude usage limit reached.")
         sys.exit(2)
 
     if exit_code != 0:
@@ -282,7 +295,7 @@ def run_init(args: argparse.Namespace) -> None:
     # Also create every configured `sources` folder (e.g. specs/prd, specs/pbi/epics,
     # specs/clarifications) so the expected input/output structure exists from the start,
     # not just the ones clarify/implement happen to create lazily on first write.
-    for key, path_str in get_sources(config).items():
+    for _key, path_str in get_sources(config).items():
         if not path_str:
             continue
         folder = Path(path_str)

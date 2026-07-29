@@ -11,7 +11,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Clarification answering — ported from the former clarify_ui.py.
 # ---------------------------------------------------------------------------

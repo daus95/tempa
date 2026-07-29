@@ -34,7 +34,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from dashboard_assets import render_page as _render_page
-from dashboard_clarify_parse import file_answer_status, _clarify_files_overview
+from dashboard_clarify_parse import _clarify_files_overview
 from dashboard_config import _load_clarify_applied_hashes
 from dashboard_runs import _new_clarify_run_state, _new_implement_run_state
 from dashboard_server import _DashboardHandler

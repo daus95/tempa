@@ -13,7 +13,12 @@ import sys
 from pathlib import Path
 
 from tempa_config import (
-    get_logs_dir, get_qa_dir, get_sources, get_workspace, load_config, save_config,
+    get_logs_dir,
+    get_qa_dir,
+    get_sources,
+    get_workspace,
+    load_config,
+    save_config,
 )
 from tempa_logging import _banner, log
 
@@ -145,7 +150,7 @@ def run_plan_clear() -> None:
     _safety_check_clear_target(pbi_dir, get_workspace(config).get("root", ""))
 
     files = [p for p in pbi_dir.rglob("*") if p.is_file()] if pbi_dir.exists() else []
-    epic_count = len((config.get("epic") or []))
+    epic_count = len(config.get("epic") or [])
 
     _banner("PLAN CLEAR — DESTRUCTIVE ACTION")
     print(f"  Delete: {pbi_dir} ({len(files)} file(s), all sub-folders) | "
@@ -208,7 +213,7 @@ def run_clear_all() -> None:
     qa_files = [p for p in qa_dir.rglob("*") if p.is_file()] if qa_dir.exists() else []
     log_files = [p for p in logs_dir.rglob("*") if p.is_file()] if logs_dir.exists() else []
     plan_files = [p for p in pbi_dir.rglob("*") if p.is_file()] if pbi_dir.exists() else []
-    epic_count = len((config.get("epic") or []))
+    epic_count = len(config.get("epic") or [])
     keep = {"claude.md"}
     clar_to_delete = [c for c in clar_dir.iterdir() if c.name.lower() not in keep] if clar_dir.exists() else []
     # Stale leftovers from a past clarify run can outlive the files they describe

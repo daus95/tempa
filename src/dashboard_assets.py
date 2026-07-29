@@ -12,11 +12,13 @@ from functools import lru_cache
 from pathlib import Path
 
 import tempa_config
-
-from dashboard_config import (
-    _load_dashboard_config, _workspace_can_close, _workspace_initialized, _workspace_root,
-)
 from dashboard_clarify_parse import _clarify_finalize_status, _live_clarification_findings
+from dashboard_config import (
+    _load_dashboard_config,
+    _workspace_can_close,
+    _workspace_initialized,
+    _workspace_root,
+)
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 

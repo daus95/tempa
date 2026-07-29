@@ -7,29 +7,41 @@ _resolve_within."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import tempa_config
-from dashboard_config import (
-    _load_clarify_applied_hashes, _load_dashboard_config, _resolve_source_dir,
-    _workspace_can_close, _workspace_initialized, _workspace_root,
-)
-from dashboard_spec import MARKDOWN_EXTENSIONS, build_tree, _is_text_file, _resolve_within
-from dashboard_clarify_parse import (
-    file_answer_status, parse_file, _clarify_files_overview,
-    _clarify_finalize_status, _live_clarification_findings,
-)
 from dashboard_assets import principles_guide_page
-from dashboard_clarify_render import _render_blocks_html
-from dashboard_runs import (
-    _epic_sessions, _start_clarify_run, _start_implement_run, _stop_implement_run,
+from dashboard_clarify_parse import (
+    _clarify_files_overview,
+    _clarify_finalize_status,
+    _live_clarification_findings,
+    file_answer_status,
+    parse_file,
 )
+from dashboard_clarify_render import _render_blocks_html
+from dashboard_config import (
+    _load_clarify_applied_hashes,
+    _load_dashboard_config,
+    _resolve_source_dir,
+    _workspace_can_close,
+    _workspace_initialized,
+    _workspace_root,
+)
+from dashboard_runs import (
+    _epic_sessions,
+    _start_clarify_run,
+    _start_implement_run,
+    _stop_implement_run,
+)
+from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within, build_tree
+
 if sys.platform == "win32":
     from dashboard_winui import _open_and_focus_folder, _pick_folder_dialog
 elif sys.platform == "darwin":
@@ -88,10 +100,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        try:
+        with contextlib.suppress(BrokenPipeError, ConnectionAbortedError):
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionAbortedError):
-            pass
 
     def _send_json(self, status: int, obj: dict) -> None:
         self._send(status, "application/json; charset=utf-8",
@@ -203,7 +213,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_clarify_run_status(self, query: dict) -> None:
         try:
-            since = int((query.get("since", ["0"])[0]))
+            since = int(query.get("since", ["0"])[0])
         except ValueError:
             since = 0
         run = self.server.clarify_run
@@ -218,7 +228,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_implement_run_status(self, query: dict) -> None:
         try:
-            since = int((query.get("since", ["0"])[0]))
+            since = int(query.get("since", ["0"])[0])
         except ValueError:
             since = 0
         run = self.server.implement_run

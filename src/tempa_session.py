@@ -11,19 +11,25 @@ prompts, only runs them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from tempa_config import (
-    WORKING_DIR, get_logs_dir, get_model, get_qa_dir, load_config, save_config,
+    WORKING_DIR,
+    get_logs_dir,
+    get_model,
+    get_qa_dir,
+    load_config,
+    save_config,
 )
-from tempa_logging import SHOW_PROMPT, _state, _banner, _print_log_tail, log
+from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
 
 
 def _format_stream_line(data: dict) -> str | None:
@@ -86,10 +92,8 @@ def _handle_usage_limit(text: str, process: subprocess.Popen, label: str) -> boo
     _state.usage_limit_hit = True
     log(f"[{label}] Claude usage limit reached — stopping the agent runner.")
     _state.stop_event.set()
-    try:
+    with contextlib.suppress(Exception):
         process.terminate()
-    except Exception:
-        pass
     return True
 
 
@@ -140,10 +144,8 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str) -> bool
     _state.auth_error_message = _friendly_auth_error_message(text)
     log(f"[{label}] {_state.auth_error_message}")
     _state.stop_event.set()
-    try:
+    with contextlib.suppress(Exception):
         process.terminate()
-    except Exception:
-        pass
     return True
 
 

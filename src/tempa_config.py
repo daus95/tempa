@@ -197,7 +197,7 @@ def load_config() -> dict:
         if get_active_workspace_root() is not None:
             save_config(config)
         return config
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         return json.load(f)
 
 
