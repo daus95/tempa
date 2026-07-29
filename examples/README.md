@@ -1,8 +1,8 @@
 # Example Usage Scenarios for Tempa
 
 This folder contains sample specifications (PRDs) for different levels of application
-complexity, as a reference for the PRD format that works well with Tempa (see [Step 1 —
-Write the specification](../README.md#step-1--write-the-specification) in the main README).
+complexity, as a reference for the PRD format that works well with Tempa (see [Step 2 —
+Write the specification](../README.md#step-2--write-the-specification) in the main README).
 
 | # | Scenario | Complexity | DB/API Access |
 |---|----------|------------|----------------|

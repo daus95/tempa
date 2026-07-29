@@ -26,11 +26,11 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
 ## Contents
 
-- [Quick Start](#quick-start)
-- [Setup (One-Time Only)](#setup-one-time-only)
-- [Dashboard (Recommended)](#dashboard-recommended)
-- [Command Line Interface (CLI)](#command-line-interface-cli)
-- [Further Reference](#further-reference)
+1. [Quick Start](#quick-start)
+2. [Setup (One-Time Only)](#setup-one-time-only)
+3. [Dashboard (Recommended)](#dashboard-recommended)
+4. [Command Line Interface (CLI)](#command-line-interface-cli)
+5. [Further Reference](#further-reference)
 
 ---
 
@@ -91,32 +91,11 @@ want:
 
 Put the extracted contents in a folder **separate from, and outside**, the repo you're going
 to work on — don't put it inside your repo folder, so it doesn't get committed to your git
-repo. The `tempa.py` launcher and `config.json` sit at the top of that `tempa` folder;
-everything the tool ships with — all implementation modules, the prompt templates, and the
-dashboard's assets — lives in the `src/` subfolder. Keep the whole folder together: the
-launcher puts `src/` on the import path and the modules import each other by name, so nothing
-works if they're separated. For example, if your repo is at `C:\repo\<your-repo>`, place Tempa
-as a sibling folder, e.g. `C:\tools\tempa` or `C:\repo\tempa` (not `C:\repo\<your-repo>\tempa`):
-
-```
-C:\repo\<your-repo>\      (your repo — left untouched)
-C:\tools\tempa\           (Tempa folder — separate)
-├─ tempa.py               (launcher / entry point)
-├─ tempa.cmd              (Windows launcher)
-├─ tempa                  (macOS/Linux launcher)
-├─ Open Dashboard.cmd     (Windows: double-click to open the dashboard, no terminal needed)
-├─ Open Dashboard.command (macOS: double-click to open the dashboard, no terminal needed)
-├─ Open Dashboard.sh      (Linux: double-click to open the dashboard, no terminal needed)
-├─ config.json            (per-project settings — edited by you)
-└─ src\                   (everything the tool ships with)
-   ├─ tempa_cli.py           (CLI dispatch)
-   ├─ tempa_*.py             (config, logging, prompts, session,
-   │                            implement, clarify, maintenance, commands)
-   ├─ dashboard_*.py         (ui, server, config, spec, clarify_parse,
-   │                            clarify_render, runs, winui, assets)
-   ├─ prompt\                (prompt templates, one .md per prompt)
-   └─ assets\                (dashboard.html / .css / .js)
-```
+repo. Keep the whole folder together: the launcher puts `src/` on the import path and the
+modules import each other by name, so nothing works if they're separated. For example, if
+your repo is at `C:\repo\<your-repo>`, place Tempa as a sibling folder, e.g. `C:\tools\tempa`
+or `C:\repo\tempa` (not `C:\repo\<your-repo>\tempa`). Full layout of what's inside that
+folder: [docs/folders-and-paths.md](docs/folders-and-paths.md#the-tempa-install-folder).
 
 Add that Tempa folder to your `PATH` so the `tempa` command works from anywhere:
 
@@ -240,6 +219,27 @@ appear under **Specification** in the left sidebar — click one to **View** it 
 markdown, or switch to **Edit** and **Save** to change it right there, no separate editor
 needed. Right-click a file or folder in the sidebar for **Rename** / **Delete**.
 
+Only upload the **new** specification you want implemented here — not old/already-implemented
+ones. Specifications for the **existing** system belong separately in the `sources.docs`
+folder (default `docs/`), not here: plan drafting uses `docs/` (and the code) as a reference
+for "what already exists", so it doesn't duplicate work that's already done.
+
+The new specification should ideally cover:
+
+- **Purpose of the application** — what problem it solves, for whom.
+- **Business process** — the workflow/steps the system needs to support.
+- **Data model** — the main entities and their relationships.
+- **UI concept** — a picture of the pages/interactions you want.
+- **Tech stack** you want (language, framework, database, etc).
+
+The more completely these five aspects are written up, the closer the resulting application
+will match what you actually want.
+
+Not sure how to start, or just want to try Tempa out first? The [examples/](examples/)
+folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
+database) — upload them here via **Add File**/**Add Folder**, or copy them straight into
+`.tempa/specs/prd` — see [examples/README.md](examples/README.md).
+
 ### Step 2 — Clarification
 
 **Start Clarification** runs one evaluation pass and lists every finding (critical/major/
@@ -250,6 +250,12 @@ own answer** (a text box appears), then **Save**. Once a file is fully answered,
 Clarification** again to confirm nothing critical remains. This loop (evaluate → answer →
 apply → re-evaluate) is the dashboard version of Workflow Step 3 below.
 
+**Answer manually during the early iterations** (usually the first 3–4 rounds): early on,
+the system doesn't yet have enough project context to guess your intent accurately — its
+recommended answers can still be off. Important decisions (application purpose, business
+process, tech stack, etc.) need your direct input first, so the PRD starts off pointed in
+the right direction.
+
 **Finalized Clarification** automates the rest of that loop (evaluate + apply, repeating
 until clean) — it stays disabled until a **Finalize readiness** panel shows all 3
 conditions met: clarification has run at least once, the latest result came from **Start
@@ -257,6 +263,24 @@ Clarification** itself (not just **Apply Answers** — applying edits the PRD, n
 finding record, so a fresh evaluation is what actually confirms nothing critical is left),
 and that evaluation shows 0 critical findings. Once it's enabled, click it to let Tempa
 finish off any remaining major/minor findings on its own.
+
+**When to switch to Finalize:** after a few manual rounds, once you notice the system's
+recommended answers over the last 2 iterations are already consistent/accurate with what you
+intend (this usually starts showing around iteration 4 or 5) — by that point it has enough
+context (from the PRD plus prior answers) that its recommendations can be trusted, and
+continuing manually would just repeat the same outcome.
+
+Finalize stops as soon as there are no more critical/major findings — some minor findings
+may still remain, and that's **fine**: they'll be resolved anyway during implementation
+(Step 3 below). So once it finishes, you can move straight on to implementation without
+chasing down remaining minor findings.
+
+This can take a while — Finalize repeats the evaluate → apply cycle on its own until
+clean, which can mean several rounds depending on how much the PRD still needs resolving.
+Expand the **Clarification log** panel to watch it live (running status plus streamed
+console output) so you can tell it's still working rather than stuck. Unlike
+**Stop Implementation** in Step 3 below, there's no way to cancel a Finalize run mid-way —
+leave the dashboard open until it finishes on its own or hits a Claude usage limit.
 
 ### Step 3 — Start Implementation
 
@@ -349,34 +373,21 @@ Save it in the `sources.prd` folder (default `.tempa/specs/prd`) — and **only*
 **new** specification you want implemented. Don't put old/already-implemented specifications
 here.
 
-Specifications for the **existing** system should be kept separately in the `sources.docs`
-folder (default `docs/`) — not rewritten inside `.tempa/specs/prd`. Plan drafting (part of
-Step 4) uses `docs/` (and the code) as a reference for "what already exists", so it doesn't
-duplicate work that's already done.
-
-The new specification should ideally cover:
-
-- **Purpose of the application** — what problem it solves, for whom.
-- **Business process** — the workflow/steps the system needs to support.
-- **Data model** — the main entities and their relationships.
-- **UI concept** — a picture of the pages/interactions you want.
-- **Tech stack** you want (language, framework, database, etc).
-
-The more completely these five aspects are written up, the closer the resulting application
-will match what you actually want.
-
-Not sure how to start, or just want to try Tempa out first? The [examples/](examples/)
-folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
-database) you can copy straight into `.tempa/specs/prd` — see [examples/README.md](examples/README.md).
+For what it should ideally cover, which specs belong in `sources.docs` instead, and
+ready-to-use example PRDs to start from, see
+[Dashboard Step 1 — Upload Specification](#step-1--upload-specification) above — the
+guidance is the same regardless of how you get the file there.
 
 ### Step 3 — Answer clarifications (`clarify`)
 
 The goal: the system asks about anything ambiguous/unclear in the PRD, you answer, and those
 answers get applied back into the PRD — repeated until there are no more `critical`/`major`
 findings. There are two ways to answer; both are used in sequence as part of the same flow,
-not as alternatives to pick from.
+not as alternatives to pick from. For when to use which, see
+[Dashboard Step 2 — Clarification](#step-2--clarification) above — the reasoning is the same
+regardless of interface.
 
-#### A. Answer manually — during the early iterations
+#### A. Answer manually
 
 ```bash
 tempa clarify          # evaluate: system writes questions + recommended answers to a file
@@ -398,30 +409,14 @@ clarification round right away — answer `y` to loop straight back into `clarif
 stop and review manually. (Only asked in an interactive terminal — non-interactive runs just
 exit.)
 
-**When:** during the early iterations (usually the first 3–4 rounds).
-**Why:** early on, the system doesn't yet have enough project context to guess your intent
-accurately — its recommended answers can still be off. Important decisions (application
-purpose, business process, tech stack, etc.) need your direct input first, so the PRD
-starts off pointed in the right direction.
-
-#### B. Answer automatically — once recommendations prove accurate
+#### B. Answer automatically (`--finalize`)
 
 ```bash
 tempa clarify --finalize
 ```
 
-**When:** after a few manual rounds, once you notice the system's recommended answers over
-the last 2 iterations are already consistent/accurate with what you intend (this usually
-starts showing around iteration 4 or 5).
-**Why:** by that point the system has enough context (from the PRD plus prior answers) that
-its recommendations can be trusted — continuing manually would just be repeating work with
-the same outcome. `--finalize` runs evaluate + answer + apply in a single automatic loop
-until clean, without you having to answer one by one anymore.
-
-`--finalize` stops as soon as there are no more `critical`/`major` findings — some `minor`
-findings may still remain, and that's **fine**: minor findings will be resolved anyway
-during implementation (Step 4). So once `--finalize` finishes, you can move straight on to
-implementation without needing to chase down the remaining minor findings.
+Runs evaluate + answer + apply in a single automatic loop until clean, without you having to
+answer one by one anymore.
 
 Full reference for every mode (`clarify` manual, `--auto-answer`, `--apply`, `--finalize`):
 see [docs/clarify-modes.md](docs/clarify-modes.md).

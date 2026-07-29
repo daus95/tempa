@@ -3,6 +3,36 @@
 See [README.md](../README.md) for a workflow summary. This document explains the details of
 the folder structure Tempa uses for the project you're working on.
 
+## The Tempa install folder
+
+What's inside the folder you get from extracting `tempa.zip` (see
+[README.md](../README.md#step-2--download--install)) — separate from, and outside, the repo
+you're working on:
+
+```
+C:\repo\<your-repo>\      (your repo — left untouched)
+C:\tools\tempa\           (Tempa folder — separate)
+├─ tempa.py               (launcher / entry point)
+├─ tempa.cmd              (Windows launcher)
+├─ tempa                  (macOS/Linux launcher)
+├─ Open Dashboard.cmd     (Windows: double-click to open the dashboard, no terminal needed)
+├─ Open Dashboard.command (macOS: double-click to open the dashboard, no terminal needed)
+├─ Open Dashboard.sh      (Linux: double-click to open the dashboard, no terminal needed)
+└─ src\                   (everything the tool ships with)
+   ├─ tempa_cli.py           (CLI dispatch)
+   ├─ tempa_*.py             (config, logging, prompts, session,
+   │                            implement, clarify, maintenance, commands)
+   ├─ dashboard_*.py         (ui, server, config, spec, clarify_parse,
+   │                            clarify_render, runs, winui, assets)
+   ├─ prompt\                (prompt templates, one .md per prompt)
+   └─ assets\                (dashboard.html / .css / .js)
+```
+
+Keep the whole folder together: the launcher puts `src/` on the import path and the modules
+import each other by name, so nothing works if they're separated. Note there's no
+`config.json` at the top level — see "Tempa's own folder (before any workspace is active)"
+below for where it actually lives.
+
 ## What is a "working folder" (workspace)?
 
 A **working folder** (workspace) is the root folder of the project you're working on (not
