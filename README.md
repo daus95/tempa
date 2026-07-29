@@ -36,26 +36,32 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
 ## Quick Start
 
-> Already have Python 3 and an authenticated `claude` CLI on `PATH`? This is the fast path.
+> Already have Python 3 and an authenticated `claude` CLI installed? This is the fast path.
 > Missing one of those, or want the full explanation of each step? See
 > [Setup (One-Time Only)](#setup-one-time-only) below instead.
 
-```bash
-# 1. Download & extract https://github.com/daus95/tempa/archive/refs/heads/main.zip
-#    to a folder OUTSIDE your project repo (see Setup Step 2 for why), then add that
-#    folder to PATH so the `tempa` command works from anywhere.
+1. **Download & extract** — [⬇ Download tempa.zip](https://github.com/daus95/tempa/archive/refs/heads/main.zip)
+   to a folder **outside** your project repo. Details:
+   [Setup Step 2 — Download & Install](#step-2--download--install).
 
-tempa init C:\repo\<your-repo>   # point Tempa at your project (creates .tempa\ there)
+2. **Open the dashboard** — double-click **`Open Dashboard.cmd`** (Windows) /
+   **`Open Dashboard.command`** (macOS) / **`Open Dashboard.sh`** (Linux) in that folder.
 
-# 2. Put your new PRD/spec in <your-repo>\.tempa\specs\prd
+3. **Point Tempa at your project:**
+   - **Windows/macOS:** on the Home page, click **Select Working Folder** and pick your
+     project folder — no terminal needed.
+   - **Linux** (no native folder picker yet): from inside the extracted folder, run
+     ```bash
+     ./tempa init C:\repo\<your-repo>
+     ```
+     then reload the dashboard.
 
-tempa clarify                    # resolve ambiguities in the spec — repeat until clean
-tempa implement                  # unattended: plan -> implement -> QA, epic by epic
-```
+4. **Follow the dashboard's checklist** — Upload Specification → Clarification → Start
+   Implementation. See [Dashboard (Recommended)](#dashboard-recommended).
 
-Prefer clicking over typing? Run `tempa dashboard` instead of `clarify`/`implement` above —
-same workflow, buttons and inline editing instead of commands. See
-[Dashboard (Recommended)](#dashboard-recommended).
+Prefer the terminal for everything? See
+[Command Line Interface (CLI)](#command-line-interface-cli) for the full command-driven
+workflow (`tempa init`, `tempa clarify`, `tempa implement`).
 
 ---
 
@@ -174,8 +180,10 @@ tempa dashboard            # PATH set (any OS)
 ```
 
 This opens `http://127.0.0.1:<port>/` in your browser (`Ctrl+C` in the terminal stops the
-server). If the project hasn't been set up yet, the **Home** page tells you to run
-`tempa init <path>` first (Workflow Step 1 below) — that one step still needs the CLI.
+server). If the project hasn't been set up yet, the **Home** page shows a
+**Select Working Folder** button — click it to pick your project via a native dialog
+(Windows/macOS) and Tempa sets it up for you, no terminal involved. No native picker on
+Linux yet: run `tempa init <path>` from the CLI once, then reload the dashboard.
 
 The Home page is a 3-step checklist; each step unlocks once the one before it is satisfied.
 Above it sits one optional card you can ignore entirely:
@@ -203,7 +211,7 @@ Above it sits one optional card you can ignore entirely:
 
 | Dashboard step | Equivalent CLI step |
 |---|---|
-| *(prerequisite, not shown above)* | [Step 1 — Initial Setup](#step-1--initial-setup) (`tempa init <path>`) |
+| **Select Working Folder** button (prerequisite, not shown above; Windows/macOS — Linux still needs the CLI) | [Step 1 — Initial Setup](#step-1--initial-setup) (`tempa init <path>`) |
 | [Step 1 — Upload Specification](#step-1--upload-specification) | [Step 2 — Write the specification](#step-2--write-the-specification) |
 | [Step 2 — Clarification](#step-2--clarification) | [Step 3 — Answer clarifications](#step-3--answer-clarifications-clarify) (`tempa clarify`) |
 | [Step 3 — Start Implementation](#step-3--start-implementation) | [Step 4 — Run implementation](#step-4--run-implementation-implement) (`tempa implement`) |
