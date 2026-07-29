@@ -35,6 +35,7 @@ from pathlib import Path
 
 from dashboard_assets import render_page as _render_page
 from dashboard_clarify_parse import file_answer_status, _clarify_files_overview
+from dashboard_config import _load_clarify_applied_hashes
 from dashboard_runs import _new_clarify_run_state, _new_implement_run_state
 from dashboard_server import _DashboardHandler
 from dashboard_spec import build_tree
@@ -50,7 +51,9 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     clar_dir = clar_dir.resolve() if clar_dir.exists() else clar_dir
 
     spec_tree = build_tree(prd_dir)
-    clarify_unanswered, clarify_answered = _clarify_files_overview(clar_dir)
+    clarify_unanswered, clarify_answered = _clarify_files_overview(
+        clar_dir, _load_clarify_applied_hashes()
+    )
     page_html = _render_page(prd_dir, spec_tree, clarify_unanswered, clarify_answered, initial_view)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
