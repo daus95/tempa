@@ -26,10 +26,36 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
 ## Contents
 
+- [Quick Start](#quick-start)
 - [Setup (One-Time Only)](#setup-one-time-only)
 - [Dashboard (Recommended)](#dashboard-recommended)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 - [Further Reference](#further-reference)
+
+---
+
+## Quick Start
+
+> Already have Python 3 and an authenticated `claude` CLI on `PATH`? This is the fast path.
+> Missing one of those, or want the full explanation of each step? See
+> [Setup (One-Time Only)](#setup-one-time-only) below instead.
+
+```bash
+# 1. Download & extract https://github.com/daus95/tempa/archive/refs/heads/main.zip
+#    to a folder OUTSIDE your project repo (see Setup Step 2 for why), then add that
+#    folder to PATH so the `tempa` command works from anywhere.
+
+tempa init C:\repo\<your-repo>   # point Tempa at your project (creates .tempa\ there)
+
+# 2. Put your new PRD/spec in <your-repo>\.tempa\specs\prd
+
+tempa clarify                    # resolve ambiguities in the spec — repeat until clean
+tempa implement                  # unattended: plan -> implement -> QA, epic by epic
+```
+
+Prefer clicking over typing? Run `tempa dashboard` instead of `clarify`/`implement` above —
+same workflow, buttons and inline editing instead of commands. See
+[Dashboard (Recommended)](#dashboard-recommended).
 
 ---
 
