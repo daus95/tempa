@@ -147,7 +147,7 @@ with your own.</p>
 
 <h3>Code organization</h3>
 <ul>
-  <li>Each service lives in its own folder under <code>apps/</code> and owns its own database
+  <li>Each service lives in its own folder under <code>src/</code> and owns its own database
       schema. Services never read each other's tables — they call each other's APIs.</li>
   <li>Business logic lives in the domain layer and must be testable without a database or an HTTP
       server.</li>
@@ -243,7 +243,7 @@ Yours does not need to be longer than this.</p>
 - No new dependency for something the standard library handles well.
 
 ## Structure
-- One service per folder under apps/. A service owns its own tables and
+- One service per folder under src/. A service owns its own tables and
   never reads another service's tables directly.
 - Business logic lives in the domain layer and is testable without a
   database or an HTTP server.

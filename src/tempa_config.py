@@ -113,7 +113,7 @@ DEFAULT_WORKSPACE = {
     # NEW specifications to be worked on (current app specs live in docs/).
     "specs": "specs",
     # Application implementation source code.
-    "apps": "apps",
+    "apps": "src",
     # Infrastructure scripts (e.g. docker compose).
     "infra": "infra",
     # Sub-folders holding past specification files no longer in use.
