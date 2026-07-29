@@ -1,15 +1,21 @@
 # Tempa — Claude Automation Harness
 
-> A long-running agent harness for building software from ideas.
+> Turn a spec into a working app — clarified, planned, implemented, and QA'd
+> automatically, while you do something else.
+
+Turning a spec into working software usually means endless manual back-and-forth:
+clarifying vague requirements, breaking the work into a plan, implementing it feature by
+feature, and catching bugs before they pile up — one `claude` session at a time, babysat
+from start to finish.
+
+**Tempa automates that entire loop.** It drives the **Claude CLI** repeatedly and
+unattended: clarifying your PRD until nothing critical is left ambiguous, drafting a plan
+(epic → feature → task), implementing it, and running QA — start it once, walk away, and
+come back to real progress instead of a blank terminal. It runs on your existing Claude
+subscription via the `claude` CLI login you already have — no separate per-token API
+billing to provision or watch.
 
 Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
-
-Tempa is a harness that runs the **Claude CLI** automatically and repeatedly to build an
-application from a specification: clarifying the PRD, drafting a plan (epic/feature/task),
-implementing it, and running QA — all without needing to be watched.
-
-All state is stored in [`config.json`](config.json). All prompt templates are stored as
-`.md` files in the [`src/prompt/`](src/prompt/) folder so they're easy to read and edit.
 
 > Once set up, the recommended way to drive Tempa is the web **dashboard**
 > (`tempa dashboard`) — see [Dashboard (Recommended)](#dashboard-recommended) below. Every
