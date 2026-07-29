@@ -13,6 +13,17 @@ Tempa still run as a plain script — `py tempa.py <cmd>` — from any working d
 import sys
 from pathlib import Path
 
+# Force UTF-8 output so log()/print() calls containing non-ASCII characters (→, ✅, 🔧,
+# ⬜, …) never crash with UnicodeEncodeError on a Windows console using a non-UTF-8
+# codepage (e.g. cp1252) — covers both interactive runs and re-invocation as a subprocess
+# by the dashboard. errors="replace" degrades to "?" instead of crashing if a console
+# still can't render a given character even in UTF-8 mode.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from tempa_cli import run  # noqa: E402  (import must follow the sys.path setup above)
