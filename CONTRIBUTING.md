@@ -57,11 +57,26 @@ clear at a glance which side of the tool (CLI vs. dashboard) it belongs to.
 
 ## Testing
 
-Tempa doesn't have an automated test suite yet — this is one of the most valuable areas to
-contribute to. If you're adding tests, a `tests/` folder using `pytest` (or `unittest`, to
-stay dependency-free) covering the pure-logic modules in `src/tempa_*.py` /
-`src/dashboard_*.py` first (config parsing, clarify-result parsing, spec handling) is a
-great starting point before tackling anything that shells out to the `claude` CLI.
+Tempa has a `pytest`-based unit test suite under `tests/`, covering the pure-logic
+modules in `src/tempa_*.py` / `src/dashboard_*.py` (config parsing, clarify-result
+parsing, spec handling, prompt templating, destructive-clear safety checks, and the
+pure parsing/formatting helpers in `tempa_session.py`). Code that shells out to the
+`claude` CLI or serves the dashboard's HTTP handler isn't covered yet — that's next on
+the list if you're looking to contribute here.
+
+Run it locally:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+CI (`.github/workflows/tests.yml`) runs the same suite on every push/PR to `main`.
+
+Tests are isolated from your local Tempa install and any active workspace via an
+autouse fixture in `tests/conftest.py` that redirects Tempa's path constants into a
+temp directory — new tests don't need to worry about touching real `.active-workspace`
+state, but should rely on that isolation rather than reading/writing real paths.
 
 ## Reporting bugs / requesting features
 
