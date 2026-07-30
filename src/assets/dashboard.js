@@ -170,7 +170,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeStep2FileList = $("homeStep2FileList"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
-  homeOpenUnansweredBtn = $("homeOpenUnansweredBtn"),
+  homeOpenUnansweredBtn = $("homeOpenUnansweredBtn"), homeApplyAnswersBtn = $("homeApplyAnswersBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
@@ -414,6 +414,7 @@ function renderHomeWorkflow() {
   homeStartClarifyBtn.title = homeBlockedByAnswers
     ? "Answer the remaining findings or apply your saved answers first." : "";
   homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
+  homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
   homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
@@ -513,6 +514,10 @@ homeStartClarifyBtn.addEventListener("click", async () => {
 });
 homeOpenUnansweredBtn.addEventListener("click", () => {
   if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
+});
+homeApplyAnswersBtn.addEventListener("click", async () => {
+  await selectTop("clarification");
+  startClarifyRun("apply");
 });
 homeFinalizeClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
