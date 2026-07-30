@@ -231,7 +231,8 @@ function closeModal(result) {
   if (resolve) resolve(result);
 }
 
-function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false, value = "" }) {
+function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false,
+    value = "", showCancel = true }) {
   return new Promise((resolve) => {
     modalResolve = resolve;
     modalIsPrompt = prompt;
@@ -243,6 +244,7 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
     });
     modalOkBtn.textContent = okLabel;
     modalOkBtn.classList.toggle("danger", danger);
+    modalCancelBtn.classList.toggle("hidden", !showCancel);
     modalInput.classList.toggle("hidden", !prompt);
     modalInput.value = prompt ? value : "";
     modalOverlay.classList.remove("hidden");
@@ -252,12 +254,16 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
   });
 }
 
-// confirmModal resolves true/false; promptModal resolves the entered string, or null on cancel.
+// confirmModal resolves true/false; promptModal resolves the entered string, or null on
+// cancel; alertModal is a single-button (no Cancel) notice, resolved once acknowledged.
 function confirmModal(message, opts) {
   return showModal({ message, prompt: false, ...opts });
 }
 function promptModal(message, value, opts) {
   return showModal({ message, prompt: true, value: value || "", ...opts }).then((v) => (v === false ? null : v));
+}
+function alertModal(message, opts) {
+  return showModal({ message, prompt: false, showCancel: false, ...opts });
 }
 
 modalCancelBtn.addEventListener("click", () => closeModal(modalIsPrompt ? null : false));
@@ -1622,8 +1628,8 @@ async function saveClarifyFile() {
   const own = items.filter((i) => i.mode === "own");
   const missing = own.filter((i) => !i.answer.trim());
   if (missing.length) {
-    alert('Please fill in your own answer for ' + missing.length +
-      ' finding(s), or switch them back to "Follow the recommendation".');
+    await alertModal('Please fill in your own answer for ' + missing.length +
+      ' finding(s), or switch them back to "Follow the recommendation".', { title: "Answers incomplete" });
     return;
   }
   saveBtn.disabled = true;
