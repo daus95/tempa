@@ -37,7 +37,9 @@ Sanity-check your setup with:
 - `docs/` — reference docs for each subsystem (config, folders, prompts, models, logging).
 
 If you add a module, follow the existing `tempa_*.py` / `dashboard_*.py` naming split so it's
-clear at a glance which side of the tool (CLI vs. dashboard) it belongs to.
+clear at a glance which side of the tool (CLI vs. dashboard) it belongs to. For the full module
+map, the import/dependency rules between the CLI and the dashboard, and where to add a new
+command/prompt-stage/dashboard-route, see [docs/architecture.md](docs/architecture.md).
 
 ## Making changes
 

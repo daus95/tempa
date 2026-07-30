@@ -1,0 +1,143 @@
+# Architecture
+
+How Tempa's own codebase is put together — for anyone contributing to `tempa_*.py` /
+`dashboard_*.py`, not for anyone just using the tool. See [CONTRIBUTING.md](../CONTRIBUTING.md)
+for the contribution workflow itself.
+
+## Overview
+
+Tempa is one Python package split into two halves that share a config layer:
+
+- **The CLI** (`tempa_*.py`) — `tempa init/clarify/implement/...`, the thing that actually spawns
+  `claude` and drives the clarify → plan → implement → QA loop.
+- **The dashboard** (`dashboard_*.py`) — `tempa dashboard`, a local web UI that drives the same
+  workflow through buttons instead of commands.
+
+Both halves are plain top-level modules in `src/`, not a package with relative imports — that's
+what lets `tempa.py` run as a standalone script from any working directory (see
+[Entry points](#entry-points)). There is no framework: the CLI is `argparse`, the dashboard is
+`http.server.BaseHTTPRequestHandler`, and the whole thing (asset bundling, session management,
+config I/O) is standard library only.
+
+## Entry points
+
+```
+tempa.py  (repo root)
+  → puts src/ on sys.path
+  → tempa_cli.run()
+      → argparse dispatch to a tempa_* handler, e.g.:
+          "dashboard" → tempa_commands.run_dashboard_command() → dashboard_ui.run_dashboard()
+          "clarify"   → tempa_clarify.run_clarify_once() / run_clarify_finalize() / ...
+          "implement" → tempa_implement.main()
+```
+
+`tempa.cmd` / `tempa` (the shell launchers) just invoke `tempa.py` with the same argv — see
+[folders-and-paths.md](folders-and-paths.md) for the install-folder layout. The dashboard itself
+re-invokes `tempa.py clarify` / `tempa.py implement` as a **subprocess** for background runs
+(see [The CLI/dashboard boundary](#the-clidashboard-boundary) below) — it never calls those
+functions directly in-process.
+
+## Module map
+
+### CLI side (`tempa_*.py`)
+
+| Module | Responsibility |
+|---|---|
+| `tempa_cli.py` | Argument parsing and dispatch only. No workflow logic lives here. |
+| `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models` resolution. The one module every other module can depend on — stdlib-only, imports nothing local. |
+| `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
+| `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
+| `tempa_session.py` | The Claude session engine: spawns `claude`, streams/parses its `stream-json` output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too. |
+| `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
+| `tempa_implement.py` | The implement poll loop and scheduler (`check_and_run`): decides what to run next (resume QA, resume an in-progress epic, implement the next pending epic). |
+| `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
+| `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/status/spec/verify/test, plus opening the dashboard. |
+
+### Dashboard side (`dashboard_*.py`)
+
+| Module | Responsibility |
+|---|---|
+| `dashboard_ui.py` | `run_dashboard()` — starts the `HTTPServer`, wires the handler and initial page render together. The dashboard's own entry point. |
+| `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
+| `dashboard_assets.py` | Reads `assets/dashboard.{html,css,js}` and the two guide `.html` files from disk once (`lru_cache`) and inlines CSS/JS into a self-contained document — no external requests from the page. |
+| `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
+| `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |
+| `dashboard_clarify_parse.py` | Parses a clarification result file into findings (via the `clarify:item`/`clarify:answer` HTML-comment markers) and computes the finalize-readiness state. Ported from the former standalone `clarify_ui.py`. |
+| `dashboard_clarify_render.py` | Turns parsed findings into the HTML shown in the Clarification pane (a small hand-rolled markdown renderer, not a dependency). |
+| `dashboard_runs.py` | Background clarify/implement runs: spawns `tempa.py clarify`/`tempa.py implement` as a subprocess, streams its output into a run-state dict the dashboard polls, and the Stop-implementation kill. |
+| `dashboard_winui.py` / `dashboard_macui.py` | OS-native folder picker and reveal-in-Explorer/Finder, split per platform since there's no cross-platform stdlib API for either. Linux has no native picker; `tempa init <path>` covers it. |
+
+### Assets (`src/assets/`, `src/prompt/`)
+
+`dashboard.html`/`.css`/`.js` are the single-page app shell; `principles-guide.html` and
+`spec-guide.html` are standalone static documents opened in their own tab (same stylesheet
+inlined, so they inherit the dashboard's theming — see `dashboard_assets.principles_guide_page`/
+`spec_guide_page` for the pattern to follow when adding a third). `src/prompt/*.md` are the raw
+prompt templates — see [prompt-templates.md](prompt-templates.md).
+
+## The CLI/dashboard boundary
+
+`tempa_config.py` is the one module both halves depend on, and it deliberately imports nothing
+local (stdlib only) — that keeps it a leaf, so nothing it does can create a cycle.
+
+The trickier constraint is the **other** direction: `tempa_commands.py` and `tempa_clarify.py`
+import `dashboard_ui` (to open the dashboard from the CLI, e.g. `tempa dashboard` / `tempa clarify`
+falling through to the answer UI). If anything on the dashboard side imported back into
+`tempa_cli`/`tempa_commands`/`tempa_clarify`/`tempa_implement`, that would be a circular import.
+
+It doesn't, and the reason is deliberate: when the dashboard needs to run a clarify or implement
+pass, `dashboard_runs.py` does **not** call `tempa_clarify.run_clarify_once()` or
+`tempa_implement.main()` in-process. It shells out to `python tempa.py clarify`/`implement` as a
+brand-new subprocess and streams its stdout back for the live log panel. That's a real process
+boundary, not just an implementation detail:
+
+- A background run has its own process log (see [logging.md](logging.md)), separate from the
+  dashboard server's own output.
+- **Stop Implementation** works by killing that child process — there's no in-process cancellation
+  to build.
+- The dashboard staying up doesn't hold a `_RunnerState` for a run that's actually happening in a
+  different process; live status is read back from `config.json` and the log tail instead
+  (see `dashboard_runs.py`).
+
+If you're adding a new heavy workflow reachable from both the CLI and the dashboard, follow this
+pattern: put the logic in a `tempa_*.py` module reachable from `tempa_cli.py`, and if the
+dashboard needs to trigger it as a background run, add it to `dashboard_runs.py` as another
+`python tempa.py <command>` subprocess spawn — don't import the `tempa_*` workflow module
+directly from `dashboard_*`.
+
+## Prompt construction
+
+Every stage's prompt is built by `tempa_prompts.build_prompt()`, which prepends the workspace's
+Architecture Principles (if set) and substitutes `${...}` placeholders (`${sources.prd}`,
+`${config_path}`, etc.) into the matching template in `src/prompt/*.md`. See
+[architecture-principles.md](architecture-principles.md#how-it-reaches-the-prompts) for the full
+stage → template table, and [prompt-templates.md](prompt-templates.md) for how to edit a
+template safely.
+
+`tempa_session.py` never builds prompts itself — callers (`tempa_clarify`, `tempa_implement`,
+`tempa_commands.run_verify`) build the string via `tempa_prompts` first and pass it in.
+
+## Extending Tempa
+
+**Adding a new CLI command:** add the subparser in `tempa_cli._build_arg_parser()`, dispatch it in
+`run()`, and put the handler in whichever `tempa_*.py` module fits by responsibility (a new
+workflow → its own module; a small stateless command → `tempa_commands.py`).
+
+**Adding a new session/prompt stage:** add the template to `src/prompt/`, a `build_*_prompt()` in
+`tempa_prompts.py`, and a runner in `tempa_session.py` if it needs its own stop-condition handling
+— otherwise reuse `_run_oneshot_session`.
+
+**Adding a new dashboard page/route:** add the route in `dashboard_server._DashboardHandler`, and
+if it's a standalone guide page (not part of the single-page app), follow the
+`principles_guide_page()`/`spec_guide_page()` pattern in `dashboard_assets.py` — a static `.html`
+file in `src/assets/` with the dashboard's CSS inlined at request time.
+
+**Adding a new background run kicked off from the dashboard:** see
+[The CLI/dashboard boundary](#the-clidashboard-boundary) above — it goes through
+`dashboard_runs.py` as a subprocess, not a direct import.
+
+## Tests
+
+`tests/` (pytest) covers the pure-logic modules end to end — see
+[CONTRIBUTING.md](../CONTRIBUTING.md#testing) for how to run it and which modules aren't covered
+yet (anything that shells out to `claude` or serves the dashboard's HTTP handler directly).

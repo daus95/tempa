@@ -453,6 +453,8 @@ recovering from problems, manual verification): see
 > Not required reading to get started — see the Dashboard or Workflow above
 > first.
 
+- **Architecture** — how Tempa's own codebase is put together (module map, CLI/dashboard
+  boundary), for anyone contributing to it: [docs/architecture.md](docs/architecture.md)
 - **Folder & Path Structure** — what a working folder is, `workspace.*`, `sources.*`:
   [docs/folders-and-paths.md](docs/folders-and-paths.md)
 - **Writing a Specification** — what a good PRD covers, worked examples, common mistakes:
