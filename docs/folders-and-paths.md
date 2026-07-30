@@ -23,7 +23,8 @@ C:\tools\tempa\           (Tempa folder — separate)
    ├─ tempa_*.py             (config, logging, prompts, session,
    │                            implement, clarify, maintenance, commands)
    ├─ dashboard_*.py         (ui, server, config, spec, clarify_parse,
-   │                            clarify_render, runs, winui, assets)
+   │                            clarify_render, runs, winui, macui, linuxui,
+   │                            assets)
    ├─ prompt\                (prompt templates, one .md per prompt)
    └─ assets\                (dashboard.html / .css / .js)
 ```
@@ -154,3 +155,13 @@ once one is selected.
 | [`src/prompt/`](../src/prompt/) | prompt templates (`.md`), one file per prompt — shipped with Tempa, not workspace-specific |
 | `docs/` (this folder) | supplementary README documentation |
 | `.active-workspace` | the active-workspace pointer (absolute path, or absent = no active workspace) |
+
+> **`specs` is the one exception.** Every other pre-`init` fallback above lives inside
+> `<tempa_install>/.tempa/`. `specs` doesn't — with no active workspace, it resolves to
+> `<parent of the Tempa install folder>/specs` instead (see `resolve_specs_dir()` in
+> `tempa_config.py`), so it lands as a sibling of the Tempa install folder, not inside it.
+> If you ever run a spec-touching command (e.g. `clarify`) before `init`-ing a workspace,
+> you'll see a stray `specs/` folder show up one level above where Tempa itself is
+> installed — that's this fallback, not a bug. Once a workspace is active, `specs` always
+> resolves under `<workspace_root>/.tempa/specs` like everything else (see
+> [Sources](#sources--concrete-paths-per-command) above).
