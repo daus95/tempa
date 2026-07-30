@@ -43,6 +43,16 @@ def principles_guide_page() -> str:
     return html.replace("/*__CSS__*/", css)
 
 
+@lru_cache(maxsize=1)
+def spec_guide_page() -> str:
+    """The "Learn more" page linked from the Upload Specification step. A standalone
+    document (opened in its own tab) that inlines the same stylesheet, so it inherits the
+    dashboard's markdown typography and light/dark theming."""
+    html = (ASSET_DIR / "spec-guide.html").read_text(encoding="utf-8")
+    css = (ASSET_DIR / "dashboard.css").read_text(encoding="utf-8")
+    return html.replace("/*__CSS__*/", css)
+
+
 def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
                   clarify_answered: list[dict], initial_view: str) -> str:
     tree_json = json.dumps(spec_tree, ensure_ascii=False)

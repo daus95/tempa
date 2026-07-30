@@ -175,22 +175,22 @@ Above it sits one optional card you can ignore entirely:
 
 ```
 ┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐
-╎  Architecture Principles   ╎  (optional — skip straight to step 1)
+╎  Architecture Principles  ╎  (optional — skip straight to step 1)
 └╌╌╌╌╌╌╌╌╌╌╌╌╌┬╌╌╌╌╌╌╌╌╌╌╌╌╌┘
               │
               ▼
 ┌───────────────────────────┐
-│  1. Upload Specification    │
-└─────────────┬──────────────┘
+│  1. Upload Specification  │
+└─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  2. Clarification           │  (Start Clarification → answer → Apply Answers → repeat)
-└─────────────┬──────────────┘
+│  2. Clarification         │  (Start Clarification → answer → Apply Answers → repeat)
+└─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  3. Start Implementation    │
+│  3. Start Implementation  │
 └───────────────────────────┘
 ```
 
@@ -223,7 +223,8 @@ Click **Add File** or **Add Folder** to upload your PRD/spec documents straight 
 browser (they land in the same `sources.prd` folder `tempa init` created). Uploaded files
 appear under **Specification** in the left sidebar — click one to **View** it as rendered
 markdown, or switch to **Edit** and **Save** to change it right there, no separate editor
-needed. Right-click a file or folder in the sidebar for **Rename** / **Delete**.
+needed. Right-click a file or folder in the sidebar for **Rename** / **Delete**. You can upload
+more than one file — Tempa reads all of them together during clarification and planning.
 
 Only upload the **new** specification you want implemented here — not old/already-implemented
 ones. Specifications for the **existing** system belong separately in the `sources.docs`
@@ -239,7 +240,9 @@ The new specification should ideally cover:
 - **Tech stack** you want (language, framework, database, etc).
 
 The more completely these five aspects are written up, the closer the resulting application
-will match what you actually want.
+will match what you actually want. Full reference, with worked examples and common mistakes:
+[docs/writing-a-spec.md](docs/writing-a-spec.md) (also linked as **What should go in here? →**
+next to Add File/Add Folder on the dashboard's Upload Specification step).
 
 Not sure how to start, or just want to try Tempa out first? The [examples/](examples/)
 folder has ready-to-use sample PRDs (from a simple client-side app to a full web app with a
@@ -321,22 +324,22 @@ own `.tempa/` folder, ready to resume if you point Tempa back at it later.
 
 ```
 ┌───────────────────────────┐
-│  1. Initial Setup          │
-└─────────────┬──────────────┘
+│  1. Initial Setup         │
+└─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  2. Write Specification    │
-└─────────────┬──────────────┘
+│  2. Write Specification   │
+└─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  3. Answer Clarifications  │  (loop: evaluate → answer → apply, until clean)
-└─────────────┬──────────────┘
+│  3. Answer Clarifications │  (loop: evaluate → answer → apply, until clean)
+└─────────────┬─────────────┘
               │
               ▼
 ┌───────────────────────────┐
-│  4. Run Implementation     │  (loop per epic: feature → QA → fixes)
+│  4. Run Implementation    │  (loop per epic: feature → QA → fixes)
 └───────────────────────────┘
 ```
 
@@ -452,6 +455,8 @@ recovering from problems, manual verification): see
 
 - **Folder & Path Structure** — what a working folder is, `workspace.*`, `sources.*`:
   [docs/folders-and-paths.md](docs/folders-and-paths.md)
+- **Writing a Specification** — what a good PRD covers, worked examples, common mistakes:
+  [docs/writing-a-spec.md](docs/writing-a-spec.md)
 - **Architecture Principles** — project-wide rules injected into every stage, how to write them:
   [docs/architecture-principles.md](docs/architecture-principles.md)
 - **AI Model per Stage** — why it's differentiated per stage, default table, how to change it:

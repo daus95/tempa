@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writing a Specification — Tempa</title>
+<style>/*__CSS__*/</style>
+<style>
+  /* The dashboard's stylesheet is built for a fixed-height app shell; this is a plain
+     scrolling document, so undo the shell-specific rules. */
+  html, body { height: auto; }
+  body { overflow: auto; }
+  .guide { max-width: 860px; margin: 0 auto; padding: 32px 24px 96px; }
+  .guide-lede { font-size: 1.05rem; color: var(--muted); margin: 0 0 8px; }
+  .callout { border: 1px solid var(--border-strong); border-left: 4px solid var(--accent);
+    border-radius: 8px; background: var(--panel); padding: 14px 18px; margin: 1.4em 0; }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  .good, .bad { font-weight: 700; }
+  .good { color: var(--ok); }
+  .bad { color: var(--danger); }
+</style>
+</head>
+<body>
+<div class="guide markdown-body">
+
+<h1>Writing a Specification</h1>
+
+<p class="guide-lede">What to put in the PRD you upload in Step 1, so Tempa spends less time
+asking clarifying questions and more time building.</p>
+
+<h2>What it is</h2>
+
+<p>Your specification (PRD) is the description of the <strong>new work</strong> you want Tempa to
+build: what it does, for whom, and roughly how. Tempa reads it during clarification (to find
+ambiguity), during planning (to lay out epics/features/tasks), and during implementation (as the
+source of truth for what "done" means.)</p>
+
+<div class="callout">
+<p><strong>Only the new work goes here.</strong> This is not a place to describe the system as it
+already exists — that lives separately in <code>sources.docs</code> (the <code>docs/</code>
+folder), and planning reads it automatically as context so it doesn't re-plan work that's already
+done. Writing already-implemented behavior into the PRD just gives Tempa more to (mis)read as new
+work.</p>
+</div>
+
+<h2>You can use more than one file</h2>
+
+<p>The PRD isn't limited to a single file. Upload as many documents as you need — Tempa reads
+<strong>every file</strong> in the specification folder together during clarification and
+planning. Splitting a large specification into a few focused files (e.g. one per major area) is
+completely fine and often easier to write and review than one huge document.</p>
+
+<h2>The five things a good specification covers</h2>
+
+<p>Every specification that has worked well with Tempa covers these five aspects. The more
+completely each is written, the fewer clarification rounds you'll need before implementation can
+start.</p>
+
+<h3>1. Purpose</h3>
+<p>What problem does this solve, and for whom? State the audience and any hard constraints up
+front — "client-side only, no backend" or "internal tool, single admin user" changes what a
+correct implementation looks like more than almost anything else you'll write.</p>
+
+<h3>2. Business Process / Usage Flow</h3>
+<p>Walk through the actual sequence of steps a user takes, screen by screen or action by action.
+Number them. Call out validation rules and edge cases explicitly instead of assuming they're
+obvious — "down payment must not exceed the property price" is the kind of rule Tempa otherwise
+has to guess at, and it will ask you about it if you don't state it.</p>
+
+<h3>3. Data Model</h3>
+<p>List the main entities and their fields, and how they relate to each other. It doesn't need to
+be a formal ERD — a plain list of entities with their fields and relationships is enough, though
+an ERD is welcome for anything with more than a few related entities.</p>
+
+<h3>4. UI Concept</h3>
+<p>Describe the layout: what's on screen, how it's arranged, what changes on mobile vs. desktop.
+You don't need mockups — a written description of the sections/components and how they're
+arranged is enough for Tempa to build a reasonable first pass.</p>
+
+<h3>5. Tech Stack</h3>
+<p>Name the language, framework, and database (or explicitly "no backend/no database" if that's
+the case) you want used. Leaving this blank doesn't skip a decision — it just means Tempa (or
+clarification) picks one for you.</p>
+
+<h2>Two more sections worth adding</h2>
+
+<p>Not strictly required, but both consistently cut down on clarification questions:</p>
+
+<h3>Non-Goals</h3>
+<p>What's explicitly <strong>out</strong> of scope. "No user accounts", "no multi-currency
+support", "no real-time data sync" — stating what you don't want prevents Tempa from adding it
+"for completeness."</p>
+
+<h3>Acceptance Criteria</h3>
+<p>A few concrete input → expected-output examples. These double as a sanity check during QA:
+"property price 300,000, down payment 20%, 10-year term, flat method → principal installment
+2,000/month" is unambiguous in a way that prose usually isn't.</p>
+
+<h2>What this looks like end to end</h2>
+
+<pre><code># PRD — &lt;Feature or App Name&gt;
+
+## 1. Purpose
+&lt;problem solved, for whom, any hard constraints&gt;
+
+## 2. Business Process / Usage Flow
+1. &lt;step&gt;
+2. &lt;step, with validation rules called out&gt;
+...
+
+## 3. Data Model
+- **&lt;Entity&gt;**: field, field, field
+- &lt;relationships between entities&gt;
+
+## 4. UI Concept
+&lt;layout description: sections, arrangement, responsive behavior&gt;
+
+## 5. Tech Stack
+&lt;language, framework, database — or "no backend" if that's the case&gt;
+
+## 6. Non-Goals
+- &lt;explicitly out of scope&gt;
+
+## 7. Acceptance Criteria
+1. Input: ... → Expected: ...
+</code></pre>
+
+<p>This is exactly the structure used by both worked examples shipped with Tempa — see
+<a href="https://github.com/daus95/tempa/tree/main/examples" target="_blank" rel="noopener">examples/</a>
+in the repo.</p>
+
+<h2>Just want to try Tempa first?</h2>
+
+<div class="callout">
+<p>You don't have to write a specification from scratch to test-drive Tempa. The
+<a href="https://github.com/daus95/tempa/tree/main/examples" target="_blank" rel="noopener">examples/</a>
+folder ships two ready-to-use sample PRDs — a simple client-side calculator and a full web app with
+a database — written following exactly the structure above. Upload one via <strong>Add
+File</strong> on the Upload Specification step, or copy it straight into the PRD folder, and go
+straight into clarification with a specification that's already in good shape.</p>
+</div>
+
+<h2>Common mistakes</h2>
+
+<ul>
+  <li><strong>Including the existing system.</strong> Describing how the app already works
+      belongs in <code>docs/</code>, not the PRD — the PRD is only the delta you want built.</li>
+  <li><strong>Leaving validation rules implicit.</strong> "Obviously" a percentage can't be
+      negative — but if it isn't written down, expect a clarification question about it.</li>
+  <li><strong>Skipping the tech stack "because it doesn't matter yet."</strong> It always gets
+      decided one way or another — deciding it yourself is faster than a clarification round.</li>
+  <li><strong>One giant wall of text.</strong> Structure it under the headings above (or split
+      across a few files) — an unstructured PRD produces more, vaguer clarification findings.</li>
+  <li><strong>Writing project-wide rules here instead.</strong> Standing decisions that apply to
+      <em>every</em> feature (database choice, API error shape, code-quality bars) belong in
+      Architecture Principles, not repeated in each specification.</li>
+</ul>
+
+<h2>Where it goes</h2>
+
+<p>Specification files live in the working folder you selected, in the PRD folder:</p>
+
+<pre><code>&lt;your-working-folder&gt;/.tempa/specs/prd/</code></pre>
+
+<p>Upload files there with <strong>Add File</strong>/<strong>Add Folder</strong> on the Upload
+Specification step, or drop them into that folder directly and click <strong>Refresh</strong>.
+Once uploaded, continue to <strong>Clarification</strong> to have Tempa check for anything
+ambiguous before implementation starts.</p>
+
+</div>
+</body>
+</html>
