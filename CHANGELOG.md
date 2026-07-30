@@ -1,0 +1,81 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+once the first tagged release is cut.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-07-30
+
+Initial tagged release.
+
+### Added
+
+- Initial Tempa harness: a Claude-driven CLI runner for PRD clarification, planning,
+  and implementation.
+- Cross-platform `tempa` / `tempa.cmd` launcher scripts, plus double-click
+  `Open Dashboard` launchers for Windows/macOS/Linux.
+- Unified web **dashboard** (`tempa dashboard`), replacing the earlier separate
+  spec/clarify UIs — Home workflow page, live Implementation run controls and log,
+  Clarification run controls (Start/Finalize/Apply) with live log, a Specification
+  file browser (add/rename/delete, view/edit), and a Settings page for AI models and
+  run limits.
+- `spec --show`: an Explorer-style web UI to browse and edit spec files.
+- Clarification answer web UI (`tempa answer`), including scanning for every
+  unanswered clarification file at once (tabbed UI).
+- Auto-apply of clarification answers back into the PRD right after saving in the UI,
+  with a prompt to run another clarification round afterward.
+- **Apply Answers** button on the dashboard Home page's Clarification step, and an
+  **Answer Findings** shortcut that jumps straight to the first unanswered file.
+- Auto-continuation of the clarify → answer → apply loop after Apply, with a clearer
+  "not ready" state on Home while critical/major findings remain.
+- Native macOS folder picker and Finder open/focus for workspace init.
+- Per-workspace `.tempa/` folder holding config/logs/qa/verify/specs, so Tempa's own
+  install folder stays clean across projects.
+- Auto-creation of `config.json` with sane defaults if missing.
+- **Architecture Principles** — project-wide rules injected into every Claude prompt
+  (clarify, plan, implement, QA, verify), editable from the dashboard.
+- Detection of `claude` CLI authentication failures, with a plain-language explanation
+  and fix instructions instead of a raw error.
+- `pytest` unit test suite (`tests/`) covering the pure-logic modules, with 100%
+  coverage on those modules, and a GitHub Actions CI workflow running it on every
+  push/PR to `main`.
+- `ruff` linting, enforced as a separate CI job.
+- CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, and GitHub issue/PR templates.
+
+### Changed
+
+- CLI moved to `argparse` subcommands; session runners deduplicated and consolidated
+  under shared runner state.
+- Config structure: `sources.*` paths are now derived from `workspace.*` instead of
+  being duplicated in `config.json`.
+- Codebase refactored into cohesive modules under `src/` (`tempa_*.py` for the CLI,
+  `dashboard_*.py` for the dashboard).
+- Default workspace app folder changed from `apps/` to `src/`.
+- README rewritten with a problem/solution-framed introduction, a Quick Start section,
+  and a table of contents.
+- Home page's Clarification step now mirrors the dedicated Clarification page's
+  Continue/Answer Findings behavior.
+- Incomplete-answer warnings now use the dashboard's styled modal instead of a native
+  `alert()`.
+- **Start Implementation** now requires clarification to have run at least once,
+  instead of being reachable before any clarification pass.
+
+### Fixed
+
+- `TypeError` when creating `.gitignore` during `init`.
+- `TypeError` crashing the `/api/clarify/run` finalize gate.
+- Top-level dashboard toolbar not hiding correctly; stray `+` icons on Add File/Folder
+  buttons.
+- `spec --show` opening the whole `specs` folder instead of `specs/prd`.
+- Dashboard Implementation log tab not using the full panel height / live progress not
+  visible.
+- Crashes from non-UTF-8 Windows console codepages when printing Unicode log output.
+- A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
+  failing on non-Windows CI runners.
+
+[Unreleased]: https://github.com/daus95/tempa/compare/v.0.1.0...HEAD
+[0.1.0]: https://github.com/daus95/tempa/releases/tag/v.0.1.0
