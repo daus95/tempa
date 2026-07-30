@@ -157,6 +157,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
+  finalizeGateHint = $("finalizeGateHint"),
   implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
@@ -751,7 +752,7 @@ function renderGateChecklist(listEl, items) {
 //   2. the most recent result comes from a fresh evaluate (Start Clarification), not
 //      just an apply — answering + applying criticals isn't enough on its own
 //   3. that evaluate's findings show 0 critical
-function renderFinalizeGate(runDisabled) {
+function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
   renderGateChecklist(finalizeGateList, [
     { ok: st.hasRun, label: "Clarification has been run at least once" },
@@ -763,12 +764,43 @@ function renderFinalizeGate(runDisabled) {
         : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
   ]);
   finalizeClarifyBtn.disabled = runDisabled || !st.ready;
+
+  // Once clarification has run at least once but isn't finalize-ready yet, relabel
+  // Start Clarification -> Continue Clarification and explain why in plain language,
+  // so users who just finished answering/applying don't get stuck wondering why
+  // Finalize/Implement are still blocked.
+  const needsContinue = st.hasRun && !st.ready;
+  startClarifyBtn.querySelector("span:last-child").textContent =
+    needsContinue ? "Continue Clarification" : "Start Clarification";
+  if (!needsContinue) {
+    finalizeGateHint.classList.add("hidden");
+  } else if (hasUnanswered || hasUnapplied) {
+    finalizeGateHint.textContent =
+      "Answer the remaining findings or apply your saved answers before continuing clarification.";
+    finalizeGateHint.classList.remove("hidden");
+  } else if (st.critical > 0) {
+    finalizeGateHint.textContent =
+      `You still need to run Continue Clarification — the last evaluation showed ${st.critical} ` +
+      "critical finding(s).";
+    finalizeGateHint.classList.remove("hidden");
+  } else {
+    finalizeGateHint.textContent =
+      "Run Continue Clarification once more to confirm the latest status before finalizing.";
+    finalizeGateHint.classList.remove("hidden");
+  }
 }
 
 function setClarifyRunButtonsDisabled(disabled) {
-  startClarifyBtn.disabled = disabled;
-  applyAnswersBtn.disabled = disabled || !state.clarifyAnswered.some((f) => !f.applied);
-  renderFinalizeGate(disabled);
+  const st = state.clarifyFinalize;
+  const hasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
+  const hasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
+  const needsContinue = st.hasRun && !st.ready;
+  const blockedByAnswers = needsContinue && (hasUnanswered || hasUnapplied);
+  startClarifyBtn.disabled = disabled || blockedByAnswers;
+  startClarifyBtn.title = blockedByAnswers
+    ? "Answer the remaining findings or apply your saved answers first." : "";
+  applyAnswersBtn.disabled = disabled || !hasUnapplied;
+  renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
   // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
   // already stamps them with the disabled state current at render time — but a run can
   // start/stop without the table re-rendering, so also sync any already-in-the-DOM ones.
@@ -865,20 +897,8 @@ async function pollClarifyRun() {
       stopClarifyPolling();
       if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
       refreshClarifyList();
-      // CLI parity: `tempa clarify --apply` asks "Run another clarification round now?"
-      // via input() right after a successful apply, but only when stdin is a real TTY —
-      // the dashboard's subprocess always runs with stdin=DEVNULL, so that prompt never
-      // fires there. Ask the same question here instead, as a modal, since the web UI
-      // has no terminal to type y/N into.
-      if (data.mode === "apply" && data.returncode === 0) askContinueClarification();
     }
   } catch (e) { /* transient network hiccup — next tick retries */ }
-}
-
-async function askContinueClarification() {
-  const ok = await confirmModal("Run another clarification round now?",
-    { title: "Continue Clarification", okLabel: "Continue" });
-  if (ok) startClarifyRun("run");
 }
 
 function startClarifyPolling() {
