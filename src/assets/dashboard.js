@@ -422,15 +422,20 @@ function renderHomeWorkflow() {
     }
   }
 
-  const findingsClean = findings.critical === 0 && findings.major === 0;
+  // Requiring hasRun matters because a workspace where clarification was never run has
+  // zero findings simply from having no clarification files yet, which would otherwise
+  // trivially satisfy the critical/major checks below.
+  const findingsClean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   const step3Locked = step2Locked || !findingsClean;
   homeStep3.classList.toggle("locked", step3Locked);
   homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
-    : findingsClean
-      ? "No critical or major findings remain — ready to start implementation."
-      : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
+    : !state.clarifyFinalize.hasRun
+      ? "Run clarification first (step 2)."
+      : findingsClean
+        ? "No critical or major findings remain — ready to start implementation."
+        : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
 }
 
 homeSelectFolderBtn.addEventListener("click", async () => {
@@ -719,12 +724,15 @@ function renderClarifyOverview() {
   renderImplementReadyBanner();
 }
 
-// Mirrors the same "no critical/major findings left" gate as the Home page's step 3
-// (see renderHomeWorkflow) — shown on the Clarification overview so the user doesn't
-// have to go back to Home to notice they can move on to implementation.
+// Mirrors the same "clarification has run + no critical/major findings left" gate as
+// the Home page's step 3 (see renderHomeWorkflow) — shown on the Clarification overview
+// so the user doesn't have to go back to Home to notice they can move on to
+// implementation. Requiring hasRun matters because a workspace where clarification was
+// never run has zero findings simply from having no clarification files yet — without
+// this check that would trivially look "ready".
 function renderImplementReadyBanner() {
   const findings = state.clarifyFindings;
-  const ready = findings.critical === 0 && findings.major === 0;
+  const ready = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   implementReadyBanner.classList.toggle("hidden", !ready);
 }
 
@@ -1021,12 +1029,15 @@ function renderImplementLog() {
   implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
-// The 2 preconditions gating "Start Implementation": no critical and no major
-// clarification findings remain (server-enforced too — see _handle_implement_run_start
-// in dashboard_ui.py).
+// The 3 preconditions gating "Start Implementation": clarification has run at least
+// once, and no critical/major clarification findings remain (server-enforced too — see
+// _handle_implement_run_start in dashboard_server.py). The hasRun check matters because
+// a workspace where clarification was never run has zero findings simply from having no
+// clarification files yet, which would otherwise trivially pass the checks below.
 function renderImplementGate() {
   const findings = state.clarifyFindings;
   renderGateChecklist(implGateList, [
+    { ok: state.clarifyFinalize.hasRun, label: "Clarification has been run at least once" },
     { ok: findings.critical === 0,
       label: findings.critical === 0
         ? "No critical findings remain"
@@ -1040,7 +1051,7 @@ function renderImplementGate() {
 
 function updateImplementControls() {
   const findings = state.clarifyFindings;
-  const clean = findings.critical === 0 && findings.major === 0;
+  const clean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   startImplementBtn.disabled = state.implementRun.running || !clean;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
@@ -1074,7 +1085,8 @@ async function refreshImplementRun() {
     const wasRunning = state.implementRun.running;
     state.implementRun.running = data.running;
     updateImplementControls();
-    homeStartImplementBtn.disabled = data.running || !(state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
+    homeStartImplementBtn.disabled = data.running ||
+      !(state.clarifyFinalize.hasRun && state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
     if (data.running && !state.implementRun.pollTimer) startImplementPolling();
     if (!data.running) {
       stopImplementPolling();
