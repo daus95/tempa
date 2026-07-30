@@ -168,9 +168,9 @@ MODEL_ALIASES = {
 # with no workspace linked yet (empty root) and no run history.
 DEFAULT_CONFIG = {
     "models": dict(DEFAULT_MODELS),
-    "features_per_session": None,
+    "features_per_session": 3,
     "max_session_run": 30,
-    "max_clarification_run": 10,
+    "max_clarification_run": 20,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_auto_answer": 0,
     "epic": [],

@@ -193,7 +193,7 @@ def run_clarify_finalize() -> None:
 
     Path(clarifications_path).mkdir(parents=True, exist_ok=True)
 
-    max_run = config.get("max_clarification_run", 10)
+    max_run = config.get("max_clarification_run", 20)
     run_number = 0
 
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
