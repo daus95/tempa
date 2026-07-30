@@ -1,5 +1,9 @@
 # Tempa — Claude Automation Harness
 
+[![CI](https://github.com/daus95/tempa/actions/workflows/tests.yml/badge.svg)](https://github.com/daus95/tempa/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/daus95/tempa?include_prereleases&label=release)](https://github.com/daus95/tempa/releases)
+[![License: Apache 2.0](https://img.shields.io/github/license/daus95/tempa)](LICENSE)
+
 > Turn a spec into a working app — clarified, planned, implemented, and QA'd
 > automatically, while you do something else.
 
