@@ -51,14 +51,15 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 2. **Open the dashboard** — double-click **`Open Dashboard.cmd`** (Windows) /
    **`Open Dashboard.command`** (macOS) / **`Open Dashboard.sh`** (Linux) in that folder.
 
-3. **Point Tempa at your project:**
-   - **Windows/macOS:** on the Home page, click **Select Working Folder** and pick your
-     project folder — no terminal needed.
-   - **Linux** (no native folder picker yet): from inside the extracted folder, run
-     ```bash
-     ./tempa init C:\repo\<your-repo>
-     ```
-     then reload the dashboard.
+3. **Point Tempa at your project:** on the Home page, click **Select Working Folder** and
+   pick your project folder — no terminal needed. (Linux: needs `zenity` or `kdialog`
+   installed for the picker dialog — both ship by default on most desktop distros; if
+   neither is installed, use the CLI fallback instead: from inside the extracted folder,
+   run
+   ```bash
+   ./tempa init C:\repo\<your-repo>
+   ```
+   then reload the dashboard.)
 
 4. **Follow the dashboard's checklist** — Upload Specification → Clarification → Start
    Implementation. See [Dashboard (Recommended)](#dashboard-recommended).
@@ -164,9 +165,10 @@ tempa dashboard            # PATH set (any OS)
 
 This opens `http://127.0.0.1:<port>/` in your browser (`Ctrl+C` in the terminal stops the
 server). If the project hasn't been set up yet, the **Home** page shows a
-**Select Working Folder** button — click it to pick your project via a native dialog
-(Windows/macOS) and Tempa sets it up for you, no terminal involved. No native picker on
-Linux yet: run `tempa init <path>` from the CLI once, then reload the dashboard.
+**Select Working Folder** button — click it to pick your project via a native dialog and
+Tempa sets it up for you, no terminal involved. (Linux: needs `zenity` or `kdialog`
+installed — see below. Without either, run `tempa init <path>` from the CLI once instead,
+then reload the dashboard.)
 
 ![Tempa dashboard Home page, showing the working folder, the optional Architecture Principles card, and the Upload Specification step](docs/assets/home.webp)
 
@@ -196,7 +198,7 @@ Above it sits one optional card you can ignore entirely:
 
 | Dashboard step | Equivalent CLI step |
 |---|---|
-| **Select Working Folder** button (prerequisite, not shown above; Windows/macOS — Linux still needs the CLI) | [Step 1 — Initial Setup](#step-1--initial-setup) (`tempa init <path>`) |
+| **Select Working Folder** button (prerequisite, not shown above; Linux needs `zenity`/`kdialog` — see below) | [Step 1 — Initial Setup](#step-1--initial-setup) (`tempa init <path>`) |
 | [Step 1 — Upload Specification](#step-1--upload-specification) | [Step 2 — Write the specification](#step-2--write-the-specification) |
 | [Step 2 — Clarification](#step-2--clarification) | [Step 3 — Answer clarifications](#step-3--answer-clarifications-clarify) (`tempa clarify`) |
 | [Step 3 — Start Implementation](#step-3--start-implementation) | [Step 4 — Run implementation](#step-4--run-implementation-implement) (`tempa implement`) |
@@ -255,9 +257,12 @@ database) — upload them here via **Add File**/**Add Folder**, or copy them str
 minor), grouped by file, under **Clarification** in the sidebar. Open a file to answer its
 findings inline: for each finding, choose **Follow the recommendation** or **I'll write my
 own answer** (a text box appears), then **Save**. Once a file is fully answered, click
-**Apply Answers** to write those resolutions back into the PRD/spec — then run **Start
-Clarification** again to confirm nothing critical remains. This loop (evaluate → answer →
-apply → re-evaluate) is the dashboard version of Workflow Step 3 below.
+**Apply Answers** to write those resolutions back into the PRD/spec — applying automatically
+chains straight into a fresh evaluation pass afterward, so you don't have to trigger it
+yourself. Once clarification has run at least once, the button relabels to **Continue
+Clarification** (with a hint explaining what's still blocking it, if anything is) for the
+rest of this loop. This loop (evaluate → answer → apply → re-evaluate) is the dashboard
+version of Workflow Step 3 below.
 
 ![Tempa dashboard Clarification page, showing the Finalize readiness checklist and the Unanswered/Fully answered file tables](docs/assets/clarification.webp)
 
@@ -310,9 +315,12 @@ as `tempa close-folder` on the CLI) — no files are deleted, it just drops the 
 point Tempa at a different project next. The current project's config/history stays in its
 own `.tempa/` folder, ready to resume if you point Tempa back at it later.
 
-> The folder picker and "open in explorer" work natively on Windows and macOS. On Linux, set
-> the working folder with `tempa init <path>` (CLI) first, then use the dashboard normally for
-> the rest of the workflow — the **✕** icon works there too.
+> The folder picker and "open in explorer" work on Windows and macOS out of the box. On Linux
+> they rely on `zenity`/`kdialog` (picker) and `xdg-open` (file manager) — all three ship by
+> default on most desktop distros, though `xdg-open` there only opens the folder, it doesn't
+> force that window to the foreground the way Explorer/Finder do. Without any of those tools
+> installed, set the working folder with `tempa init <path>` (CLI) first, then use the
+> dashboard normally for the rest of the workflow — the **✕** icon works there too.
 
 ---
 
@@ -405,20 +413,20 @@ tempa clarify          # evaluate: system writes questions + recommended answers
 ```
 
 Once the evaluation finishes, Tempa opens the **clarification-answer web UI** on the result
-file so you can answer right there (add `--noui` to skip it) — saving in the UI immediately
-applies your answers back into the PRD.
+file so you can answer right there (add `--noui` to skip it). Clicking **Save** asks whether
+to apply those answers to the PRD right away (**Save & Apply**) or just save them for now
+(plain **Save**) — applying automatically chains straight into a fresh evaluation pass
+afterward, the same as the dashboard's **Apply Answers** button (see
+[Dashboard Step 2 — Clarification](#step-2--clarification) above).
 
 Prefer editing the markdown file by hand instead? That still works: edit the result file
-yourself, then run `tempa clarify --apply` to apply it back into the PRD. Re-open the
+yourself, then run `tempa clarify --apply` to apply it back into the PRD — run this way,
+directly from a terminal, Tempa asks whether to run another clarification round right away
+(`y`/`N`; only asked in an interactive terminal, non-interactive runs just exit). Re-open the
 UI anytime with `tempa answer` — no file argument needed: it scans
 `sources.clarifications` for every result file and, as long as at least one still has an
 unanswered finding, opens them **all** at once (one tab per file, badged complete/incomplete)
 so you never have to hunt down which file still needs an answer.
-
-After answers are applied (from the UI, or via `--apply`), Tempa asks whether to run another
-clarification round right away — answer `y` to loop straight back into `clarify`, or `N` to
-stop and review manually. (Only asked in an interactive terminal — non-interactive runs just
-exit.)
 
 #### B. Answer automatically (`--finalize`)
 

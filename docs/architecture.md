@@ -65,7 +65,7 @@ functions directly in-process.
 | `dashboard_clarify_parse.py` | Parses a clarification result file into findings (via the `clarify:item`/`clarify:answer` HTML-comment markers) and computes the finalize-readiness state. Ported from the former standalone `clarify_ui.py`. |
 | `dashboard_clarify_render.py` | Turns parsed findings into the HTML shown in the Clarification pane (a small hand-rolled markdown renderer, not a dependency). |
 | `dashboard_runs.py` | Background clarify/implement runs: spawns `tempa.py clarify`/`tempa.py implement` as a subprocess, streams its output into a run-state dict the dashboard polls, and the Stop-implementation kill. |
-| `dashboard_winui.py` / `dashboard_macui.py` | OS-native folder picker and reveal-in-Explorer/Finder, split per platform since there's no cross-platform stdlib API for either. Linux has no native picker; `tempa init <path>` covers it. |
+| `dashboard_winui.py` / `dashboard_macui.py` / `dashboard_linuxui.py` | OS-native folder picker and reveal-in-file-manager, split per platform since there's no cross-platform stdlib API for either. Linux is best-effort (`zenity`/`kdialog` for the picker, `xdg-open` for the file manager, no window-focus equivalent) since neither is guaranteed installed the way PowerShell/osascript are on their platforms; `tempa init <path>` is the fallback if neither tool is present. |
 
 ### Assets (`src/assets/`, `src/prompt/`)
 

@@ -46,6 +46,8 @@ if sys.platform == "win32":
     from dashboard_winui import _open_and_focus_folder, _pick_folder_dialog
 elif sys.platform == "darwin":
     from dashboard_macui import _open_and_focus_folder, _pick_folder_dialog
+elif sys.platform.startswith("linux"):
+    from dashboard_linuxui import _open_and_focus_folder, _pick_folder_dialog
 else:
     _pick_folder_dialog = _open_and_focus_folder = None
 
@@ -567,10 +569,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "root": root, "output": output})
 
     def _handle_workspace_open(self) -> None:
-        """Open workspace.root in the OS file manager (Explorer/Finder) and bring it to
-        the front — used by the path label on the Home page's working-folder panel.
-        Windows and macOS only; Linux has no single native equivalent, so the button is
-        disabled there (see _open_and_focus_folder)."""
+        """Open workspace.root in the OS file manager (Explorer/Finder/xdg-open) and, on
+        Windows/macOS, bring it to the front — used by the path label on the Home page's
+        working-folder panel. Unsupported only if the platform isn't recognized, or (on
+        Linux) if none of the relied-upon command-line tools are installed (see
+        _open_and_focus_folder)."""
         root = _workspace_root()
         if not root or not Path(root).is_dir():
             self._send_json(404, {"ok": False, "error": "Working folder not found on disk."})
@@ -578,7 +581,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if _open_and_focus_folder is None:
             self._send_json(200, {
                 "ok": False,
-                "error": "Opening the working folder in a file manager is only supported on Windows and macOS.",
+                "error": "Opening the working folder in a file manager isn't supported on this platform.",
             })
             return
         try:
