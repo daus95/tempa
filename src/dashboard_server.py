@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import tempa_config
-from dashboard_assets import principles_guide_page
+from dashboard_assets import principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
     _clarify_files_overview,
     _clarify_finalize_status,
@@ -117,6 +117,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         elif route == "/architecture-principles":
             self._send(200, "text/html; charset=utf-8",
                        principles_guide_page().encode("utf-8"))
+        elif route == "/spec-guide":
+            self._send(200, "text/html; charset=utf-8",
+                       spec_guide_page().encode("utf-8"))
         elif route == "/api/tree":
             unanswered, answered = _clarify_files_overview(
                 self.server.clar_dir, _load_clarify_applied_hashes()
