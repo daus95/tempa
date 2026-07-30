@@ -168,6 +168,8 @@ server). If the project hasn't been set up yet, the **Home** page shows a
 (Windows/macOS) and Tempa sets it up for you, no terminal involved. No native picker on
 Linux yet: run `tempa init <path>` from the CLI once, then reload the dashboard.
 
+![Tempa dashboard Home page, showing the working folder, the optional Architecture Principles card, and the Upload Specification step](docs/assets/home.webp)
+
 The Home page is a 3-step checklist; each step unlocks once the one before it is satisfied.
 Above it sits one optional card you can ignore entirely:
 
@@ -253,6 +255,8 @@ own answer** (a text box appears), then **Save**. Once a file is fully answered,
 **Apply Answers** to write those resolutions back into the PRD/spec — then run **Start
 Clarification** again to confirm nothing critical remains. This loop (evaluate → answer →
 apply → re-evaluate) is the dashboard version of Workflow Step 3 below.
+
+![Tempa dashboard Clarification page, showing the Finalize readiness checklist and the Unanswered/Fully answered file tables](docs/assets/clarification.webp)
 
 **Answer manually during the early iterations** (usually the first 3–4 rounds): early on,
 the system doesn't yet have enough project context to guess your intent accurately — its
