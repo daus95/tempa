@@ -156,7 +156,9 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
+  finalizeGateHint = $("finalizeGateHint"),
   implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
@@ -168,6 +170,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeStep2FileList = $("homeStep2FileList"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
+  homeOpenUnansweredBtn = $("homeOpenUnansweredBtn"), homeApplyAnswersBtn = $("homeApplyAnswersBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
@@ -229,7 +232,8 @@ function closeModal(result) {
   if (resolve) resolve(result);
 }
 
-function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false, value = "" }) {
+function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false,
+    value = "", showCancel = true }) {
   return new Promise((resolve) => {
     modalResolve = resolve;
     modalIsPrompt = prompt;
@@ -241,6 +245,7 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
     });
     modalOkBtn.textContent = okLabel;
     modalOkBtn.classList.toggle("danger", danger);
+    modalCancelBtn.classList.toggle("hidden", !showCancel);
     modalInput.classList.toggle("hidden", !prompt);
     modalInput.value = prompt ? value : "";
     modalOverlay.classList.remove("hidden");
@@ -250,12 +255,16 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
   });
 }
 
-// confirmModal resolves true/false; promptModal resolves the entered string, or null on cancel.
+// confirmModal resolves true/false; promptModal resolves the entered string, or null on
+// cancel; alertModal is a single-button (no Cancel) notice, resolved once acknowledged.
 function confirmModal(message, opts) {
   return showModal({ message, prompt: false, ...opts });
 }
 function promptModal(message, value, opts) {
   return showModal({ message, prompt: true, value: value || "", ...opts }).then((v) => (v === false ? null : v));
+}
+function alertModal(message, opts) {
+  return showModal({ message, prompt: false, showCancel: false, ...opts });
 }
 
 modalCancelBtn.addEventListener("click", () => closeModal(modalIsPrompt ? null : false));
@@ -393,7 +402,19 @@ function renderHomeWorkflow() {
 
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
-  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  // Mirrors the Clarification page's own Start/Continue Clarification + Answer Findings
+  // behavior (see setClarifyRunButtonsDisabled) so the two pages never disagree.
+  const homeHasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
+  const homeHasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
+  const homeNeedsContinue = state.clarifyFinalize.hasRun && !state.clarifyFinalize.ready;
+  const homeBlockedByAnswers = homeNeedsContinue && (homeHasUnanswered || homeHasUnapplied);
+  homeStartClarifyBtn.querySelector("span:last-child").textContent =
+    homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
+  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers;
+  homeStartClarifyBtn.title = homeBlockedByAnswers
+    ? "Answer the remaining findings or apply your saved answers first." : "";
+  homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
+  homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
   homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
@@ -421,15 +442,20 @@ function renderHomeWorkflow() {
     }
   }
 
-  const findingsClean = findings.critical === 0 && findings.major === 0;
+  // Requiring hasRun matters because a workspace where clarification was never run has
+  // zero findings simply from having no clarification files yet, which would otherwise
+  // trivially satisfy the critical/major checks below.
+  const findingsClean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   const step3Locked = step2Locked || !findingsClean;
   homeStep3.classList.toggle("locked", step3Locked);
   homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
-    : findingsClean
-      ? "No critical or major findings remain — ready to start implementation."
-      : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
+    : !state.clarifyFinalize.hasRun
+      ? "Run clarification first (step 2)."
+      : findingsClean
+        ? "No critical or major findings remain — ready to start implementation."
+        : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
 }
 
 homeSelectFolderBtn.addEventListener("click", async () => {
@@ -485,6 +511,13 @@ homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; ad
 homeStartClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
   startClarifyRun("run");
+});
+homeOpenUnansweredBtn.addEventListener("click", () => {
+  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
+});
+homeApplyAnswersBtn.addEventListener("click", async () => {
+  await selectTop("clarification");
+  startClarifyRun("apply");
 });
 homeFinalizeClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
@@ -718,12 +751,15 @@ function renderClarifyOverview() {
   renderImplementReadyBanner();
 }
 
-// Mirrors the same "no critical/major findings left" gate as the Home page's step 3
-// (see renderHomeWorkflow) — shown on the Clarification overview so the user doesn't
-// have to go back to Home to notice they can move on to implementation.
+// Mirrors the same "clarification has run + no critical/major findings left" gate as
+// the Home page's step 3 (see renderHomeWorkflow) — shown on the Clarification overview
+// so the user doesn't have to go back to Home to notice they can move on to
+// implementation. Requiring hasRun matters because a workspace where clarification was
+// never run has zero findings simply from having no clarification files yet — without
+// this check that would trivially look "ready".
 function renderImplementReadyBanner() {
   const findings = state.clarifyFindings;
-  const ready = findings.critical === 0 && findings.major === 0;
+  const ready = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   implementReadyBanner.classList.toggle("hidden", !ready);
 }
 
@@ -751,7 +787,7 @@ function renderGateChecklist(listEl, items) {
 //   2. the most recent result comes from a fresh evaluate (Start Clarification), not
 //      just an apply — answering + applying criticals isn't enough on its own
 //   3. that evaluate's findings show 0 critical
-function renderFinalizeGate(runDisabled) {
+function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
   renderGateChecklist(finalizeGateList, [
     { ok: st.hasRun, label: "Clarification has been run at least once" },
@@ -763,12 +799,44 @@ function renderFinalizeGate(runDisabled) {
         : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
   ]);
   finalizeClarifyBtn.disabled = runDisabled || !st.ready;
+
+  // Once clarification has run at least once but isn't finalize-ready yet, relabel
+  // Start Clarification -> Continue Clarification and explain why in plain language,
+  // so users who just finished answering/applying don't get stuck wondering why
+  // Finalize/Implement are still blocked.
+  const needsContinue = st.hasRun && !st.ready;
+  startClarifyBtn.querySelector("span:last-child").textContent =
+    needsContinue ? "Continue Clarification" : "Start Clarification";
+  if (!needsContinue) {
+    finalizeGateHint.classList.add("hidden");
+  } else if (hasUnanswered || hasUnapplied) {
+    finalizeGateHint.textContent =
+      "Answer the remaining findings or apply your saved answers before continuing clarification.";
+    finalizeGateHint.classList.remove("hidden");
+  } else if (st.critical > 0) {
+    finalizeGateHint.textContent =
+      `You still need to run Continue Clarification — the last evaluation showed ${st.critical} ` +
+      "critical finding(s).";
+    finalizeGateHint.classList.remove("hidden");
+  } else {
+    finalizeGateHint.textContent =
+      "Run Continue Clarification once more to confirm the latest status before finalizing.";
+    finalizeGateHint.classList.remove("hidden");
+  }
 }
 
 function setClarifyRunButtonsDisabled(disabled) {
-  startClarifyBtn.disabled = disabled;
-  applyAnswersBtn.disabled = disabled || !state.clarifyAnswered.some((f) => !f.applied);
-  renderFinalizeGate(disabled);
+  const st = state.clarifyFinalize;
+  const hasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
+  const hasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
+  const needsContinue = st.hasRun && !st.ready;
+  const blockedByAnswers = needsContinue && (hasUnanswered || hasUnapplied);
+  startClarifyBtn.disabled = disabled || blockedByAnswers;
+  startClarifyBtn.title = blockedByAnswers
+    ? "Answer the remaining findings or apply your saved answers first." : "";
+  applyAnswersBtn.disabled = disabled || !hasUnapplied;
+  openUnansweredBtn.disabled = disabled || !hasUnanswered;
+  renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
   // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
   // already stamps them with the disabled state current at render time — but a run can
   // start/stop without the table re-rendering, so also sync any already-in-the-DOM ones.
@@ -865,20 +933,8 @@ async function pollClarifyRun() {
       stopClarifyPolling();
       if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
       refreshClarifyList();
-      // CLI parity: `tempa clarify --apply` asks "Run another clarification round now?"
-      // via input() right after a successful apply, but only when stdin is a real TTY —
-      // the dashboard's subprocess always runs with stdin=DEVNULL, so that prompt never
-      // fires there. Ask the same question here instead, as a modal, since the web UI
-      // has no terminal to type y/N into.
-      if (data.mode === "apply" && data.returncode === 0) askContinueClarification();
     }
   } catch (e) { /* transient network hiccup — next tick retries */ }
-}
-
-async function askContinueClarification() {
-  const ok = await confirmModal("Run another clarification round now?",
-    { title: "Continue Clarification", okLabel: "Continue" });
-  if (ok) startClarifyRun("run");
 }
 
 function startClarifyPolling() {
@@ -939,6 +995,11 @@ async function checkClarifyRunOnLoad() {
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
+// With multiple unanswered files, just jump into the first one — same as clicking a
+// row in the "Unanswered" table below, this is only meant to get the user started.
+openUnansweredBtn.addEventListener("click", () => {
+  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
+});
 
 // ---------------------------------------------------------------------------
 // Implementation run (Start/Stop Implementation + Status/Log tabs)
@@ -1001,12 +1062,15 @@ function renderImplementLog() {
   implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
-// The 2 preconditions gating "Start Implementation": no critical and no major
-// clarification findings remain (server-enforced too — see _handle_implement_run_start
-// in dashboard_ui.py).
+// The 3 preconditions gating "Start Implementation": clarification has run at least
+// once, and no critical/major clarification findings remain (server-enforced too — see
+// _handle_implement_run_start in dashboard_server.py). The hasRun check matters because
+// a workspace where clarification was never run has zero findings simply from having no
+// clarification files yet, which would otherwise trivially pass the checks below.
 function renderImplementGate() {
   const findings = state.clarifyFindings;
   renderGateChecklist(implGateList, [
+    { ok: state.clarifyFinalize.hasRun, label: "Clarification has been run at least once" },
     { ok: findings.critical === 0,
       label: findings.critical === 0
         ? "No critical findings remain"
@@ -1020,7 +1084,7 @@ function renderImplementGate() {
 
 function updateImplementControls() {
   const findings = state.clarifyFindings;
-  const clean = findings.critical === 0 && findings.major === 0;
+  const clean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
   startImplementBtn.disabled = state.implementRun.running || !clean;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
@@ -1054,7 +1118,8 @@ async function refreshImplementRun() {
     const wasRunning = state.implementRun.running;
     state.implementRun.running = data.running;
     updateImplementControls();
-    homeStartImplementBtn.disabled = data.running || !(state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
+    homeStartImplementBtn.disabled = data.running ||
+      !(state.clarifyFinalize.hasRun && state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
     if (data.running && !state.implementRun.pollTimer) startImplementPolling();
     if (!data.running) {
       stopImplementPolling();
@@ -1583,8 +1648,8 @@ async function saveClarifyFile() {
   const own = items.filter((i) => i.mode === "own");
   const missing = own.filter((i) => !i.answer.trim());
   if (missing.length) {
-    alert('Please fill in your own answer for ' + missing.length +
-      ' finding(s), or switch them back to "Follow the recommendation".');
+    await alertModal('Please fill in your own answer for ' + missing.length +
+      ' finding(s), or switch them back to "Follow the recommendation".', { title: "Answers incomplete" });
     return;
   }
   saveBtn.disabled = true;

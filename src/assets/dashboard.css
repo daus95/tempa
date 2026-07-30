@@ -290,6 +290,7 @@
   .gate-panel { max-width: 860px; margin-bottom: 18px; border: 1px solid var(--border-strong);
     border-radius: 8px; background: var(--panel); padding: 14px 16px; }
   .gate-panel h3 { margin: 0 0 10px; font-size: 0.88rem; }
+  .gate-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
   .gate-checklist { list-style: none; margin: 0; padding: 0; display: flex;
     flex-direction: column; gap: 6px; }
   .gate-checklist + .clarify-run-btn { margin-top: 14px; }

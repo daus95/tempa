@@ -55,7 +55,14 @@ def _start_clarify_run(server, mode: str) -> bool:
     or `tempa clarify --apply` (mode "apply") as a background subprocess, appending its
     console output to server.clarify_run["lines"] as it streams in. Returns False without
     starting anything if a run is already in progress (defense in depth alongside the
-    dashboard disabling the buttons client-side)."""
+    dashboard disabling the buttons client-side).
+
+    A successful "apply" run automatically chains straight into a fresh "run" (evaluate)
+    pass — see run_once()/worker() below — since applying never re-verifies against the
+    live PRD itself, and the dashboard's finalize gate requires a fresh evaluate before
+    it'll allow "Finalized Clarification" to proceed (see _clarify_finalize_status in
+    dashboard_clarify_parse.py). Without this, users who only ever click Apply get stuck
+    unable to finalize with no clear next step."""
     run = server.clarify_run
     with run["lock"]:
         if run["running"]:
@@ -68,19 +75,26 @@ def _start_clarify_run(server, mode: str) -> bool:
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
-        cmd = [sys.executable, str(tempa_py), "clarify", *_CLARIFY_RUN_ARGS[mode]]
-        returncode = -1
-        try:
-            process = subprocess.Popen(
-                cmd,
-                # `tempa clarify --apply` asks (via input()) whether to run another
-                # clarification round right away, but only if stdin is a tty — DEVNULL
-                # guarantees it never is, so a dashboard-triggered apply can't block
-                # forever waiting for a keypress no one can give it.
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
-            )
+
+        def run_once(args: list[str]) -> int:
+            cmd = [sys.executable, str(tempa_py), "clarify", *args]
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    # `tempa clarify --apply` asks (via input()) whether to run another
+                    # clarification round right away, but only if stdin is a tty — DEVNULL
+                    # guarantees it never is, so a dashboard-triggered apply can't block
+                    # forever waiting for a keypress no one can give it. (The dashboard
+                    # instead auto-chains a fresh evaluate itself — see below — rather
+                    # than asking.)
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                )
+            except OSError as e:
+                with run["lock"]:
+                    run["lines"].append(f"[error] Could not start clarify process: {e}")
+                return -1
             for raw_line in process.stdout:
                 line = raw_line.strip()
                 if not line:
@@ -91,10 +105,18 @@ def _start_clarify_run(server, mode: str) -> bool:
                     else:
                         run["lines"].append(line)
             process.wait()
-            returncode = process.returncode
-        except OSError as e:
+            return process.returncode
+
+        returncode = run_once(_CLARIFY_RUN_ARGS[mode])
+        if mode == "apply" and returncode == 0:
             with run["lock"]:
-                run["lines"].append(f"[error] Could not start clarify process: {e}")
+                run["lines"].append(
+                    "Apply finished — automatically starting a new Start Clarification "
+                    "run to refresh critical/major status..."
+                )
+                run["mode"] = "run"
+                run["progress"] = None
+            returncode = run_once(_CLARIFY_RUN_ARGS["run"])
         with run["lock"]:
             run["running"] = False
             run["progress"] = None

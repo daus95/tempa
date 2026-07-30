@@ -98,6 +98,12 @@
               <button type="button" class="clarify-run-btn" id="homeStartClarifyBtn">
                 <span>▶️</span><span>Start Clarification</span>
               </button>
+              <button type="button" class="clarify-run-btn secondary" id="homeOpenUnansweredBtn" disabled>
+                <span>📝</span><span>Answer Findings</span>
+              </button>
+              <button type="button" class="clarify-run-btn secondary" id="homeApplyAnswersBtn" disabled>
+                <span>📤</span><span>Apply Answers</span>
+              </button>
               <button type="button" class="clarify-run-btn secondary" id="homeFinalizeClarifyBtn">
                 <span>🏁</span><span>Finalized Clarification</span>
               </button>
@@ -155,12 +161,16 @@
           <button type="button" class="clarify-run-btn" id="startClarifyBtn">
             <span>▶️</span><span>Start Clarification</span>
           </button>
+          <button type="button" class="clarify-run-btn secondary" id="openUnansweredBtn" disabled>
+            <span>📝</span><span>Answer Findings</span>
+          </button>
           <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
             <span>📤</span><span>Apply Answers</span>
           </button>
         </div>
         <div class="gate-panel" id="finalizeGate">
           <h3>Finalize readiness</h3>
+          <p class="gate-hint hidden" id="finalizeGateHint"></p>
           <ul class="gate-checklist" id="finalizeGateList"></ul>
           <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
             <span>🏁</span><span>Finalized Clarification</span>

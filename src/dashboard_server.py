@@ -463,6 +463,17 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # Server-side gate, not just a disabled button client-side — tempa.py's
         # `implement` itself has no awareness of clarification findings and will
         # happily start regardless, so this is the only thing actually enforcing it.
+        last_action = _load_dashboard_config().get("last_clarification_action")
+        if last_action is None:
+            # Same "hasRun" check the finalize gate uses (_clarify_finalize_status) —
+            # without it, a workspace where clarification was never run at all has zero
+            # findings by simple absence of any clarification file, which would
+            # otherwise trivially satisfy the critical/major checks below.
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot start implementation before clarification has been run at least once.",
+            })
+            return
         unanswered, answered = _clarify_files_overview(
             self.server.clar_dir, _load_clarify_applied_hashes()
         )
