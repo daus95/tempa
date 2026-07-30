@@ -156,6 +156,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"),
   implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
@@ -808,6 +809,7 @@ function setClarifyRunButtonsDisabled(disabled) {
   startClarifyBtn.title = blockedByAnswers
     ? "Answer the remaining findings or apply your saved answers first." : "";
   applyAnswersBtn.disabled = disabled || !hasUnapplied;
+  openUnansweredBtn.disabled = disabled || !hasUnanswered;
   renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
   // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
   // already stamps them with the disabled state current at render time — but a run can
@@ -967,6 +969,11 @@ async function checkClarifyRunOnLoad() {
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
+// With multiple unanswered files, just jump into the first one — same as clicking a
+// row in the "Unanswered" table below, this is only meant to get the user started.
+openUnansweredBtn.addEventListener("click", () => {
+  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
+});
 
 // ---------------------------------------------------------------------------
 // Implementation run (Start/Stop Implementation + Status/Log tabs)
