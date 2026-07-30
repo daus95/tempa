@@ -170,6 +170,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeStep2FileList = $("homeStep2FileList"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
+  homeOpenUnansweredBtn = $("homeOpenUnansweredBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
@@ -401,7 +402,18 @@ function renderHomeWorkflow() {
 
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
-  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  // Mirrors the Clarification page's own Start/Continue Clarification + Answer Findings
+  // behavior (see setClarifyRunButtonsDisabled) so the two pages never disagree.
+  const homeHasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
+  const homeHasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
+  const homeNeedsContinue = state.clarifyFinalize.hasRun && !state.clarifyFinalize.ready;
+  const homeBlockedByAnswers = homeNeedsContinue && (homeHasUnanswered || homeHasUnapplied);
+  homeStartClarifyBtn.querySelector("span:last-child").textContent =
+    homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
+  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers;
+  homeStartClarifyBtn.title = homeBlockedByAnswers
+    ? "Answer the remaining findings or apply your saved answers first." : "";
+  homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
   homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
@@ -498,6 +510,9 @@ homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; ad
 homeStartClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
   startClarifyRun("run");
+});
+homeOpenUnansweredBtn.addEventListener("click", () => {
+  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
 });
 homeFinalizeClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
