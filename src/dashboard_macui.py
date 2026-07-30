@@ -1,8 +1,8 @@
 """macOS-only desktop conveniences (osascript).
 
 Native folder-picker dialog and reveal-in-Finder helper used by the Home page's
-working-folder actions. macOS-specific by nature; other platforms use dashboard_winui
-or the CLI."""
+working-folder actions. macOS-specific by nature; other platforms use dashboard_winui /
+dashboard_linuxui, or the CLI."""
 
 from __future__ import annotations
 

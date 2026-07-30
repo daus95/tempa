@@ -2,7 +2,7 @@
 
 Native folder-picker dialog and bring-Explorer-window-to-front helpers used by the Home
 page's working-folder actions. Windows-specific by nature; other platforms use
-dashboard_macui or the CLI."""
+dashboard_macui / dashboard_linuxui, or the CLI."""
 
 from __future__ import annotations
 
