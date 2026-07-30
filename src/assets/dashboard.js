@@ -179,6 +179,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody"),
   modalOverlay = $("modalOverlay"), modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
+  modalExtraBtn = $("modalExtraBtn"),
   settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
@@ -233,7 +234,7 @@ function closeModal(result) {
 }
 
 function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false,
-    value = "", showCancel = true }) {
+    value = "", showCancel = true, extraLabel = "" }) {
   return new Promise((resolve) => {
     modalResolve = resolve;
     modalIsPrompt = prompt;
@@ -246,6 +247,8 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
     modalOkBtn.textContent = okLabel;
     modalOkBtn.classList.toggle("danger", danger);
     modalCancelBtn.classList.toggle("hidden", !showCancel);
+    modalExtraBtn.textContent = extraLabel;
+    modalExtraBtn.classList.toggle("hidden", !extraLabel);
     modalInput.classList.toggle("hidden", !prompt);
     modalInput.value = prompt ? value : "";
     modalOverlay.classList.remove("hidden");
@@ -257,6 +260,9 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
 
 // confirmModal resolves true/false; promptModal resolves the entered string, or null on
 // cancel; alertModal is a single-button (no Cancel) notice, resolved once acknowledged.
+// threeWayModal is for a Cancel/middle-choice/main-choice prompt (e.g. Cancel / Save /
+// Save & Apply): resolves "cancel" (Cancel, Escape, or overlay click), extraLabel's
+// choice as the string "extra", or okLabel's choice as "ok".
 function confirmModal(message, opts) {
   return showModal({ message, prompt: false, ...opts });
 }
@@ -266,8 +272,13 @@ function promptModal(message, value, opts) {
 function alertModal(message, opts) {
   return showModal({ message, prompt: false, showCancel: false, ...opts });
 }
+function threeWayModal(message, opts) {
+  return showModal({ message, prompt: false, ...opts })
+    .then((v) => (v === "extra" ? "extra" : v === true ? "ok" : "cancel"));
+}
 
 modalCancelBtn.addEventListener("click", () => closeModal(modalIsPrompt ? null : false));
+modalExtraBtn.addEventListener("click", () => closeModal("extra"));
 modalOkBtn.addEventListener("click", () => closeModal(modalIsPrompt ? modalInput.value : true));
 modalOverlay.addEventListener("click", (e) => {
   if (e.target === modalOverlay) closeModal(modalIsPrompt ? null : false);
@@ -1652,6 +1663,17 @@ async function saveClarifyFile() {
       ' finding(s), or switch them back to "Follow the recommendation".', { title: "Answers incomplete" });
     return;
   }
+  // Ask before saving, not after: applying re-runs an evaluate afterward (see
+  // _start_clarify_run's auto-chain in dashboard_runs.py), so it's worth knowing up
+  // front whether that longer round-trip is about to start. Cancel aborts the save
+  // entirely (the textarea edits stay in place, dirty), unlike "Save" which saves but
+  // skips applying.
+  const choice = await threeWayModal(
+    "Apply these answers to the PRD right after saving?",
+    { title: "Apply Answers", extraLabel: "Save", okLabel: "Save & Apply" }
+  );
+  if (choice === "cancel") return;
+  const applyAfterSave = choice === "ok";
   saveBtn.disabled = true;
   try {
     const res = await fetch("/api/clarify/save", {
@@ -1665,6 +1687,10 @@ async function saveClarifyFile() {
     updateToolbar();
     toast(`Saved ${state.selectedClarifyPath} (${data.answered}/${data.total} answered)`);
     await refreshClarifyList();
+    if (applyAfterSave) {
+      await selectTop("clarification");
+      startClarifyRun("apply");
+    }
   } catch (e) {
     toast("Network error while saving.", true);
     updateToolbar();
