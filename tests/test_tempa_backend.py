@@ -32,7 +32,7 @@ def test_get_backend_def_unknown_name_falls_back_to_claude():
 # ---------------------------------------------------------------------------
 
 def test_claude_build_cmd_basic_no_resume():
-    cmd = tb.CLAUDE.build_cmd("claude", "claude-sonnet-5", None, None)
+    cmd = tb.CLAUDE.build_cmd("claude", "claude-sonnet-5", None, None, "")
     assert cmd[0] == "claude"
     assert "--dangerously-skip-permissions" in cmd
     assert "--permission-mode" in cmd and "bypassPermissions" in cmd
@@ -41,13 +41,20 @@ def test_claude_build_cmd_basic_no_resume():
     assert "--output-format" in cmd and "stream-json" in cmd
     assert cmd[-1] == "-p"
     assert "--resume" not in cmd
+    assert "--effort" not in cmd
 
 
 def test_claude_build_cmd_with_resume():
-    cmd = tb.CLAUDE.build_cmd("claude", "claude-sonnet-5", "sess-123", None)
+    cmd = tb.CLAUDE.build_cmd("claude", "claude-sonnet-5", "sess-123", None, "")
     idx = cmd.index("--resume")
     assert cmd[idx + 1] == "sess-123"
     assert cmd.index("--resume") < cmd.index("-p")
+
+
+def test_claude_build_cmd_with_reasoning_effort():
+    cmd = tb.CLAUDE.build_cmd("claude", "claude-sonnet-5", None, None, "high")
+    idx = cmd.index("--effort")
+    assert cmd[idx + 1] == "high"
 
 
 def test_claude_parse_line_system_init():
@@ -101,23 +108,30 @@ def test_claude_friendly_auth_error_message_oauth_branch():
 # ---------------------------------------------------------------------------
 
 def test_copilot_build_cmd_basic():
-    cmd = tb.COPILOT.build_cmd("copilot", "auto", None, "read the file")
+    cmd = tb.COPILOT.build_cmd("copilot", "auto", None, "read the file", "")
     assert cmd[0] == "copilot"
     assert "--allow-all-tools" in cmd
     assert "--output-format" in cmd and "json" in cmd
     assert "--model" in cmd and "auto" in cmd
     assert cmd[-2:] == ["-p", "read the file"]
     assert not any(a.startswith("--resume") for a in cmd)
+    assert "--reasoning-effort" not in cmd
 
 
 def test_copilot_build_cmd_no_model_omits_flag():
-    cmd = tb.COPILOT.build_cmd("copilot", "", None, "do it")
+    cmd = tb.COPILOT.build_cmd("copilot", "", None, "do it", "")
     assert "--model" not in cmd
 
 
 def test_copilot_build_cmd_with_resume():
-    cmd = tb.COPILOT.build_cmd("copilot", "auto", "sess-abc", "do it")
+    cmd = tb.COPILOT.build_cmd("copilot", "auto", "sess-abc", "do it", "")
     assert "--resume=sess-abc" in cmd
+
+
+def test_copilot_build_cmd_with_reasoning_effort():
+    cmd = tb.COPILOT.build_cmd("copilot", "auto", None, "do it", "minimal")
+    idx = cmd.index("--reasoning-effort")
+    assert cmd[idx + 1] == "minimal"
 
 
 def test_copilot_parse_line_assistant_message_with_content_and_tool_requests():
@@ -147,24 +161,37 @@ def test_copilot_extract_session_id_only_from_result_event():
 # ---------------------------------------------------------------------------
 
 def test_codex_build_cmd_fresh_session():
-    cmd = tb.CODEX.build_cmd("codex", "gpt-5.1-codex", None, None)
+    cmd = tb.CODEX.build_cmd("codex", "gpt-5.1-codex", None, None, "")
     assert cmd[:2] == ["codex", "exec"]
     assert "--json" in cmd
     assert "--dangerously-bypass-approvals-and-sandbox" in cmd
     assert "--skip-git-repo-check" in cmd
     assert "--model" in cmd and "gpt-5.1-codex" in cmd
     assert cmd[-1] == "-"
+    assert "-c" not in cmd
 
 
 def test_codex_build_cmd_resume_uses_subcommand_shape():
-    cmd = tb.CODEX.build_cmd("codex", "gpt-5.1-codex", "thread-123", None)
+    cmd = tb.CODEX.build_cmd("codex", "gpt-5.1-codex", "thread-123", None, "")
     assert cmd[:4] == ["codex", "exec", "resume", "thread-123"]
     assert cmd[-1] == "-"
 
 
 def test_codex_build_cmd_no_model_omits_flag():
-    cmd = tb.CODEX.build_cmd("codex", "", None, None)
+    cmd = tb.CODEX.build_cmd("codex", "", None, None, "")
     assert "--model" not in cmd
+
+
+def test_codex_build_cmd_with_reasoning_effort():
+    cmd = tb.CODEX.build_cmd("codex", "gpt-5.6-sol", None, None, "ultra")
+    idx = cmd.index("-c")
+    assert cmd[idx + 1] == 'model_reasoning_effort="ultra"'
+
+
+def test_codex_build_cmd_reasoning_effort_also_applies_on_resume():
+    cmd = tb.CODEX.build_cmd("codex", "gpt-5.6-sol", "thread-123", None, "high")
+    idx = cmd.index("-c")
+    assert cmd[idx + 1] == 'model_reasoning_effort="high"'
 
 
 def test_codex_parse_line_thread_started():
@@ -195,6 +222,47 @@ def test_codex_parse_line_failed_event_surfaced_as_error():
 def test_codex_extract_session_id_only_from_thread_started():
     assert tb.CODEX.extract_session_id({"type": "thread.started", "thread_id": "t-1"}) == "t-1"
     assert tb.CODEX.extract_session_id({"type": "turn.started", "thread_id": "t-1"}) is None
+
+
+# ---------------------------------------------------------------------------
+# reasoning_effort_choices / is_valid_reasoning_effort
+# ---------------------------------------------------------------------------
+
+def test_claude_reasoning_effort_choices_uniform_regardless_of_model():
+    assert tb.CLAUDE.reasoning_effort_choices("claude-opus-5") == tb.CLAUDE_EFFORT_LEVELS
+    assert tb.CLAUDE.reasoning_effort_choices("claude-haiku-4-5-20251001") == tb.CLAUDE_EFFORT_LEVELS
+
+
+def test_copilot_reasoning_effort_choices_uniform_regardless_of_model():
+    assert tb.COPILOT.reasoning_effort_choices("auto") == tb.COPILOT_EFFORT_LEVELS
+    assert tb.COPILOT.reasoning_effort_choices("claude-opus-5") == tb.COPILOT_EFFORT_LEVELS
+
+
+def test_codex_reasoning_effort_choices_known_model():
+    assert tb.CODEX.reasoning_effort_choices("gpt-5.4") == tb.CODEX_MODEL_REASONING_LEVELS["gpt-5.4"]
+    assert "ultra" not in tb.CODEX.reasoning_effort_choices("gpt-5.4")
+    assert "ultra" in tb.CODEX.reasoning_effort_choices("gpt-5.6-sol")
+
+
+def test_codex_reasoning_effort_choices_known_model_case_insensitive():
+    assert tb.CODEX.reasoning_effort_choices("GPT-5.4") == tb.CODEX_MODEL_REASONING_LEVELS["gpt-5.4"]
+
+
+def test_codex_reasoning_effort_choices_unknown_model_falls_back_to_default():
+    assert tb.CODEX.reasoning_effort_choices("some-future-model") == tb.CODEX_DEFAULT_EFFORT_LEVELS
+
+
+@pytest.mark.parametrize("backend", tb.BACKENDS.values(), ids=lambda b: b.name)
+def test_is_valid_reasoning_effort_empty_string_always_valid(backend):
+    assert tb.is_valid_reasoning_effort(backend, "anything", "") is True
+
+
+def test_is_valid_reasoning_effort_valid_and_invalid_per_backend():
+    assert tb.is_valid_reasoning_effort(tb.CLAUDE, "claude-opus-5", "xhigh") is True
+    assert tb.is_valid_reasoning_effort(tb.CLAUDE, "claude-opus-5", "ultra") is False
+    assert tb.is_valid_reasoning_effort(tb.COPILOT, "auto", "none") is True
+    assert tb.is_valid_reasoning_effort(tb.CODEX, "gpt-5.4", "ultra") is False
+    assert tb.is_valid_reasoning_effort(tb.CODEX, "gpt-5.6-sol", "ultra") is True
 
 
 # ---------------------------------------------------------------------------

@@ -63,3 +63,43 @@ tempa show-models                              # show the model per stage
   Aliases are Claude-specific; for a `copilot`/`codex` stage the value is stored exactly
   as given, since those CLIs' model catalogs aren't hardcoded into Tempa.
 - A stage that isn't specified keeps its previous/default value.
+
+## Reasoning Effort
+
+Each stage also has a **Reasoning Effort** setting — how hard the backend CLI should
+"think" before responding — stored under the `reasoning_efforts` key in `config.json`,
+default `""` (no override; the CLI/model's own default is used) for every stage.
+
+```bash
+tempa set-effort --clarify high --plan medium --implement high
+tempa set-effort --implement ""                  # clear it back to the CLI/model default
+tempa show-efforts                                # show the reasoning effort per stage
+```
+
+**The value must be supported by that stage's currently configured backend *and* model** —
+Tempa validates this both in the dashboard (Settings → the effort dropdown next to each
+stage's model field only offers the valid choices for whatever's currently typed there) and
+on the CLI (`set-effort` rejects an unsupported value with the list of what *is* valid). An
+invalid combination never reaches the CLI.
+
+| Backend | Levels | Per-model? |
+|---|---|---|
+| `claude` (Claude Code) | `low`, `medium`, `high`, `xhigh`, `max` | No — same list for every model. |
+| `copilot` (GitHub Copilot CLI) | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | No — same list for every model. |
+| `codex` (OpenAI Codex CLI) | depends on the model — see below | **Yes.** |
+
+Codex is the only backend that actually varies by model (verified live against
+`codex debug models` and the real API's validation error for an unsupported level):
+
+| Model | Levels |
+|---|---|
+| `gpt-5.6-sol` / `gpt-5.6-terra` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` |
+| `gpt-5.6-luna` / `codex-auto-review` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| any other/future Codex model | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (conservative fallback) |
+
+Claude sets this via `--effort <level>`, Copilot via `--reasoning-effort <level>`, Codex via
+a config override (`-c model_reasoning_effort="<level>"` — there's no dedicated CLI flag).
+Since Claude/Copilot don't expose finer-grained data than "one list per backend," that's the
+validation ceiling for those two — Codex's real per-model catalog can go stale as Codex
+adds/retires models, same tradeoff already accepted for the model-id suggestions above.

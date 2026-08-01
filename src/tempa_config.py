@@ -173,6 +173,17 @@ DEFAULT_BACKENDS = {
     "implement": "claude",
 }
 
+# Reasoning effort per harness stage. Stored under the "reasoning_efforts" key in
+# config.json. "" means no override — the backend CLI/model's own default is used. A
+# non-empty value must be one of the stage's backend+model's valid choices (see
+# tempa_backend.is_valid_reasoning_effort) — enforced in dashboard_server.py and
+# tempa_commands.set_efforts, not here (this module has no tempa_backend dependency).
+DEFAULT_REASONING_EFFORTS = {
+    "clarify": "",
+    "plan": "",
+    "implement": "",
+}
+
 
 # Fresh-install / deleted-file fallback for load_config() below. Mirrors the shape
 # documented in docs/config-json.md — every key a brand-new config.json should have,
@@ -180,6 +191,7 @@ DEFAULT_BACKENDS = {
 DEFAULT_CONFIG = {
     "models": dict(DEFAULT_MODELS),
     "backends": dict(DEFAULT_BACKENDS),
+    "reasoning_efforts": dict(DEFAULT_REASONING_EFFORTS),
     "features_per_session": 3,
     "max_session_run": 30,
     "max_clarification_run": 20,
@@ -363,6 +375,20 @@ def get_backend(config: dict, stage: str) -> str:
     """Return the CLI backend configured for a stage (clarify | plan | implement):
     "claude" | "copilot" | "codex"."""
     return get_backends(config).get(stage, DEFAULT_BACKENDS.get(stage, "claude"))
+
+
+def get_reasoning_efforts(config: dict) -> dict:
+    """Return the per-stage reasoning efforts merged over DEFAULT_REASONING_EFFORTS
+    (missing stage → default, i.e. "" / no override)."""
+    efforts = dict(DEFAULT_REASONING_EFFORTS)
+    efforts.update(config.get("reasoning_efforts", {}))
+    return efforts
+
+
+def get_reasoning_effort(config: dict, stage: str) -> str:
+    """Return the reasoning effort configured for a stage (clarify | plan | implement).
+    "" means no override — the backend CLI/model's own default is used."""
+    return get_reasoning_efforts(config).get(stage, DEFAULT_REASONING_EFFORTS.get(stage, ""))
 
 
 # Field names used to persist a resumable session id on an epic entry, per kind. Kept

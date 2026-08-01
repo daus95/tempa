@@ -27,6 +27,7 @@ from tempa_clarify import (
 )
 from tempa_commands import (
     print_backends,
+    print_efforts,
     print_models,
     print_principles,
     print_status,
@@ -38,6 +39,7 @@ from tempa_commands import (
     run_test,
     run_verify,
     set_backends,
+    set_efforts,
     set_models,
     set_working_folders,
 )
@@ -99,6 +101,10 @@ USAGE
   tempa set-backend [--clarify b] [--plan b] [--implement b]
                                   Set the CLI backend per stage: claude | copilot | codex
   tempa show-backends        Show the CLI backend per stage
+  tempa set-effort [--clarify e] [--plan e] [--implement e]
+                                  Set the reasoning effort per stage (must be supported by that
+                                  stage's backend+model; "" clears it back to the CLI/model default)
+  tempa show-efforts         Show the reasoning effort per stage
   tempa show-principles      Show the architecture principles applied to every stage's prompt
                                   (optional; set them in the dashboard's Architecture Principles page)
   tempa test                 Permission test (verifies the implement stage's backend CLI runs)
@@ -170,6 +176,9 @@ CONFIG OPTIONS (config.json)
   backends.clarify                CLI backend for clarify: claude | copilot | codex (default: claude)
   backends.plan                   CLI backend for the plan stage, run via implement (default: claude)
   backends.implement              CLI backend for implement/QA/verify (default: claude)
+  reasoning_efforts.clarify       Reasoning effort for clarify ("" = backend/model default)
+  reasoning_efforts.plan          Reasoning effort for the plan stage, run via implement
+  reasoning_efforts.implement     Reasoning effort for implement/QA/verify
 
 PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in config.json)
   src/prompt/implementation.md        New implementation prompt
@@ -251,6 +260,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--implement")
 
     sub.add_parser("show-backends", parents=[common], add_help=False)
+
+    p = sub.add_parser("set-effort", parents=[common], add_help=False)
+    p.add_argument("--clarify")
+    p.add_argument("--plan")
+    p.add_argument("--implement")
+
+    sub.add_parser("show-efforts", parents=[common], add_help=False)
     sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
@@ -359,6 +375,10 @@ def run() -> None:
         set_backends(cli_args)
     elif cli_args.command == "show-backends":
         print_backends()
+    elif cli_args.command == "set-effort":
+        set_efforts(cli_args)
+    elif cli_args.command == "show-efforts":
+        print_efforts()
     elif cli_args.command == "show-principles":
         print_principles()
     elif cli_args.command == "test":

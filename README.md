@@ -181,9 +181,19 @@ tempa show-backends
 
 Each backend has its own model catalog, so changing a stage's backend usually means updating
 that stage's model too (the dashboard's model field suggests options based on the backend
-picked, but always accepts free text). Full reference, including what happens to a
-resumed/interrupted session's history when a stage's backend changes mid-epic: see
-[docs/ai-models.md](docs/ai-models.md).
+picked, but always accepts free text). Each stage also has an optional **Reasoning Effort**
+setting, right next to the model field — its valid choices depend on the backend *and* model
+picked (Codex varies per model; Claude/Copilot are uniform per backend), and Tempa rejects a
+combination that CLI doesn't actually support:
+
+```bash
+tempa set-effort --implement high
+tempa show-efforts
+```
+
+Full reference, including what happens to a resumed/interrupted session's history when a
+stage's backend changes mid-epic and the exact reasoning-effort levels per backend/model:
+see [docs/ai-models.md](docs/ai-models.md).
 
 ---
 

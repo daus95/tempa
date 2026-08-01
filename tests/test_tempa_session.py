@@ -166,6 +166,29 @@ def test_prepare_invocation_raises_when_executable_not_found(monkeypatch, tmp_pa
         ts.prepare_backend_invocation(tb.CODEX, "gpt-5.1-codex", None, "prompt", tmp_path / "log.txt")
 
 
+def test_prepare_invocation_reasoning_effort_reaches_cmd_for_stdin_backend(monkeypatch, tmp_path):
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "codex")
+    log_path = tmp_path / "session_20260101_000000.txt"
+    cmd, _ = ts.prepare_backend_invocation(tb.CODEX, "gpt-5.6-sol", None, "do the thing", log_path, "ultra")
+    idx = cmd.index("-c")
+    assert cmd[idx + 1] == 'model_reasoning_effort="ultra"'
+
+
+def test_prepare_invocation_reasoning_effort_reaches_cmd_for_file_ref_backend(monkeypatch, tmp_path):
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "copilot")
+    log_path = tmp_path / "session_20260101_000000.txt"
+    cmd, _ = ts.prepare_backend_invocation(tb.COPILOT, "auto", None, "do the thing", log_path, "high")
+    idx = cmd.index("--reasoning-effort")
+    assert cmd[idx + 1] == "high"
+
+
+def test_prepare_invocation_no_reasoning_effort_omits_flag(monkeypatch, tmp_path):
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "codex")
+    log_path = tmp_path / "session_20260101_000000.txt"
+    cmd, _ = ts.prepare_backend_invocation(tb.CODEX, "gpt-5.6-sol", None, "do the thing", log_path)
+    assert "-c" not in cmd
+
+
 # ---------------------------------------------------------------------------
 # _handle_usage_limit / _handle_auth_error (state side effects, no subprocess)
 # ---------------------------------------------------------------------------

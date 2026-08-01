@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dashboard_ui import run_dashboard
-from tempa_backend import BACKENDS, get_backend_def
+from tempa_backend import BACKENDS, get_backend_def, is_valid_reasoning_effort
 from tempa_config import (
     DEFAULT_WORKSPACE,
     WORKING_DIR,
@@ -28,6 +28,8 @@ from tempa_config import (
     get_models,
     get_principles_path,
     get_qa_dir,
+    get_reasoning_effort,
+    get_reasoning_efforts,
     get_sources,
     get_verify_dir,
     get_workspace,
@@ -77,7 +79,10 @@ def run_test() -> None:
     # parse it into readable lines (written to the log file) instead of dumping raw JSON
     # straight to the console.
     try:
-        cmd, stdin_text = prepare_backend_invocation(backend, get_model(config, "implement"), None, test_prompt, log_path)
+        cmd, stdin_text = prepare_backend_invocation(
+            backend, get_model(config, "implement"), None, test_prompt, log_path,
+            get_reasoning_effort(config, "implement"),
+        )
         exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, "permission test", [0])
     except Exception as e:
         log(f"TEST FAILED — error running {backend.label}: {e}")
@@ -126,6 +131,7 @@ def run_verify(epic: str) -> None:
         get_model(config, "implement"),
         log_prefix=f"verify_{epic}",
         banner_label=f"Verification for [{epic}]",
+        reasoning_effort=get_reasoning_effort(config, "implement"),
         progress_tag=f"VERIFY {epic}",
         on_json_event=_on_json_event,
     )
@@ -367,6 +373,58 @@ def print_backends(config: dict | None = None) -> None:
     for stage in ("clarify", "plan", "implement"):
         name = backends.get(stage, "claude")
         print(f"  {STAGE_LABELS[stage]:<34} {name:<10} ({get_backend_def(name).label})", flush=True)
+
+
+def print_efforts(config: dict | None = None) -> None:
+    """Display the reasoning effort configured for each harness stage."""
+    if config is None:
+        config = load_config()
+    efforts = get_reasoning_efforts(config)
+    _banner("AI REASONING EFFORT PER STAGE")
+    for stage in ("clarify", "plan", "implement"):
+        value = efforts.get(stage) or "(default)"
+        print(f"  {STAGE_LABELS[stage]:<34} {value}", flush=True)
+
+
+def set_efforts(args: argparse.Namespace) -> None:
+    """Set the reasoning effort per stage in config.json (key "reasoning_efforts").
+
+    Usage:
+      tempa set-effort [--clarify <level>] [--plan <level>] [--implement <level>]
+
+    <level> must be supported by that stage's currently configured backend+model (see
+    `tempa show-models`/`show-backends`) — e.g. low/medium/high/xhigh/max for Claude Code,
+    up to xhigh/max/ultra depending on the OpenAI Codex CLI model. Pass an empty string
+    ("") to clear it (use the CLI/model's own default). Stages omitted keep their
+    current/default value.
+    """
+    config = load_config()
+    efforts = get_reasoning_efforts(config)
+    models = get_models(config)
+    backends = get_backends(config)
+
+    changed = False
+    for stage in ("clarify", "plan", "implement"):
+        value = getattr(args, stage)
+        if value is not None:
+            value = value.strip()
+            backend_def = get_backend_def(backends.get(stage, "claude"))
+            model = models.get(stage, "")
+            if not is_valid_reasoning_effort(backend_def, model, value):
+                choices = ", ".join(backend_def.reasoning_effort_choices(model))
+                log(f"ERROR: '{value}' is not a supported reasoning effort for {backend_def.label} model "
+                    f"'{model}' — must be empty or one of: {choices}")
+                sys.exit(1)
+            efforts[stage] = value
+            changed = True
+
+    config["reasoning_efforts"] = efforts
+    save_config(config)
+    if changed:
+        log("Reasoning effort saved to config.json (key \"reasoning_efforts\").")
+    else:
+        log("No effort flag given (--clarify/--plan/--implement) — showing the current configuration.")
+    print_efforts(config)
 
 
 def print_principles() -> None:

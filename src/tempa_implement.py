@@ -22,6 +22,7 @@ from tempa_config import (
     get_epic_session_id,
     get_model,
     get_qa_dir,
+    get_reasoning_effort,
     get_sources,
     load_config,
     save_config,
@@ -397,7 +398,10 @@ def _plan_epics_run(config: dict) -> bool:
     log("Laying out new epics/features/tasks from the PRD (only what's not yet implemented)...")
     gen_prompt = build_plan_epics_prompt(config)
     backend = get_backend_def(get_backend(config, "plan"))
-    if not _run_oneshot_session(gen_prompt, "PLAN-EPICS", "plan_epics_generate", backend, get_model(config, "plan")):
+    if not _run_oneshot_session(
+        gen_prompt, "PLAN-EPICS", "plan_epics_generate", backend,
+        get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+    ):
         if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Generate epic failed — stopping.")
         return False
@@ -407,7 +411,10 @@ def _plan_epics_run(config: dict) -> bool:
     config = load_config()
     backend = get_backend_def(get_backend(config, "plan"))
     review_prompt = build_review_epics_prompt(config)
-    if not _run_oneshot_session(review_prompt, "REVIEW-EPICS", "plan_epics_review", backend, get_model(config, "plan")):
+    if not _run_oneshot_session(
+        review_prompt, "REVIEW-EPICS", "plan_epics_review", backend,
+        get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+    ):
         if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Review epic failed — stopping.")
         return False

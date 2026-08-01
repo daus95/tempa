@@ -18,7 +18,14 @@ from pathlib import Path
 from dashboard_clarify_parse import file_answer_status
 from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
-from tempa_config import get_backend, get_model, get_sources, load_config, save_config
+from tempa_config import (
+    get_backend,
+    get_model,
+    get_reasoning_effort,
+    get_sources,
+    load_config,
+    save_config,
+)
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
 from tempa_prompts import (
@@ -69,7 +76,7 @@ def run_clarify_once(noui: bool = False) -> None:
 
     start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
     prompt = build_clarification_prompt(config)
-    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
+    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
@@ -155,7 +162,7 @@ def run_clarify_answer() -> None:
 
     start_ts = time.time() - 1
     prompt = build_auto_answer_prompt(config)
-    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
+    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
@@ -211,7 +218,7 @@ def run_clarify_finalize() -> None:
         config = load_config()
         prompt = build_clarification_prompt(config)
 
-        success = run_clarification_session(prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"))
+        success = run_clarification_session(prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
@@ -242,7 +249,7 @@ def run_clarify_finalize() -> None:
 
         config = load_config()
         apply_prompt = build_apply_clarification_prompt(config)
-        apply_success = run_apply_clarification_session(apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"))
+        apply_success = run_apply_clarification_session(apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
@@ -285,7 +292,7 @@ def _run_apply_step(config: dict) -> bool:
     process directly on an auth error or usage-limit hit, matching every other clarify
     subcommand's behavior."""
     prompt = build_apply_clarification_prompt(config)
-    if not run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
+    if not run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:

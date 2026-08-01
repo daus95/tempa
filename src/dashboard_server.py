@@ -263,6 +263,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "config": {
                 "models": tempa_config.get_models(config),
                 "backends": tempa_config.get_backends(config),
+                "reasoning_efforts": tempa_config.get_reasoning_efforts(config),
                 "features_per_session": config.get("features_per_session"),
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
@@ -639,7 +640,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
         models_in = payload.get("models")
         backends_in = payload.get("backends")
-        if not isinstance(models_in, dict) or not isinstance(backends_in, dict):
+        reasoning_efforts_in = payload.get("reasoning_efforts")
+        if not isinstance(models_in, dict) or not isinstance(backends_in, dict) or not isinstance(reasoning_efforts_in, dict):
             self._send_json(400, {"ok": False, "error": "Malformed request."})
             return
         backends = {}
@@ -658,6 +660,15 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             # Friendly aliases (opus-5, sonnet-5, ...) are Claude-only — for copilot/codex
             # the model string is stored as-is (see tempa_config._resolve_model_alias).
             models[stage] = tempa_config._resolve_model_alias(value) if backends[stage] == "claude" else value
+        reasoning_efforts = {}
+        for stage in ("clarify", "plan", "implement"):
+            value = (reasoning_efforts_in.get(stage) or "").strip()
+            backend_def = tempa_backend.get_backend_def(backends[stage])
+            if not tempa_backend.is_valid_reasoning_effort(backend_def, models[stage], value):
+                choices = ", ".join(backend_def.reasoning_effort_choices(models[stage]))
+                self._send_json(400, {"ok": False, "error": f"The {stage} reasoning effort must be empty or one of: {choices}."})
+                return
+            reasoning_efforts[stage] = value
 
         def _parse_limit(name: str, required: bool) -> tuple[bool, int | None]:
             """Returns (ok, value). `value` is None for a blank/absent field (only
@@ -688,6 +699,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config = tempa_config.load_config()
         config["models"] = models
         config["backends"] = backends
+        config["reasoning_efforts"] = reasoning_efforts
         config["features_per_session"] = features_per_session
         config["max_session_run"] = max_session_run
         config["max_clarification_run"] = max_clarification_run
@@ -699,6 +711,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "config": {
                 "models": models,
                 "backends": backends,
+                "reasoning_efforts": reasoning_efforts,
                 "features_per_session": features_per_session,
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,

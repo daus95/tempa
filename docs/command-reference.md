@@ -12,6 +12,8 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `show-models` | Shows the AI model per stage |
 | `set-backend [--clarify b] [--plan b] [--implement b]` | Sets the CLI backend per stage: `claude` \| `copilot` \| `codex` |
 | `show-backends` | Shows the CLI backend per stage |
+| `set-effort [--clarify e] [--plan e] [--implement e]` | Sets the reasoning effort per stage — must be supported by that stage's backend+model, `""` clears it back to the default |
+| `show-efforts` | Shows the reasoning effort per stage |
 | `show-principles` | Shows the [architecture principles](architecture-principles.md) prepended to every stage's prompt (optional; edited in the dashboard) |
 | `dashboard` | Opens the web dashboard (Home / Specification / Clarification / Implementation) |
 | `spec --show` | Opens the dashboard directly on the Specification section |

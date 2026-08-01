@@ -41,6 +41,34 @@ AUTONOMOUS_SYSTEM_PROMPT = (
     "A session is only successful when both the source code AND the config.json status update are done."
 )
 
+# Reasoning-effort levels each backend's own CLI flag documents (`claude --help` /
+# `copilot --help`) — uniform across every model of that backend, since neither CLI exposes
+# a finer-grained per-model breakdown the way Codex does below.
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+COPILOT_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+# Codex DOES expose a real per-model reasoning catalog (`codex debug models`), and live
+# testing (feeding a deliberately-invalid value to `codex exec -c model_reasoning_effort=...`
+# and reading the resulting API error) confirmed both the config key name and the graduated
+# tiers below. Two corrections vs. what `codex debug models` itself displays: it silently
+# omits "none"/"minimal" from its "supported_reasoning_levels" field even though the real
+# API accepts both for every model tested — CODEX_UNIVERSAL_LEVELS below adds them back.
+# Codex's own model catalog moves independently of Tempa and this can go stale, same
+# tradeoff already accepted for MODEL_OPTIONS_BY_BACKEND in dashboard.js.
+CODEX_UNIVERSAL_LEVELS = ("none", "minimal")
+CODEX_MODEL_REASONING_LEVELS = {
+    "gpt-5.6-sol": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh", "max", "ultra"),
+    "gpt-5.6-terra": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh", "max", "ultra"),
+    "gpt-5.6-luna": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh", "max"),
+    "codex-auto-review": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh", "max"),
+    "gpt-5.5": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh"),
+    "gpt-5.4": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh"),
+    "gpt-5.4-mini": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh"),
+}
+# Safe common denominator for a Codex model not in the table above (the model field is free
+# text, so an unrecognized/future model must still get a usable, conservative choice list).
+CODEX_DEFAULT_EFFORT_LEVELS = CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh")
+
 
 @dataclass(frozen=True)
 class Backend:
@@ -49,12 +77,13 @@ class Backend:
     exe_names: tuple[str, ...]
     prompt_mode: str  # "stdin" | "file_ref"
     append_system_prompt: bool
-    build_cmd: Callable[[str, str, str | None, str | None], list[str]]
+    build_cmd: Callable[[str, str, str | None, str | None, str], list[str]]
     parse_line: Callable[[dict], str | None]
     extract_session_id: Callable[[dict], str | None]
     usage_limit_markers: tuple[str, ...]
     auth_error_markers: tuple[str, ...]
     friendly_auth_error_message: Callable[[str], str]
+    reasoning_effort_choices: Callable[[str], tuple[str, ...]]
 
 
 def resolve_exe(backend: Backend) -> str | None:
@@ -67,20 +96,30 @@ def resolve_exe(backend: Backend) -> str | None:
     return None
 
 
+def is_valid_reasoning_effort(backend: Backend, model: str, effort: str) -> bool:
+    """"" (unset — use the CLI/model's own default) is always valid; otherwise `effort`
+    must be one of backend.reasoning_effort_choices(model)."""
+    return not effort or effort in backend.reasoning_effort_choices(model)
+
+
 # ---------------------------------------------------------------------------
 # claude — Claude Code CLI
 # ---------------------------------------------------------------------------
 
-def _claude_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None) -> list[str]:
+def _claude_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None, reasoning_effort: str) -> list[str]:
     cmd = [
         exe,
         "--dangerously-skip-permissions",
         "--permission-mode", "bypassPermissions",
         "--model", model,
+    ]
+    if reasoning_effort:
+        cmd.extend(["--effort", reasoning_effort])
+    cmd.extend([
         "--append-system-prompt", AUTONOMOUS_SYSTEM_PROMPT,
         "--output-format", "stream-json",
         "--verbose",
-    ]
+    ])
     if resume_session_id:
         cmd.extend(["--resume", resume_session_id])
     # The prompt is NOT passed as a CLI argument. On Windows `claude` resolves to
@@ -167,6 +206,7 @@ CLAUDE = Backend(
         "invalid bearer token",
     ),
     friendly_auth_error_message=_claude_friendly_auth_error_message,
+    reasoning_effort_choices=lambda model: CLAUDE_EFFORT_LEVELS,
 )
 
 
@@ -174,10 +214,12 @@ CLAUDE = Backend(
 # copilot — GitHub Copilot CLI
 # ---------------------------------------------------------------------------
 
-def _copilot_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None) -> list[str]:
+def _copilot_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None, reasoning_effort: str) -> list[str]:
     cmd = [exe, "--allow-all-tools", "--output-format", "json", "-s", "--log-level", "error"]
     if model:
         cmd.extend(["--model", model])
+    if reasoning_effort:
+        cmd.extend(["--reasoning-effort", reasoning_effort])
     if resume_session_id:
         cmd.append(f"--resume={resume_session_id}")
     cmd.extend(["-p", prompt_arg or ""])
@@ -247,6 +289,7 @@ COPILOT = Backend(
         "unauthorized",
     ),
     friendly_auth_error_message=_copilot_friendly_auth_error_message,
+    reasoning_effort_choices=lambda model: COPILOT_EFFORT_LEVELS,
 )
 
 
@@ -254,11 +297,16 @@ COPILOT = Backend(
 # codex — OpenAI Codex CLI
 # ---------------------------------------------------------------------------
 
-def _codex_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None) -> list[str]:
+def _codex_build_cmd(exe: str, model: str, resume_session_id: str | None, prompt_arg: str | None, reasoning_effort: str) -> list[str]:
     cmd = [exe, "exec", "resume", resume_session_id] if resume_session_id else [exe, "exec"]
     cmd.extend(["--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"])
     if model:
         cmd.extend(["--model", model])
+    if reasoning_effort:
+        # Verified live: `-c model_reasoning_effort="<level>"` is the real config key (the
+        # API rejects an invalid level with a `[reasoning.effort]`-tagged error, confirming
+        # both the key name and that it reaches the request) — no dedicated CLI flag exists.
+        cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     # Prompt via stdin: `codex exec [resume ...] -` reads the full prompt from stdin —
     # documented and verified live, no Windows .cmd-argument truncation risk (see
     # prompt_mode="stdin").
@@ -315,6 +363,7 @@ CODEX = Backend(
         "unauthorized",
     ),
     friendly_auth_error_message=_codex_friendly_auth_error_message,
+    reasoning_effort_choices=lambda model: CODEX_MODEL_REASONING_LEVELS.get(model.strip().lower(), CODEX_DEFAULT_EFFORT_LEVELS),
 )
 
 

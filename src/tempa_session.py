@@ -29,6 +29,7 @@ from tempa_config import (
     get_logs_dir,
     get_model,
     get_qa_dir,
+    get_reasoning_effort,
     load_config,
     save_config,
     set_epic_session_id,
@@ -111,6 +112,7 @@ def prepare_backend_invocation(
     resume_session_id: str | None,
     prompt: str,
     log_path: Path,
+    reasoning_effort: str = "",
 ) -> tuple[list[str], str]:
     """Resolve `backend`'s executable and build (argv, stdin_text) for one invocation.
 
@@ -122,6 +124,10 @@ def prepare_backend_invocation(
       returned argv's CLI-visible instruction is a short single-line pointer at that file
       instead — the actual prompt never touches argv, avoiding the Windows .cmd-shim
       multi-line-argument truncation issue. stdin_text is "" in this case.
+
+    `reasoning_effort` ("" = no override) is passed straight through to `backend.build_cmd` —
+    the caller is responsible for having validated it against the model via
+    `tempa_backend.is_valid_reasoning_effort` before getting here.
 
     Raises FileNotFoundError if the backend's executable isn't on PATH.
     """
@@ -141,9 +147,9 @@ def prepare_backend_invocation(
             "them exactly. That file is your entire task for this session — do not summarize "
             "it back or ask for confirmation, just do it."
         )
-        return backend.build_cmd(exe, model, resume_session_id, prompt_arg), ""
+        return backend.build_cmd(exe, model, resume_session_id, prompt_arg, reasoning_effort), ""
 
-    return backend.build_cmd(exe, model, resume_session_id, None), full_prompt
+    return backend.build_cmd(exe, model, resume_session_id, None, reasoning_effort), full_prompt
 
 
 def _stream_backend_process(
@@ -216,6 +222,7 @@ def _run_backend_session(
     banner_label: str,
     *,
     resume_session_id: str | None = None,
+    reasoning_effort: str = "",
     progress_tag: str | None = None,
     on_json_event: Callable[[dict], None] | None = None,
     extra_progress_fn: Callable[[], str] | None = None,
@@ -268,7 +275,7 @@ def _run_backend_session(
                 print(line, flush=True)
 
     try:
-        cmd, stdin_text = prepare_backend_invocation(backend, model, resume_session_id, prompt, log_path)
+        cmd, stdin_text = prepare_backend_invocation(backend, model, resume_session_id, prompt, log_path, reasoning_effort)
 
         progress_thread = threading.Thread(target=_display_progress, daemon=True)
         progress_thread.start()
@@ -376,6 +383,7 @@ def run_session(
         log_prefix=f"session_{session_label}",
         banner_label=f"{action} session [{session_label}]",
         resume_session_id=resume_session_id,
+        reasoning_effort=get_reasoning_effort(load_config(), "implement"),
         on_json_event=on_json_event,
         extra_progress_fn=_feature_progress_suffix,
         pre_banner_extra=_print_feature_plan,
@@ -420,6 +428,7 @@ def run_qa_session(
         log_prefix=f"qa_{session_label}",
         banner_label=f"{action} QA session [{session_label}]",
         resume_session_id=resume_session_id,
+        reasoning_effort=get_reasoning_effort(load_config(), "implement"),
         progress_tag="QA",
         on_json_event=on_json_event,
     )
@@ -433,7 +442,9 @@ def run_qa_session(
         _state.running_index = None
 
 
-def _run_oneshot_session(prompt: str, label: str, log_prefix: str, backend: Backend, model: str) -> bool:
+def _run_oneshot_session(
+    prompt: str, label: str, log_prefix: str, backend: Backend, model: str, reasoning_effort: str = "",
+) -> bool:
     """Run a single fresh session (never resumes) against `backend`. Streams output to a
     log file and returns True on exit code 0. Used by one-pass workflows (plan-epics,
     review)."""
@@ -443,12 +454,15 @@ def _run_oneshot_session(prompt: str, label: str, log_prefix: str, backend: Back
         model,
         log_prefix=log_prefix,
         banner_label=label,
+        reasoning_effort=reasoning_effort,
         progress_tag=label,
     )
     return _log_session_result(f"[{label}]", exit_code, log_path)
 
 
-def run_clarification_session(prompt: str, run_number: int, backend: Backend, model: str) -> bool:
+def run_clarification_session(
+    prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
+) -> bool:
     """Run a single clarification session against `backend`. Always starts a fresh
     session — never resumes. No session_id is captured or stored; each loop iteration is
     independent."""
@@ -459,12 +473,15 @@ def run_clarification_session(prompt: str, run_number: int, backend: Backend, mo
         model,
         log_prefix=f"clarification_{run_number}",
         banner_label=label,
+        reasoning_effort=reasoning_effort,
         progress_tag="CLARIFY",
     )
     return _log_session_result(label, exit_code, log_path)
 
 
-def run_apply_clarification_session(prompt: str, run_number: int, backend: Backend, model: str) -> bool:
+def run_apply_clarification_session(
+    prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
+) -> bool:
     """Apply clarification findings to PRD/spec documents against `backend`. Always
     starts a fresh session."""
     label = f"Apply-clarifications run #{run_number}"
@@ -474,6 +491,7 @@ def run_apply_clarification_session(prompt: str, run_number: int, backend: Backe
         model,
         log_prefix=f"apply_clarification_{run_number}",
         banner_label=label,
+        reasoning_effort=reasoning_effort,
         progress_tag="APPLY",
     )
     return _log_session_result(label, exit_code, log_path)

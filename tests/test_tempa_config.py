@@ -291,6 +291,34 @@ def test_get_backend_unknown_stage_falls_back_to_claude():
 
 
 # ---------------------------------------------------------------------------
+# get_reasoning_efforts / get_reasoning_effort
+# ---------------------------------------------------------------------------
+
+def test_get_reasoning_efforts_empty_config_returns_defaults():
+    assert tempa_config.get_reasoning_efforts({}) == tempa_config.DEFAULT_REASONING_EFFORTS
+
+
+def test_get_reasoning_efforts_partial_override_merges():
+    efforts = tempa_config.get_reasoning_efforts({"reasoning_efforts": {"implement": "high"}})
+    assert efforts["implement"] == "high"
+    assert efforts["clarify"] == tempa_config.DEFAULT_REASONING_EFFORTS["clarify"]
+    assert efforts["plan"] == tempa_config.DEFAULT_REASONING_EFFORTS["plan"]
+
+
+def test_get_reasoning_effort_stage_present():
+    config = {"reasoning_efforts": {"implement": "xhigh"}}
+    assert tempa_config.get_reasoning_effort(config, "implement") == "xhigh"
+
+
+def test_get_reasoning_effort_stage_absent_falls_back_to_empty():
+    assert tempa_config.get_reasoning_effort({"reasoning_efforts": {}}, "clarify") == ""
+
+
+def test_get_reasoning_effort_unknown_stage_falls_back_to_empty():
+    assert tempa_config.get_reasoning_effort({}, "nonexistent-stage") == ""
+
+
+# ---------------------------------------------------------------------------
 # get_epic_session_id / set_epic_session_id
 # ---------------------------------------------------------------------------
 

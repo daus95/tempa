@@ -237,7 +237,7 @@
         </div>
         <div class="settings-group">
           <h3>AI Backend &amp; Model</h3>
-          <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — and which model it uses. The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested.</p>
+          <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for. The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested. Reasoning Effort's options depend on the model typed — an unsupported combination is rejected when you save.</p>
           <div class="settings-field">
             <label for="settingsBackendClarify">Clarifications</label>
             <p class="settings-field-desc">Used for the Clarification stage — analyzes the specification for ambiguities and conflicts. It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model.</p>
@@ -245,6 +245,7 @@
               <select id="settingsBackendClarify" class="settings-backend-select"></select>
               <input type="text" id="settingsModelClarify" class="settings-model-input" list="modelSuggestionsClarify" autocomplete="off">
               <datalist id="modelSuggestionsClarify"></datalist>
+              <select id="settingsEffortClarify" class="settings-effort-select"></select>
             </div>
             <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
           </div>
@@ -255,6 +256,7 @@
               <select id="settingsBackendPlan" class="settings-backend-select"></select>
               <input type="text" id="settingsModelPlan" class="settings-model-input" list="modelSuggestionsPlan" autocomplete="off">
               <datalist id="modelSuggestionsPlan"></datalist>
+              <select id="settingsEffortPlan" class="settings-effort-select"></select>
             </div>
             <p class="settings-model-note hidden" id="settingsModelNotePlan"></p>
           </div>
@@ -265,6 +267,7 @@
               <select id="settingsBackendImplement" class="settings-backend-select"></select>
               <input type="text" id="settingsModelImplement" class="settings-model-input" list="modelSuggestionsImplement" autocomplete="off">
               <datalist id="modelSuggestionsImplement"></datalist>
+              <select id="settingsEffortImplement" class="settings-effort-select"></select>
             </div>
             <p class="settings-model-note hidden" id="settingsModelNoteImplement"></p>
           </div>
