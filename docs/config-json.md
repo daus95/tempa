@@ -18,6 +18,7 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `max_session_run` | Max sessions per epic (anti-loop safeguard) |
 | `max_clarification_run` | Max rounds for the `clarify --finalize` loop |
 | `last_clarification_findings` | Summary of the last clarification findings (critical/major/minor) |
+| `last_clarification_round` | Round number of the most recent evaluate pass (manual `clarify` or one iteration of `clarify --finalize`) — shown on the dashboard as "Round N of `max_clarification_run`" |
 | `last_auto_answer` | Number of findings answered by the last `clarify --auto-answer` |
 | `epic` | Array of state for every epic (status, features, QA, session_id, etc.) |
 

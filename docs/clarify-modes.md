@@ -145,3 +145,16 @@ rounds) without pausing: evaluate → if `critical`/`major` findings remain, Cla
 own resolution to the PRD/spec document → repeat until `critical == 0` and `major == 0`
 (remaining `minor` findings are considered acceptable). Here Claude decides the answers, not
 you — run this once you're confident its recommended answers can be trusted.
+
+## Clarification history and round tracking
+
+Every evaluation pass (manual `clarify` or one iteration of `clarify --finalize`) writes its
+findings to a **new** file in `sources.clarifications` instead of overwriting or deleting a
+previous one — so every past round's findings and answers stay visible in the dashboard's
+Clarification Overview ("Unanswered" / "Fully answered" sections), even after later rounds run
+or answers are applied. Applying answers (`clarify --apply`, or saving in the web UI) never
+touches the clarification files themselves — only the PRD/spec documents and `config.json`.
+
+The dashboard's "Finalize readiness" panel shows **Round N of M**, where N is
+`last_clarification_round` (the most recent evaluate pass) and M is `max_clarification_run` —
+the same limit that bounds the `--finalize` loop above.

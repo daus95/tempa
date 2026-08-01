@@ -235,7 +235,16 @@ def test_live_clarification_findings_empty_list():
 
 def test_clarify_finalize_status_no_action_yet():
     result = dcp._clarify_finalize_status({"critical": 0}, None)
-    assert result == {"hasRun": False, "lastAction": None, "critical": 0, "ready": False}
+    assert result == {
+        "hasRun": False, "lastAction": None, "critical": 0, "ready": False,
+        "round": 0, "maxRound": 0,
+    }
+
+
+def test_clarify_finalize_status_round_passthrough():
+    result = dcp._clarify_finalize_status({"critical": 0}, "evaluate", round_=3, max_round=20)
+    assert result["round"] == 3
+    assert result["maxRound"] == 20
 
 
 def test_clarify_finalize_status_apply_alone_not_enough():

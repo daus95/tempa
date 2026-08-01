@@ -8,6 +8,19 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clarification result files are no longer overwritten or deleted by later evaluation/apply
+  passes — each `clarify` evaluation now writes a new, uniquely-named file, and `clarify
+  --apply` never touches the clarification files themselves. Previously answered rounds now
+  stay visible in the dashboard's "Fully answered" list instead of disappearing after a
+  later round or apply step.
+
+### Added
+
+- Dashboard's Clarification page shows **Round N of M** (current clarification round vs.
+  `max_clarification_run`) next to the Finalize readiness panel.
+
 ## [0.1.0] - 2026-07-30
 
 Initial tagged release.

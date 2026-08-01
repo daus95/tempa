@@ -172,6 +172,7 @@ DEFAULT_CONFIG = {
     "max_session_run": 30,
     "max_clarification_run": 20,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
+    "last_clarification_round": 0,
     "last_auto_answer": 0,
     "epic": [],
     "workspace": dict(DEFAULT_WORKSPACE),
