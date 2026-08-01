@@ -1,7 +1,29 @@
-# AI Model per Stage
+# AI Model & CLI Backend per Stage
 
-See [README.md](../README.md) for a summary. This document explains why the AI model is
-differentiated per stage, and how to configure it.
+See [README.md](../README.md) for a summary. This document explains why the AI model (and
+CLI backend) is differentiated per stage, and how to configure it.
+
+## CLI backend
+
+Each stage (`clarify`, `plan`, `implement`) is also driven by a specific **CLI backend** —
+which agentic coding CLI Tempa shells out to for that stage. Stored in `config.json` under
+the `backends` key, default `claude` for every stage:
+
+| Backend | CLI | Notes |
+|---------|-----|-------|
+| `claude` | Claude Code (`claude`) | Default. Model aliases (opus-5, sonnet-5, ...) apply. |
+| `copilot` | GitHub Copilot CLI (`copilot`) | Model catalog is Copilot's own — pass a real model id or `auto`. |
+| `codex` | OpenAI Codex CLI (`codex`) | Model catalog is Codex's own — pass a real model id. |
+
+```bash
+tempa set-backend --clarify claude --plan copilot --implement codex
+tempa show-backends                              # show the backend per stage
+```
+
+Each CLI must already be installed and authenticated on your machine (`claude`/`copilot`/
+`codex` on PATH, logged in via their own `login` flow) — Tempa only invokes them, it doesn't
+manage credentials. Switching a stage's backend mid-epic starts that stage's next session
+fresh instead of trying to resume a session id captured under a different CLI.
 
 ## Why differentiate per stage?
 
@@ -37,5 +59,7 @@ tempa show-models                              # show the model per stage
 ```
 
 - Values accept an **alias** (`opus-5`, `sonnet-5`, `haiku-4.5`, `fable-5`) or a **full
-  model id** (e.g. `claude-opus-5`).
+  model id** (e.g. `claude-opus-5`) — **only when that stage's backend is `claude`**.
+  Aliases are Claude-specific; for a `copilot`/`codex` stage the value is stored exactly
+  as given, since those CLIs' model catalogs aren't hardcoded into Tempa.
 - A stage that isn't specified keeps its previous/default value.

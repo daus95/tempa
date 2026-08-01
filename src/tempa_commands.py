@@ -9,18 +9,20 @@ tempa_implement / tempa_clarify / tempa_maintenance.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from dashboard_ui import run_dashboard
+from tempa_backend import BACKENDS, get_backend_def
 from tempa_config import (
     DEFAULT_WORKSPACE,
     WORKING_DIR,
     WORKSPACE_LABELS,
     _resolve_model_alias,
     clear_active_workspace_root,
+    get_backend,
+    get_backends,
     get_logs_dir,
     get_model,
     get_models,
@@ -39,13 +41,15 @@ from tempa_config import resolve_clar_dir as _resolve_clar_dir
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _print_log_tail, _state, log
 from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
-from tempa_session import _run_claude_session, _stream_claude_process, build_claude_cmd
+from tempa_session import _run_backend_session, _stream_backend_process, prepare_backend_invocation
 
 
 def run_test() -> None:
-    claude_exe = shutil.which("claude") or shutil.which("claude.cmd")
-    if not claude_exe:
-        raise FileNotFoundError("claude CLI not found in PATH")
+    """Exercise whichever backend is configured for the "implement" stage end-to-end —
+    this is the command that answers "can Tempa actually drive this CLI," so it should
+    reflect whichever backend the pipeline will actually use."""
+    config = load_config()
+    backend = get_backend_def(get_backend(config, "implement"))
 
     test_file = WORKING_DIR / "permission-test.txt"
     done_file = WORKING_DIR / "permission-test-done.txt"
@@ -67,18 +71,16 @@ def run_test() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = logs_dir / f"test_{timestamp}.txt"
 
-    log(f"Permission test starting — claude: {claude_exe} | log: {log_path.name}")
+    log(f"Permission test starting — backend: {backend.label} | log: {log_path.name}")
 
-    # Same pattern as every other session runner: capture the raw --output-format
-    # stream-json output and parse it into readable lines (written to the log file)
-    # instead of dumping raw JSON straight to the console.
+    # Same pattern as every other session runner: capture the raw JSON-lines output and
+    # parse it into readable lines (written to the log file) instead of dumping raw JSON
+    # straight to the console.
     try:
-        exit_code = _stream_claude_process(
-            build_claude_cmd(claude_exe, get_model(load_config(), "implement")),
-            test_prompt, log_path, "permission test", [0],
-        )
+        cmd, stdin_text = prepare_backend_invocation(backend, get_model(config, "implement"), None, test_prompt, log_path)
+        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, "permission test", [0])
     except Exception as e:
-        log(f"TEST FAILED — error running claude: {e}")
+        log(f"TEST FAILED — error running {backend.label}: {e}")
         return
 
     if test_file.exists():
@@ -87,11 +89,11 @@ def run_test() -> None:
     if _state.auth_error_hit:
         log(f"TEST stopped — authentication failed (see message above; log: {log_path.name})")
     elif _state.usage_limit_hit:
-        log(f"TEST stopped — Claude usage limit reached (see log: {log_path.name})")
+        log(f"TEST stopped — usage limit reached (see log: {log_path.name})")
     elif exit_code != 0:
-        log(f"TEST FAILED — claude exited with code {exit_code} (see log: {log_path.name})")
+        log(f"TEST FAILED — {backend.label} exited with code {exit_code} (see log: {log_path.name})")
     elif not done_file.exists():
-        log(f"TEST FAILED — claude did not complete all steps (done marker missing) (see log: {log_path.name})")
+        log(f"TEST FAILED — {backend.label} did not complete all steps (done marker missing) (see log: {log_path.name})")
     else:
         done_file.unlink()
         log("TEST PASSED — all steps completed successfully")
@@ -118,9 +120,10 @@ def run_verify(epic: str) -> None:
         if data.get("type") == "result" and data.get("result"):
             result_holder[0] = data["result"]
 
-    exit_code, log_path = _run_claude_session(
+    exit_code, log_path = _run_backend_session(
+        get_backend_def(get_backend(config, "implement")),
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, get_model(config, "implement")),
+        get_model(config, "implement"),
         log_prefix=f"verify_{epic}",
         banner_label=f"Verification for [{epic}]",
         progress_tag=f"VERIFY {epic}",
@@ -130,7 +133,7 @@ def run_verify(epic: str) -> None:
     if _state.auth_error_hit:
         sys.exit(3)
     if _state.usage_limit_hit:
-        log("Verification stopped — Claude usage limit reached.")
+        log("Verification stopped — usage limit reached.")
         sys.exit(2)
 
     if exit_code != 0:
@@ -338,19 +341,32 @@ def run_init(args: argparse.Namespace) -> None:
     print_workspace(config)
 
 
+STAGE_LABELS = {
+    "clarify": "Clarify   (clarify)",
+    "plan": "Plan      (plan)",
+    "implement": "Implement (implement, QA, verify)",
+}
+
+
 def print_models(config: dict | None = None) -> None:
     """Display the AI model configured for each harness stage."""
     if config is None:
         config = load_config()
     models = get_models(config)
     _banner("AI MODEL PER STAGE")
-    labels = {
-        "clarify": "Clarify   (clarify)",
-        "plan": "Plan      (plan)",
-        "implement": "Implement (implement, QA, verify)",
-    }
     for stage in ("clarify", "plan", "implement"):
-        print(f"  {labels[stage]:<34} {models.get(stage, '?')}", flush=True)
+        print(f"  {STAGE_LABELS[stage]:<34} {models.get(stage, '?')}", flush=True)
+
+
+def print_backends(config: dict | None = None) -> None:
+    """Display the CLI backend configured for each harness stage."""
+    if config is None:
+        config = load_config()
+    backends = get_backends(config)
+    _banner("CLI BACKEND PER STAGE")
+    for stage in ("clarify", "plan", "implement"):
+        name = backends.get(stage, "claude")
+        print(f"  {STAGE_LABELS[stage]:<34} {name:<10} ({get_backend_def(name).label})", flush=True)
 
 
 def print_principles() -> None:
@@ -374,16 +390,20 @@ def set_models(args: argparse.Namespace) -> None:
       tempa set-model [--clarify <model>] [--plan <model>] [--implement <model>]
 
     <model> accepts a friendly alias (opus-5, sonnet-5, haiku-4.5, fable-5) or a full
-    model id (e.g. claude-opus-5). Stages omitted keep their current/default value.
+    model id (e.g. claude-opus-5) when the stage's backend is "claude" — aliases are
+    Claude-only, so for a "copilot"/"codex" stage the value is stored as-is (their model
+    catalogs move independently of Tempa and aren't hardcoded here; see `tempa set-backend`).
+    Stages omitted keep their current/default value.
     """
     config = load_config()
     models = get_models(config)
+    backends = get_backends(config)
 
     changed = False
     for stage in ("clarify", "plan", "implement"):
         value = getattr(args, stage)
         if value is not None:
-            models[stage] = _resolve_model_alias(value)
+            models[stage] = _resolve_model_alias(value) if backends.get(stage, "claude") == "claude" else value
             changed = True
 
     config["models"] = models
@@ -393,6 +413,36 @@ def set_models(args: argparse.Namespace) -> None:
     else:
         log("No model flag given (--clarify/--plan/--implement) — showing the current configuration.")
     print_models(config)
+
+
+def set_backends(args: argparse.Namespace) -> None:
+    """Set the CLI backend per stage in config.json (key "backends").
+
+    Usage:
+      tempa set-backend [--clarify <claude|copilot|codex>] [--plan ...] [--implement ...]
+
+    Stages omitted keep their current/default value ("claude").
+    """
+    config = load_config()
+    backends = get_backends(config)
+
+    changed = False
+    for stage in ("clarify", "plan", "implement"):
+        value = getattr(args, stage)
+        if value is not None:
+            if value not in BACKENDS:
+                log(f"ERROR: unknown backend '{value}' — must be one of: {', '.join(BACKENDS)}")
+                sys.exit(1)
+            backends[stage] = value
+            changed = True
+
+    config["backends"] = backends
+    save_config(config)
+    if changed:
+        log("CLI backend saved to config.json (key \"backends\").")
+    else:
+        log("No backend flag given (--clarify/--plan/--implement) — showing the current configuration.")
+    print_backends(config)
 
 
 def print_status() -> None:

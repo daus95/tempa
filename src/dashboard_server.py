@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import tempa_backend
 import tempa_config
 from dashboard_assets import principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
@@ -261,6 +262,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "ok": True,
             "config": {
                 "models": tempa_config.get_models(config),
+                "backends": tempa_config.get_backends(config),
                 "features_per_session": config.get("features_per_session"),
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
@@ -636,16 +638,26 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
 
         models_in = payload.get("models")
-        if not isinstance(models_in, dict):
+        backends_in = payload.get("backends")
+        if not isinstance(models_in, dict) or not isinstance(backends_in, dict):
             self._send_json(400, {"ok": False, "error": "Malformed request."})
             return
+        backends = {}
+        for stage in ("clarify", "plan", "implement"):
+            value = (backends_in.get(stage) or "").strip()
+            if value not in tempa_backend.BACKENDS:
+                self._send_json(400, {"ok": False, "error": f"The {stage} backend must be one of: {', '.join(tempa_backend.BACKENDS)}."})
+                return
+            backends[stage] = value
         models = {}
         for stage in ("clarify", "plan", "implement"):
             value = (models_in.get(stage) or "").strip()
             if not value:
                 self._send_json(400, {"ok": False, "error": f"The {stage} model cannot be empty."})
                 return
-            models[stage] = tempa_config._resolve_model_alias(value)
+            # Friendly aliases (opus-5, sonnet-5, ...) are Claude-only — for copilot/codex
+            # the model string is stored as-is (see tempa_config._resolve_model_alias).
+            models[stage] = tempa_config._resolve_model_alias(value) if backends[stage] == "claude" else value
 
         def _parse_limit(name: str, required: bool) -> tuple[bool, int | None]:
             """Returns (ok, value). `value` is None for a blank/absent field (only
@@ -675,6 +687,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
         config = tempa_config.load_config()
         config["models"] = models
+        config["backends"] = backends
         config["features_per_session"] = features_per_session
         config["max_session_run"] = max_session_run
         config["max_clarification_run"] = max_clarification_run
@@ -685,6 +698,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "ok": True,
             "config": {
                 "models": models,
+                "backends": backends,
                 "features_per_session": features_per_session,
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,

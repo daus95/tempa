@@ -24,6 +24,7 @@ from tempa_clarify import (
     run_clarify_once,
 )
 from tempa_commands import (
+    print_backends,
     print_models,
     print_principles,
     print_status,
@@ -34,10 +35,19 @@ from tempa_commands import (
     run_spec_show,
     run_test,
     run_verify,
+    set_backends,
     set_models,
     set_working_folders,
 )
-from tempa_config import POLL_INTERVAL_SEC, WORKING_DIR, get_config_path, get_qa_dir, load_config
+from tempa_config import (
+    POLL_INTERVAL_SEC,
+    WORKING_DIR,
+    get_backend,
+    get_config_path,
+    get_epic_session_id,
+    get_qa_dir,
+    load_config,
+)
 from tempa_implement import main
 from tempa_maintenance import (
     _reset_failed_epics,
@@ -82,11 +92,14 @@ USAGE
   tempa close-folder         Detach the active workspace (its config/logs/qa/specs stay put in
                                   <root>/.tempa/, untouched — reopen it later with `init` to resume)
   tempa set-model [--clarify m] [--plan m] [--implement m]
-                                  Set the AI model per stage (alias: opus-5, sonnet-5, ...)
+                                  Set the AI model per stage (alias: opus-5, sonnet-5, ... — claude only)
   tempa show-models          Show the AI model per stage
+  tempa set-backend [--clarify b] [--plan b] [--implement b]
+                                  Set the CLI backend per stage: claude | copilot | codex
+  tempa show-backends        Show the CLI backend per stage
   tempa show-principles      Show the architecture principles applied to every stage's prompt
                                   (optional; set them in the dashboard's Architecture Principles page)
-  tempa test                 Permission test (verifies the claude CLI runs)
+  tempa test                 Permission test (verifies the implement stage's backend CLI runs)
   tempa --help               Show this help
 
   -- Create Spec & Clarification --
@@ -152,6 +165,9 @@ CONFIG OPTIONS (config.json)
   models.clarify                  AI model for clarify (default: claude-opus-5)
   models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
+  backends.clarify                CLI backend for clarify: claude | copilot | codex (default: claude)
+  backends.plan                   CLI backend for the plan stage, run via implement (default: claude)
+  backends.implement              CLI backend for implement/QA/verify (default: claude)
 
 PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in config.json)
   src/prompt/implementation.md        New implementation prompt
@@ -188,8 +204,9 @@ PROGRESS ({done}/{total} epics done)""")
         total_f = on_progress.get("total_features", 0)
         completed_f = on_progress.get("completed_features", 0)
         progress_str = f"{completed_f}/{total_f}" if total_f else "?"
-        sid = on_progress.get("claude_session_id", "-")
-        print(f"  IN PROGRESS : {label} ({progress_str} features) — session_id: {sid}")
+        backend = get_backend(config, "implement")
+        sid = get_epic_session_id(on_progress, backend, kind="implement") or "-"
+        print(f"  IN PROGRESS : {label} ({progress_str} features) — backend: {backend} — session_id: {sid}")
     if failed:
         for s in failed:
             print(f"  FAILED      : {s.get('epic_name', '?')}")
@@ -225,6 +242,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--implement")
 
     sub.add_parser("show-models", parents=[common], add_help=False)
+
+    p = sub.add_parser("set-backend", parents=[common], add_help=False)
+    p.add_argument("--clarify")
+    p.add_argument("--plan")
+    p.add_argument("--implement")
+
+    sub.add_parser("show-backends", parents=[common], add_help=False)
     sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
@@ -329,6 +353,10 @@ def run() -> None:
         set_models(cli_args)
     elif cli_args.command == "show-models":
         print_models()
+    elif cli_args.command == "set-backend":
+        set_backends(cli_args)
+    elif cli_args.command == "show-backends":
+        print_backends()
     elif cli_args.command == "show-principles":
         print_principles()
     elif cli_args.command == "test":

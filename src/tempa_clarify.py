@@ -17,7 +17,8 @@ from pathlib import Path
 
 from dashboard_clarify_parse import file_answer_status
 from dashboard_ui import run_dashboard
-from tempa_config import get_model, get_sources, load_config, save_config
+from tempa_backend import get_backend_def
+from tempa_config import get_backend, get_model, get_sources, load_config, save_config
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
 from tempa_prompts import (
@@ -68,18 +69,18 @@ def run_clarify_once(noui: bool = False) -> None:
 
     start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
     prompt = build_clarification_prompt(config)
-    if not run_clarification_session(prompt, 1, get_model(config, "clarify")):
+    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
-            log("Clarify stopped — Claude usage limit reached.")
+            log("Clarify stopped — usage limit reached.")
             sys.exit(2)
         log("Clarification evaluation failed.")
         sys.exit(1)
     if _state.auth_error_hit:
         sys.exit(3)
     if _state.usage_limit_hit:
-        log("Clarify stopped — Claude usage limit reached.")
+        log("Clarify stopped — usage limit reached.")
         sys.exit(2)
 
     config = load_config()
@@ -154,18 +155,18 @@ def run_clarify_answer() -> None:
 
     start_ts = time.time() - 1
     prompt = build_auto_answer_prompt(config)
-    if not run_clarification_session(prompt, 1, get_model(config, "clarify")):
+    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
-            log("Auto-answer stopped — Claude usage limit reached.")
+            log("Auto-answer stopped — usage limit reached.")
             sys.exit(2)
         log("Auto-answer failed.")
         sys.exit(1)
     if _state.auth_error_hit:
         sys.exit(3)
     if _state.usage_limit_hit:
-        log("Auto-answer stopped — Claude usage limit reached.")
+        log("Auto-answer stopped — usage limit reached.")
         sys.exit(2)
 
     config = load_config()
@@ -210,11 +211,11 @@ def run_clarify_finalize() -> None:
         config = load_config()
         prompt = build_clarification_prompt(config)
 
-        success = run_clarification_session(prompt, run_number, get_model(config, "clarify"))
+        success = run_clarification_session(prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
-            log("Clarify (finalize) stopped — Claude usage limit reached.")
+            log("Clarify (finalize) stopped — usage limit reached.")
             sys.exit(2)
         if not success:
             log(f"Clarification run #{run_number} failed — stopping the loop.")
@@ -241,11 +242,11 @@ def run_clarify_finalize() -> None:
 
         config = load_config()
         apply_prompt = build_apply_clarification_prompt(config)
-        apply_success = run_apply_clarification_session(apply_prompt, run_number, get_model(config, "clarify"))
+        apply_success = run_apply_clarification_session(apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
-            log("Clarify (finalize) stopped — Claude usage limit reached.")
+            log("Clarify (finalize) stopped — usage limit reached.")
             sys.exit(2)
         if not apply_success:
             log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
@@ -284,18 +285,18 @@ def _run_apply_step(config: dict) -> bool:
     process directly on an auth error or usage-limit hit, matching every other clarify
     subcommand's behavior."""
     prompt = build_apply_clarification_prompt(config)
-    if not run_apply_clarification_session(prompt, 1, get_model(config, "clarify")):
+    if not run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
         if _state.usage_limit_hit:
-            log("Apply stopped — Claude usage limit reached.")
+            log("Apply stopped — usage limit reached.")
             sys.exit(2)
         log("Apply clarification failed.")
         return False
     if _state.auth_error_hit:
         sys.exit(3)
     if _state.usage_limit_hit:
-        log("Apply stopped — Claude usage limit reached.")
+        log("Apply stopped — usage limit reached.")
         sys.exit(2)
 
     config = load_config()

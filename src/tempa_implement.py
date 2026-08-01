@@ -13,10 +13,13 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from tempa_backend import get_backend_def
 from tempa_config import (
     POLL_INTERVAL_SEC,
     WORKING_DIR,
+    get_backend,
     get_config_path,
+    get_epic_session_id,
     get_model,
     get_qa_dir,
     get_sources,
@@ -70,7 +73,7 @@ def check_and_run(features_override: int | None = None) -> None:
         for i, session in enumerate(config["epic"]):
             if session.get("qa_status") == "ongoing":
                 label = session.get("epic_name", f"epic_{i}")
-                resume_sid = session.get("qa_session_id") or None
+                resume_sid = get_epic_session_id(session, get_backend(config, "implement"), kind="qa")
                 log(f"QA [{label}] was interrupted (qa_status=ongoing) — resuming with session_id: {resume_sid}")
 
                 if not _validate_and_increment_qa_run(config, i, label):
@@ -322,7 +325,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             if _state.auth_error_hit:
                 sys.exit(3)
             if _state.usage_limit_hit:
-                log("Plan stopped — Claude usage limit reached.")
+                log("Plan stopped — usage limit reached.")
                 sys.exit(2)
             log("Plan failed — agent runner stopping.")
             sys.exit(1)
@@ -359,10 +362,10 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
 
     if _state.auth_error_hit:
         log("Agent runner stopped — authentication failed (see message above). "
-            "Re-authenticate the `claude` CLI, then run this command again.")
+            "Re-authenticate the configured CLI backend, then run this command again.")
         sys.exit(3)
     if _state.usage_limit_hit:
-        log("Agent runner stopped — Claude usage limit reached. "
+        log("Agent runner stopped — usage limit reached. "
             "Run it again once the limit resets.")
         sys.exit(2)
     if _state.all_done:
@@ -393,7 +396,8 @@ def _plan_epics_run(config: dict) -> bool:
     # 1) Generate
     log("Laying out new epics/features/tasks from the PRD (only what's not yet implemented)...")
     gen_prompt = build_plan_epics_prompt(config)
-    if not _run_oneshot_session(gen_prompt, "PLAN-EPICS", "plan_epics_generate", get_model(config, "plan")):
+    backend = get_backend_def(get_backend(config, "plan"))
+    if not _run_oneshot_session(gen_prompt, "PLAN-EPICS", "plan_epics_generate", backend, get_model(config, "plan")):
         if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Generate epic failed — stopping.")
         return False
@@ -401,8 +405,9 @@ def _plan_epics_run(config: dict) -> bool:
     # 2) Review & fix
     log("Reviewing & fixing the result (coverage, feature size < 300K, testability, parallelism)...")
     config = load_config()
+    backend = get_backend_def(get_backend(config, "plan"))
     review_prompt = build_review_epics_prompt(config)
-    if not _run_oneshot_session(review_prompt, "REVIEW-EPICS", "plan_epics_review", get_model(config, "plan")):
+    if not _run_oneshot_session(review_prompt, "REVIEW-EPICS", "plan_epics_review", backend, get_model(config, "plan")):
         if not _state.usage_limit_hit and not _state.auth_error_hit:
             log("Review epic failed — stopping.")
         return False

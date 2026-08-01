@@ -182,7 +182,13 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
   modalExtraBtn = $("modalExtraBtn"),
   settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
-  settingsModelImplement = $("settingsModelImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
+  settingsModelImplement = $("settingsModelImplement"),
+  settingsBackendClarify = $("settingsBackendClarify"), settingsBackendPlan = $("settingsBackendPlan"),
+  settingsBackendImplement = $("settingsBackendImplement"),
+  modelSuggestionsClarify = $("modelSuggestionsClarify"), modelSuggestionsPlan = $("modelSuggestionsPlan"),
+  modelSuggestionsImplement = $("modelSuggestionsImplement"),
+  settingsModelNoteClarify = $("settingsModelNoteClarify"), settingsModelNotePlan = $("settingsModelNotePlan"),
+  settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
@@ -945,7 +951,7 @@ function returncodeMessage(code, mode) {
   const label = mode === "apply" ? "Apply" : mode === "finalize" ? "Finalize"
     : mode === "implement" ? "Implementation" : "Clarification";
   if (code === 0) return `${label} run finished.`;
-  if (code === 2) return `${label} stopped — Claude usage limit reached.`;
+  if (code === 2) return `${label} stopped — usage limit reached.`;
   if (code === 3) return `${label} stopped — authentication error.`;
   return `${label} run exited with an error (code ${code}).`;
 }
@@ -1225,26 +1231,71 @@ startImplementBtn.addEventListener("click", startImplementRun);
 stopImplementBtn.addEventListener("click", stopImplementRun);
 
 // ---------------------------------------------------------------------------
-// Settings (AI models + run limits, backed by config.json)
+// Settings (AI backend + model + run limits, backed by config.json)
 // ---------------------------------------------------------------------------
-const MODEL_OPTIONS = [
-  { value: "claude-opus-5", label: "Opus 5" },
-  { value: "claude-sonnet-5", label: "Sonnet 5" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-  { value: "claude-fable-5", label: "Fable 5" },
+// Each backend's model field stays free text (typing any id always works), but which
+// suggestions the <datalist> offers depends on the backend picked for that stage — see
+// populateModelDatalist / the "change" listener wired in wireBackendModelStage below.
+const MODEL_OPTIONS_BY_BACKEND = {
+  claude: [
+    { value: "claude-opus-5", label: "Opus 5" },
+    { value: "claude-sonnet-5", label: "Sonnet 5" },
+  ],
+  codex: [
+    { value: "gpt-5.6-sol", label: "GPT 5.6 Sol" },
+    { value: "gpt-5.6-terra", label: "GPT 5.6 Terra" },
+  ],
+  copilot: [
+    { value: "auto", label: "Auto" },
+    { value: "claude-opus-5", label: "Opus 5" },
+    { value: "claude-sonnet-5", label: "Sonnet 5" },
+    { value: "gpt-5.6-sol", label: "GPT 5.6 Sol" },
+    { value: "gpt-5.6-terra", label: "GPT 5.6 Terra" },
+  ],
+};
+
+// Shown under the model field only for backends whose model access can be restricted by
+// an organization admin (Copilot's model list is governed by the org's Copilot policy).
+const MODEL_AVAILABILITY_NOTES = {
+  copilot: "Model availability depends on your organization's GitHub Copilot administrator/policy.",
+};
+
+const BACKEND_OPTIONS = [
+  { value: "claude", label: "Claude Code" },
+  { value: "copilot", label: "GitHub Copilot CLI" },
+  { value: "codex", label: "OpenAI Codex CLI" },
 ];
 
-function populateModelSelect(selectEl, currentValue) {
+function populateModelDatalist(datalistEl, backendName) {
+  if (!datalistEl) return;
+  datalistEl.innerHTML = "";
+  const options = MODEL_OPTIONS_BY_BACKEND[backendName] || MODEL_OPTIONS_BY_BACKEND.claude;
+  for (const opt of options) {
+    const el = document.createElement("option");
+    el.value = opt.value;
+    el.label = opt.label;
+    datalistEl.appendChild(el);
+  }
+}
+
+function updateModelAvailabilityNote(noteEl, backendName) {
+  if (!noteEl) return;
+  const note = MODEL_AVAILABILITY_NOTES[backendName];
+  noteEl.textContent = note || "";
+  noteEl.classList.toggle("hidden", !note);
+}
+
+function populateBackendSelect(selectEl, currentValue) {
   selectEl.innerHTML = "";
   let found = false;
-  for (const opt of MODEL_OPTIONS) {
+  for (const opt of BACKEND_OPTIONS) {
     const el = document.createElement("option");
     el.value = opt.value;
     el.textContent = opt.label;
     if (opt.value === currentValue) { el.selected = true; found = true; }
     selectEl.appendChild(el);
   }
-  // Keep an unrecognized/custom model id usable instead of silently swapping it out.
+  // Keep an unrecognized/legacy backend value usable instead of silently swapping it out.
   if (!found && currentValue) {
     const el = document.createElement("option");
     el.value = currentValue;
@@ -1254,10 +1305,32 @@ function populateModelSelect(selectEl, currentValue) {
   }
 }
 
+// Wires a stage's backend <select> so picking a different backend refreshes that same
+// stage's model <datalist> suggestions + availability note. Does NOT touch the model
+// input's current value — it's free text, switching backends shouldn't clobber it.
+function wireBackendModelStage(backendSelect, modelDatalist, modelNote) {
+  backendSelect.addEventListener("change", () => {
+    populateModelDatalist(modelDatalist, backendSelect.value);
+    updateModelAvailabilityNote(modelNote, backendSelect.value);
+  });
+}
+wireBackendModelStage(settingsBackendClarify, modelSuggestionsClarify, settingsModelNoteClarify);
+wireBackendModelStage(settingsBackendPlan, modelSuggestionsPlan, settingsModelNotePlan);
+wireBackendModelStage(settingsBackendImplement, modelSuggestionsImplement, settingsModelNoteImplement);
+
 function fillSettingsForm(config) {
-  populateModelSelect(settingsModelClarify, config.models.clarify);
-  populateModelSelect(settingsModelPlan, config.models.plan);
-  populateModelSelect(settingsModelImplement, config.models.implement);
+  populateBackendSelect(settingsBackendClarify, config.backends.clarify);
+  populateBackendSelect(settingsBackendPlan, config.backends.plan);
+  populateBackendSelect(settingsBackendImplement, config.backends.implement);
+  populateModelDatalist(modelSuggestionsClarify, config.backends.clarify);
+  populateModelDatalist(modelSuggestionsPlan, config.backends.plan);
+  populateModelDatalist(modelSuggestionsImplement, config.backends.implement);
+  updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify);
+  updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan);
+  updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement);
+  settingsModelClarify.value = config.models.clarify;
+  settingsModelPlan.value = config.models.plan;
+  settingsModelImplement.value = config.models.implement;
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
@@ -1290,6 +1363,11 @@ settingsSaveBtn.addEventListener("click", async () => {
           clarify: settingsModelClarify.value,
           plan: settingsModelPlan.value,
           implement: settingsModelImplement.value,
+        },
+        backends: {
+          clarify: settingsBackendClarify.value,
+          plan: settingsBackendPlan.value,
+          implement: settingsBackendImplement.value,
         },
         features_per_session: settingsFeaturesPerSession.value,
         max_session_run: settingsMaxSessionRun.value,

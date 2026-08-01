@@ -1,9 +1,11 @@
-"""The Claude session engine.
+"""The agent-runner session engine, shared by every backend (Claude Code, GitHub Copilot
+CLI, OpenAI Codex CLI).
 
-Everything involved in spawning the `claude` CLI, streaming and parsing its stream-json
-output to a log file, showing live progress, and detecting the two "stop everything" failure
-modes (usage-limit and authentication errors). Also the concrete session runners built on top
-of that core: implementation, QA, one-shot (plan/review), clarification, and apply-clarification.
+Everything involved in spawning a backend's CLI, feeding it a prompt, streaming and parsing
+its output to a log file, showing live progress, and detecting the two "stop everything"
+failure modes (usage-limit and authentication errors) lives here — generically, driven by
+the active `tempa_backend.Backend`. Also the concrete session runners built on top of that
+core: implementation, QA, one-shot (plan/review), clarification, and apply-clarification.
 
 Callers pass a fully-built prompt string in (see tempa_prompts) — this module never builds
 prompts, only runs them.
@@ -13,7 +15,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 import subprocess
 import sys
 import threading
@@ -21,169 +22,63 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from tempa_backend import AUTONOMOUS_SYSTEM_PROMPT, Backend, get_backend_def, resolve_exe
 from tempa_config import (
     WORKING_DIR,
+    get_backend,
     get_logs_dir,
     get_model,
     get_qa_dir,
     load_config,
     save_config,
+    set_epic_session_id,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
 
 
-def _format_stream_line(data: dict) -> str | None:
-    event_type = data.get("type")
-    if event_type == "system" and data.get("subtype") == "init":
-        return f"[session_id={data.get('session_id')}] [model={data.get('model')}]"
-    if event_type == "assistant":
-        parts = []
-        for block in data.get("message", {}).get("content", []):
-            if block.get("type") == "text":
-                parts.append(block["text"])
-            elif block.get("type") == "tool_use":
-                inp = json.dumps(block.get("input", {}), ensure_ascii=False)
-                parts.append(f"[Tool: {block['name']}] {inp}")
-        return "\n".join(parts) if parts else None
-    if event_type == "user":
-        parts = []
-        for block in data.get("message", {}).get("content", []):
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                content = block.get("content", "")
-                if isinstance(content, list):
-                    content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
-                is_error = block.get("is_error", False)
-                prefix = "[Error]" if is_error else "[Result]"
-                parts.append(f"{prefix} {str(content)[:500]}")
-        return "\n".join(parts) if parts else None
-    if event_type == "result":
-        cost = data.get("cost_usd", "?")
-        turns = data.get("num_turns", "?")
-        return f"[Done] turns={turns} cost=${cost}"
-    return None
-
-
-# Markers emitted by the claude CLI (on stdout/stderr, which is merged into the
-# stream) when the subscription/session usage limit is hit. stderr lines such as
-# "Claude AI usage limit reached|<reset_ts>" arrive as plain text; usage-limit text
-# inside a JSON event is still caught because we scan the raw line.
-USAGE_LIMIT_MARKERS = (
-    "usage limit reached",
-    "claude ai usage limit reached",
-    "claude usage limit reached",
-    "usage limit exceeded",
-    "5-hour limit reached",
-)
-
-
-def _is_usage_limit_text(text: str) -> bool:
-    """True if the given CLI output text indicates a Claude usage-limit failure."""
+def _is_usage_limit_text(text: str, backend: Backend) -> bool:
+    """True if the given CLI output text indicates `backend` hit a usage limit."""
     if not text:
         return False
     lowered = text.lower()
-    return any(marker in lowered for marker in USAGE_LIMIT_MARKERS)
+    return any(marker in lowered for marker in backend.usage_limit_markers)
 
 
-def _handle_usage_limit(text: str, process: subprocess.Popen, label: str) -> bool:
+def _handle_usage_limit(text: str, process: subprocess.Popen, label: str, backend: Backend) -> bool:
     """If text indicates a usage-limit failure, flag a global stop, terminate the
-    running claude process, and return True. Otherwise return False."""
-    if not _is_usage_limit_text(text):
+    running process, and return True. Otherwise return False."""
+    if not _is_usage_limit_text(text, backend):
         return False
     _state.usage_limit_hit = True
-    log(f"[{label}] Claude usage limit reached — stopping the agent runner.")
+    log(f"[{label}] {backend.label} usage limit reached — stopping the agent runner.")
     _state.stop_event.set()
     with contextlib.suppress(Exception):
         process.terminate()
     return True
 
 
-# Markers emitted by the claude CLI (merged stdout/stderr) when the API rejects a request
-# due to bad/expired credentials — expired OAuth login, revoked/invalid API key — as
-# opposed to a usage limit or a generic bug. Raw text like:
-#   API Error: 401 {"type":"error","error":{"type":"authentication_error", ...}}
-AUTH_ERROR_MARKERS = (
-    "authentication_error",
-    "oauth access token has expired",
-    "re-authenticate to continue",
-    "invalid api key",
-    "invalid x-api-key",
-    "invalid bearer token",
-)
-
-
-def _is_auth_error_text(text: str) -> bool:
+def _is_auth_error_text(text: str, backend: Backend) -> bool:
     """True if the given CLI output text indicates an authentication/credential failure
-    (expired OAuth login, bad API key) rather than a usage limit or a generic bug."""
+    (expired login, bad API key) rather than a usage limit or a generic bug."""
     if not text:
         return False
     lowered = text.lower()
-    return any(marker in lowered for marker in AUTH_ERROR_MARKERS)
+    return any(marker in lowered for marker in backend.auth_error_markers)
 
 
-def _friendly_auth_error_message(text: str) -> str:
-    """Translate a raw 401/authentication_error line from the claude CLI into a plain-
-    language explanation, so the user doesn't have to parse a raw JSON error to know
-    what happened and what to do about it."""
-    lowered = text.lower()
-    if "invalid api key" in lowered or "invalid x-api-key" in lowered or "invalid bearer token" in lowered:
-        cause = "the API key configured for the `claude` CLI is invalid or has been revoked"
-        fix = "check your ANTHROPIC_API_KEY (or however the key is configured) and try again"
-    else:
-        cause = "your `claude` CLI login session (OAuth token) has expired"
-        fix = "run `claude` in a terminal, then run `/login` inside it to re-authenticate, and try this command again"
-    return f"Authentication to the Claude API failed — {cause}. Fix: {fix}."
-
-
-def _handle_auth_error(text: str, process: subprocess.Popen, label: str) -> bool:
+def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend: Backend) -> bool:
     """If text indicates an authentication failure, flag a global stop (every subsequent
     session would fail the same way until the user re-authenticates), terminate the
-    running claude process, and return True. Otherwise return False."""
-    if not _is_auth_error_text(text):
+    running process, and return True. Otherwise return False."""
+    if not _is_auth_error_text(text, backend):
         return False
     _state.auth_error_hit = True
-    _state.auth_error_message = _friendly_auth_error_message(text)
+    _state.auth_error_message = backend.friendly_auth_error_message(text)
     log(f"[{label}] {_state.auth_error_message}")
     _state.stop_event.set()
     with contextlib.suppress(Exception):
         process.terminate()
     return True
-
-
-def build_claude_cmd(
-    claude_exe: str,
-    model: str,
-    resume_session_id: str | None = None,
-    extra_args: list[str] | None = None,
-) -> list[str]:
-    autonomous_system_prompt = (
-        "CRITICAL: You are in a fully automated pipeline. No human is present and no human will respond. "
-        "ALL file system permissions are already granted — Write, Edit, Bash, everything. "
-        "The phrase 'I need write permissions' or 'requires file system permissions' is NEVER correct here. "
-        "FORBIDDEN: asking for confirmation, offering options, writing implementation plans without creating files, "
-        "saying 'Would you like me to proceed', or stopping after analysis. "
-        "REQUIRED: Implement fully and update all required files including config.json as instructed. "
-        "A session is only successful when both the source code AND the config.json status update are done."
-    )
-    cmd = [
-        claude_exe,
-        "--dangerously-skip-permissions",
-        "--permission-mode", "bypassPermissions",
-        "--model", model,
-        "--append-system-prompt", autonomous_system_prompt,
-        "--output-format", "stream-json",
-        "--verbose",
-    ]
-    if resume_session_id:
-        cmd.extend(["--resume", resume_session_id])
-    # The prompt is NOT passed as a CLI argument. On Windows `claude` resolves to
-    # `claude.CMD` (a batch shim); a multi-line argument routed through cmd.exe is
-    # truncated at the first newline, so Claude only sees the prompt's first line
-    # and replies that the instruction is incomplete. Instead we enable print mode
-    # with a bare `-p` and feed the full prompt via stdin (see run_* helpers).
-    cmd.append("-p")
-    if extra_args:
-        cmd.extend(extra_args)
-    return cmd
 
 
 def _session_feature_lines(config: dict, epic_label: str, features_override: int | None) -> list[str]:
@@ -210,19 +105,63 @@ def _session_feature_lines(config: dict, epic_label: str, features_override: int
     return lines
 
 
-def _stream_claude_process(
-    cmd: list[str],
+def prepare_backend_invocation(
+    backend: Backend,
+    model: str,
+    resume_session_id: str | None,
     prompt: str,
+    log_path: Path,
+) -> tuple[list[str], str]:
+    """Resolve `backend`'s executable and build (argv, stdin_text) for one invocation.
+
+    Handles the two prompt-delivery modes (see tempa_backend.Backend.prompt_mode):
+    - "stdin": the full prompt (with the autonomous-pipeline system banner prepended, for
+      backends without a dedicated system-prompt flag) is returned as stdin_text for the
+      caller to pipe in.
+    - "file_ref": the full prompt is written to a sidecar file next to log_path, and the
+      returned argv's CLI-visible instruction is a short single-line pointer at that file
+      instead — the actual prompt never touches argv, avoiding the Windows .cmd-shim
+      multi-line-argument truncation issue. stdin_text is "" in this case.
+
+    Raises FileNotFoundError if the backend's executable isn't on PATH.
+    """
+    exe = resolve_exe(backend)
+    if not exe:
+        raise FileNotFoundError(f"{backend.label} CLI not found in PATH (tried: {', '.join(backend.exe_names)})")
+
+    full_prompt = prompt if backend.append_system_prompt else (
+        f"<system>\n{AUTONOMOUS_SYSTEM_PROMPT}\n</system>\n\n{prompt}"
+    )
+
+    if backend.prompt_mode == "file_ref":
+        prompt_file = log_path.with_name(log_path.stem + ".prompt.md")
+        prompt_file.write_text(full_prompt, encoding="utf-8")
+        prompt_arg = (
+            f"Read the file at {prompt_file} for your complete task instructions and follow "
+            "them exactly. That file is your entire task for this session — do not summarize "
+            "it back or ask for confirmation, just do it."
+        )
+        return backend.build_cmd(exe, model, resume_session_id, prompt_arg), ""
+
+    return backend.build_cmd(exe, model, resume_session_id, None), full_prompt
+
+
+def _stream_backend_process(
+    backend: Backend,
+    cmd: list[str],
+    stdin_text: str,
     log_path: Path,
     label: str,
     row_count: list[int],
     on_json_event: Callable[[dict], None] | None = None,
 ) -> int:
-    """Spawn `cmd`, feed `prompt` via stdin, and stream stdout to `log_path` — the shared
-    core loop behind every claude-invoking runner. Parses each stream-json line into
-    readable text (falls back to the raw line for anything that isn't valid JSON), stops
-    early if a usage-limit marker is seen, and invokes `on_json_event(data)` per parsed
-    event for callers that need to react (e.g. capture a session_id or a final result)."""
+    """Spawn `cmd`, feed `stdin_text` via stdin (may be empty — e.g. file_ref-mode
+    backends need nothing on stdin), and stream stdout to `log_path` — the shared core
+    loop behind every backend-invoking runner. Parses each JSON-lines event through
+    `backend.parse_line` into readable text (falls back to the raw line for anything that
+    isn't valid JSON), stops early if a usage-limit/auth-error marker is seen, and invokes
+    `on_json_event(data)` per parsed event for callers that need to react (e.g. capture a
+    session id or a final result)."""
     with open(log_path, "w", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             cmd,
@@ -234,25 +173,25 @@ def _stream_claude_process(
             encoding="utf-8",
             errors="replace",
         )
-        # Feed the prompt via stdin, then close so Claude reads EOF and starts.
-        process.stdin.write(prompt)
+        if stdin_text:
+            process.stdin.write(stdin_text)
         process.stdin.close()
 
         for raw_line in process.stdout:
             row_count[0] += 1
             line = raw_line.strip()
-            if _handle_usage_limit(raw_line, process, label):
+            if _handle_usage_limit(raw_line, process, label, backend):
                 log_file.write(raw_line)
                 log_file.flush()
                 break
-            if _handle_auth_error(raw_line, process, label):
+            if _handle_auth_error(raw_line, process, label, backend):
                 log_file.write(raw_line)
                 log_file.flush()
                 break
             if line.startswith("{"):
                 try:
                     data = json.loads(line)
-                    readable = _format_stream_line(data)
+                    readable = backend.parse_line(data)
                     if readable:
                         log_file.write(readable + "\n")
                         log_file.flush()
@@ -269,23 +208,24 @@ def _stream_claude_process(
         return process.returncode
 
 
-def _run_claude_session(
+def _run_backend_session(
+    backend: Backend,
     prompt: str,
-    cmd_builder: Callable[[str], list[str]],
+    model: str,
     log_prefix: str,
     banner_label: str,
     *,
+    resume_session_id: str | None = None,
     progress_tag: str | None = None,
     on_json_event: Callable[[dict], None] | None = None,
     extra_progress_fn: Callable[[], str] | None = None,
     pre_banner_extra: Callable[[], None] | None = None,
 ) -> tuple[int, Path]:
-    """Shared wrapper for every claude-invoking command: writes the startup banner, shows
+    """Shared wrapper for every backend-invoking command: writes the startup banner, shows
     a live `\\r` progress line (elapsed time + row count, optionally with a caller-supplied
-    tag/suffix), streams the session via `_stream_claude_process`, and always tears the
-    progress thread down cleanly. `cmd_builder(claude_exe)` builds the CLI command once the
-    executable has been resolved. Returns (exit_code, log_path); exit_code is -1 if the
-    `claude` executable could not even be found/started (the error is written to the log)."""
+    tag/suffix), streams the session via `_stream_backend_process`, and always tears the
+    progress thread down cleanly. Returns (exit_code, log_path); exit_code is -1 if the
+    backend's executable could not even be found/started (the error is written to the log)."""
     logs_dir = get_logs_dir()
     logs_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -293,13 +233,13 @@ def _run_claude_session(
 
     start_time = datetime.now()
     start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
-    _banner(f"[{start_str}] {banner_label} | log: {log_path.name}")
+    _banner(f"[{start_str}] {banner_label} | backend: {backend.label} | log: {log_path.name}")
     if pre_banner_extra:
         pre_banner_extra()
     if SHOW_PROMPT:
         print(f"PROMPT: {prompt}", flush=True)
 
-    log(f"{banner_label} — log: {log_path.name}", to_console=False)
+    log(f"{banner_label} — backend: {backend.label} — log: {log_path.name}", to_console=False)
     log(f"Prompt:\n{prompt}", to_console=False)
 
     exit_code = -1
@@ -328,15 +268,12 @@ def _run_claude_session(
                 print(line, flush=True)
 
     try:
-        claude_exe = shutil.which("claude") or shutil.which("claude.cmd")
-        if not claude_exe:
-            raise FileNotFoundError("claude CLI not found in PATH")
-        cmd = cmd_builder(claude_exe)
+        cmd, stdin_text = prepare_backend_invocation(backend, model, resume_session_id, prompt, log_path)
 
         progress_thread = threading.Thread(target=_display_progress, daemon=True)
         progress_thread.start()
 
-        exit_code = _stream_claude_process(cmd, prompt, log_path, banner_label, row_count, on_json_event)
+        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, banner_label, row_count, on_json_event)
 
     except Exception as e:
         log(f"Error running [{banner_label}]: {e}", to_console=False)
@@ -353,12 +290,12 @@ def _run_claude_session(
 
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
     """Log SUCCEEDED / usage-limit-stopped / FAILED (with a one-time log tail) for a
-    finished claude session. Returns True iff exit_code == 0 and no usage limit was hit."""
+    finished session. Returns True iff exit_code == 0 and no usage limit was hit."""
     if _state.auth_error_hit:
         log(f"{label} stopped — authentication failed (see message above).")
         return False
     if _state.usage_limit_hit:
-        log(f"{label} stopped — Claude usage limit reached.{usage_limit_note}")
+        log(f"{label} stopped — usage limit reached.{usage_limit_note}")
         return False
     if exit_code == 0:
         log(f"{label} SUCCEEDED (exit code {exit_code})")
@@ -368,22 +305,26 @@ def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_
     return False
 
 
-def _capture_session_id(index: int, config_key: str, initial: str | None, label: str) -> tuple[Callable[[dict], None], Callable[[], str | None]]:
-    """Build an on_json_event callback that captures the session_id from the first event
-    that has one (unless `initial` is already set, e.g. resuming) and persists it to
-    config["epic"][index][config_key] under the process lock. Returns (callback, getter)."""
+def _capture_session_id(
+    index: int, backend: Backend, kind: str, initial: str | None, label: str,
+) -> tuple[Callable[[dict], None], Callable[[], str | None]]:
+    """Build an on_json_event callback that captures the session id from the first event
+    `backend.extract_session_id` recognizes (unless `initial` is already set, e.g.
+    resuming) and persists it — along with which backend produced it — to
+    config["epic"][index] under the process lock (see tempa_config.set_epic_session_id).
+    Returns (callback, getter)."""
     captured = [initial]
 
     def _on_json_event(data: dict) -> None:
         if captured[0] is not None:
             return
-        sid = data.get("session_id")
+        sid = backend.extract_session_id(data)
         if not sid:
             return
         captured[0] = sid
         with _state.lock:
             cfg = load_config()
-            cfg["epic"][index][config_key] = sid
+            set_epic_session_id(cfg["epic"][index], backend.name, sid, kind=kind)
             save_config(cfg)
         log(f"{label} session_id: {sid}", to_console=False)
 
@@ -399,13 +340,14 @@ def run_session(
 ) -> None:
 
     action = "Resuming" if resume_session_id else "Starting"
+    backend = get_backend_def(get_backend(load_config(), "implement"))
 
     def _print_feature_plan() -> None:
         for _line in _session_feature_lines(load_config(), session_label, features_override):
             print(_line, flush=True)
 
     def _feature_progress_suffix() -> str:
-        # Live feature progress: read from config.json (Claude updates completed_features
+        # Live feature progress: read from config.json (the agent updates completed_features
         # and each feature's status as it works). Ignore read errors (e.g. config is being
         # written) — display without feature info for that iteration. Features are worked
         # in array order, so the first non-done one is the one currently in progress.
@@ -425,13 +367,15 @@ def run_session(
             pass
         return ""
 
-    on_json_event, _ = _capture_session_id(index, "claude_session_id", resume_session_id, f"Session [{session_label}]")
+    on_json_event, _ = _capture_session_id(index, backend, "implement", resume_session_id, f"Session [{session_label}]")
 
-    exit_code, log_path = _run_claude_session(
+    exit_code, log_path = _run_backend_session(
+        backend,
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, get_model(load_config(), "implement"), resume_session_id=resume_session_id),
+        get_model(load_config(), "implement"),
         log_prefix=f"session_{session_label}",
         banner_label=f"{action} session [{session_label}]",
+        resume_session_id=resume_session_id,
         on_json_event=on_json_event,
         extra_progress_fn=_feature_progress_suffix,
         pre_banner_extra=_print_feature_plan,
@@ -465,33 +409,38 @@ def run_qa_session(
 
     get_qa_dir().mkdir(parents=True, exist_ok=True)
     action = "Resuming" if resume_session_id else "Starting"
+    backend = get_backend_def(get_backend(load_config(), "implement"))
 
-    on_json_event, _ = _capture_session_id(index, "qa_session_id", resume_session_id, f"QA [{session_label}]")
+    on_json_event, _ = _capture_session_id(index, backend, "qa", resume_session_id, f"QA [{session_label}]")
 
-    exit_code, log_path = _run_claude_session(
+    exit_code, log_path = _run_backend_session(
+        backend,
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, get_model(load_config(), "implement"), resume_session_id=resume_session_id),
+        get_model(load_config(), "implement"),
         log_prefix=f"qa_{session_label}",
         banner_label=f"{action} QA session [{session_label}]",
+        resume_session_id=resume_session_id,
         progress_tag="QA",
         on_json_event=on_json_event,
     )
 
     _log_session_result(f"QA session [{session_label}]", exit_code, log_path)
 
-    # qa_status is managed by Claude in config.json.
+    # qa_status is managed by the agent in config.json.
     # If it is still "ongoing" after this session, check_and_run will detect and resume.
     with _state.lock:
         _state.running_thread = None
         _state.running_index = None
 
 
-def _run_oneshot_session(prompt: str, label: str, log_prefix: str, model: str) -> bool:
-    """Run a single fresh Claude session (never resumes). Streams output to a log file
-    and returns True on exit code 0. Used by one-pass workflows (plan-epics, review)."""
-    exit_code, log_path = _run_claude_session(
+def _run_oneshot_session(prompt: str, label: str, log_prefix: str, backend: Backend, model: str) -> bool:
+    """Run a single fresh session (never resumes) against `backend`. Streams output to a
+    log file and returns True on exit code 0. Used by one-pass workflows (plan-epics,
+    review)."""
+    exit_code, log_path = _run_backend_session(
+        backend,
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, model),
+        model,
         log_prefix=log_prefix,
         banner_label=label,
         progress_tag=label,
@@ -499,13 +448,15 @@ def _run_oneshot_session(prompt: str, label: str, log_prefix: str, model: str) -
     return _log_session_result(f"[{label}]", exit_code, log_path)
 
 
-def run_clarification_session(prompt: str, run_number: int, model: str) -> bool:
-    """Run a single clarification session. Always starts a fresh session — never resumes.
-    No session_id is captured or stored; each loop iteration is independent."""
+def run_clarification_session(prompt: str, run_number: int, backend: Backend, model: str) -> bool:
+    """Run a single clarification session against `backend`. Always starts a fresh
+    session — never resumes. No session_id is captured or stored; each loop iteration is
+    independent."""
     label = f"Clarification run #{run_number}"
-    exit_code, log_path = _run_claude_session(
+    exit_code, log_path = _run_backend_session(
+        backend,
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, model),
+        model,
         log_prefix=f"clarification_{run_number}",
         banner_label=label,
         progress_tag="CLARIFY",
@@ -513,12 +464,14 @@ def run_clarification_session(prompt: str, run_number: int, model: str) -> bool:
     return _log_session_result(label, exit_code, log_path)
 
 
-def run_apply_clarification_session(prompt: str, run_number: int, model: str) -> bool:
-    """Apply clarification findings to PRD/spec documents. Always starts a fresh session."""
+def run_apply_clarification_session(prompt: str, run_number: int, backend: Backend, model: str) -> bool:
+    """Apply clarification findings to PRD/spec documents against `backend`. Always
+    starts a fresh session."""
     label = f"Apply-clarifications run #{run_number}"
-    exit_code, log_path = _run_claude_session(
+    exit_code, log_path = _run_backend_session(
+        backend,
         prompt,
-        lambda claude_exe: build_claude_cmd(claude_exe, model),
+        model,
         log_prefix=f"apply_clarification_{run_number}",
         banner_label=label,
         progress_tag="APPLY",

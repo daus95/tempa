@@ -334,9 +334,14 @@
   .settings-field:last-child { margin-bottom: 0; }
   .settings-field label { display: block; font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; }
   .settings-field-desc { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; max-width: 640px; }
-  .settings-field select, .settings-field input[type="number"] { width: 100%; max-width: 320px;
+  .settings-field select, .settings-field input[type="number"], .settings-field input[type="text"] {
+    width: 100%; max-width: 320px;
     padding: 7px 10px; font-size: 0.9rem; border: 1px solid var(--border-strong); border-radius: 6px;
     background: var(--bg); color: var(--text); }
+  .settings-inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: 480px; }
+  .settings-inline-row .settings-backend-select { flex: 1 1 170px; min-width: 150px; max-width: 220px; }
+  .settings-inline-row .settings-model-input { flex: 2 1 200px; min-width: 150px; max-width: none; }
+  .settings-model-note { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
   .settings-switch-row { display: flex; align-items: center; gap: 10px; cursor: pointer;
     font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; }
   .settings-switch { position: relative; flex: none; }
