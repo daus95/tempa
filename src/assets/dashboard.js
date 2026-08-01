@@ -184,6 +184,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
+  settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
+  settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
   homePrinciplesBtn = $("homePrinciplesBtn"), homeStepPrinciplesStatus = $("homeStepPrinciplesStatus"),
   principlesEditor = $("principlesEditor"), principlesSaveBtn = $("principlesSaveBtn"),
@@ -215,7 +217,8 @@ const state = {
   workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
-    { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0 },
+    { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
+      allowFinalizeWithCritical: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   epics: [],
   implTab: "status",
@@ -440,11 +443,14 @@ function renderHomeWorkflow() {
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
   const criticalCount = state.clarifyFindings.critical;
+  const criticalOverrideNote = criticalCount > 0 && state.clarifyFinalize.allowFinalizeWithCritical
+    ? " Finalizing is allowed anyway via the Settings override." : "";
   homeStep2Status.textContent = step2Locked
     ? "Upload a specification first (step 1)."
     : totalFindings === 0
       ? "No clarification results yet — click Start Clarification to begin."
-      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).`;
+      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).` +
+        criticalOverrideNote;
 
   const findings = state.clarifyFindings;
   const needsClarification = !step2Locked && (findings.critical > 0 || findings.major > 0);
@@ -806,7 +812,8 @@ function renderGateChecklist(listEl, items) {
 //   1. clarification has been run at least once
 //   2. the most recent result comes from a fresh evaluate (Start Clarification), not
 //      just an apply — answering + applying criticals isn't enough on its own
-//   3. that evaluate's findings show 0 critical
+//   3. that evaluate's findings show 0 critical — unless the Settings toggle "Allow
+//      finalizing with critical findings" (st.allowFinalizeWithCritical) overrides it
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
   if (st.maxRound > 0) {
@@ -815,14 +822,18 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   } else {
     clarifyRoundBadge.classList.add("hidden");
   }
+  const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
   renderGateChecklist(finalizeGateList, [
     { ok: st.hasRun, label: "Clarification has been run at least once" },
     { ok: st.lastAction === "evaluate",
       label: "Most recent result comes from Start Clarification, not just Apply Answers" },
-    { ok: st.critical === 0,
+    { ok: criticalOk,
       label: st.critical === 0
         ? "Most recent evaluation shows 0 critical findings"
-        : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
+        : st.allowFinalizeWithCritical
+          ? `Most recent evaluation still shows ${st.critical} critical finding(s) — allowed via ` +
+            "the Settings override"
+          : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
   ]);
   finalizeClarifyBtn.disabled = runDisabled || !st.ready;
 
@@ -1250,6 +1261,8 @@ function fillSettingsForm(config) {
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
+  settingsAllowFinalizeWithCritical.checked = !!config.allow_finalize_with_critical;
+  settingsAllowFinalizeWithCriticalWarning.classList.toggle("hidden", !config.allow_finalize_with_critical);
 }
 
 async function renderSettings() {
@@ -1281,6 +1294,7 @@ settingsSaveBtn.addEventListener("click", async () => {
         features_per_session: settingsFeaturesPerSession.value,
         max_session_run: settingsMaxSessionRun.value,
         max_clarification_run: settingsMaxClarificationRun.value,
+        allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
       }),
     });
     const data = await res.json();
@@ -1298,6 +1312,32 @@ settingsSaveBtn.addEventListener("click", async () => {
   } finally {
     settingsSaveBtn.disabled = false;
   }
+});
+
+// Explain the meaning and consequences before letting the user actually turn this on —
+// reverts the switch if they back out. The warning banner stays visible below the field
+// afterward as a standing reminder (see fillSettingsForm), since this is a real change in
+// what Finalized Clarification is allowed to do, not a cosmetic preference.
+settingsAllowFinalizeWithCritical.addEventListener("change", async () => {
+  if (!settingsAllowFinalizeWithCritical.checked) {
+    settingsAllowFinalizeWithCriticalWarning.classList.add("hidden");
+    return;
+  }
+  const ok = await confirmModal(
+    "Turning this on lets Finalized Clarification start even while critical findings are still " +
+    "open, so its automated evaluate → apply loop will attempt to resolve those critical " +
+    "issues on its own instead of requiring you to answer them by hand first. Critical findings " +
+    "are the ones most likely to affect correctness, so letting automation resolve them " +
+    "unsupervised carries real risk of a wrong or incomplete answer being applied to the PRD/spec " +
+    "— review its results carefully afterward. This does not relax the separate requirement " +
+    "for Start Implementation, which always needs zero critical and zero major findings regardless " +
+    "of this setting.\n\nEnable anyway? (Remember to click Save Settings to apply.)",
+    { title: "Allow Finalizing With Critical Findings?", okLabel: "Enable", danger: true });
+  if (!ok) {
+    settingsAllowFinalizeWithCritical.checked = false;
+    return;
+  }
+  settingsAllowFinalizeWithCriticalWarning.classList.remove("hidden");
 });
 
 // ---------------------------------------------------------------------------

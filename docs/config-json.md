@@ -20,6 +20,7 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `last_clarification_findings` | Summary of the last clarification findings (critical/major/minor) |
 | `last_clarification_round` | Round number of the most recent evaluate pass (manual `clarify` or one iteration of `clarify --finalize`) — shown on the dashboard as "Round N of `max_clarification_run`" |
 | `last_auto_answer` | Number of findings answered by the last `clarify --auto-answer` |
+| `allow_finalize_with_critical` | Dashboard Settings toggle (default `false`). When `true`, "Finalized Clarification" is allowed to start even while critical findings remain open, letting its automated evaluate/apply loop attempt to resolve them unsupervised. Never relaxes the separate Start Implementation gate, which always requires zero critical and zero major findings |
 | `epic` | Array of state for every epic (status, features, QA, session_id, etc.) |
 
 Prompt templates are **no longer** in config.json — see [prompt-templates.md](prompt-templates.md).

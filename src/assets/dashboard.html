@@ -271,6 +271,30 @@
             <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
           </div>
         </div>
+        <div class="settings-group">
+          <h3>Clarification</h3>
+          <div class="settings-field">
+            <label class="settings-switch-row" for="settingsAllowFinalizeWithCritical">
+              <span class="settings-switch">
+                <input type="checkbox" id="settingsAllowFinalizeWithCritical">
+                <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+              </span>
+              <span>Allow finalizing with critical findings</span>
+            </label>
+            <p class="settings-field-desc">Off by default. Finalized Clarification normally refuses to start while any
+              critical finding is still open, so you have to answer and apply those yourself first — the automated
+              evaluate/apply loop it runs is meant for mopping up remaining major findings and confirming nothing has
+              regressed, not for unsupervised critical fixes. Turning this on lets Finalized Clarification start (and
+              its automated loop run) even with critical findings still open, so the automation will attempt to
+              resolve them on its own — review its answers carefully afterward. This never changes Start
+              Implementation, which always requires zero critical and zero major findings regardless of this
+              setting.</p>
+            <div class="settings-warning hidden" id="settingsAllowFinalizeWithCriticalWarning">
+              ⚠️ Enabled — Finalized Clarification can start with critical findings still open, and its automation
+              will try to resolve them unsupervised. Double-check the results before relying on them.
+            </div>
+          </div>
+        </div>
         <div class="settings-actions">
           <button type="button" class="clarify-run-btn" id="settingsSaveBtn">
             <span>💾</span><span>Save Settings</span>
