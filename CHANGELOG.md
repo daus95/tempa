@@ -8,6 +8,20 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-01
+
+### Added
+
+- Settings page toggle, **Allow finalizing with critical findings** (off by default).
+  Finalized Clarification normally refuses to start while any critical finding is still
+  open; enabling this lets its automated evaluate/apply loop attempt to resolve them
+  unsupervised instead, with an explanation of the consequences shown when turning it on
+  and a persistent warning while it's active. The Home and Clarification pages' Finalize
+  buttons follow this setting; Start Implementation's separate zero-critical/zero-major
+  gate is unaffected.
+- Dashboard's Clarification page shows **Round N of M** (current clarification round vs.
+  `max_clarification_run`) next to the Finalize readiness panel.
+
 ### Fixed
 
 - Clarification result files are no longer overwritten or deleted by later evaluation/apply
@@ -15,11 +29,6 @@ once the first tagged release is cut.
   --apply` never touches the clarification files themselves. Previously answered rounds now
   stay visible in the dashboard's "Fully answered" list instead of disappearing after a
   later round or apply step.
-
-### Added
-
-- Dashboard's Clarification page shows **Round N of M** (current clarification round vs.
-  `max_clarification_run`) next to the Finalize readiness panel.
 
 ## [0.1.0] - 2026-07-30
 
@@ -90,5 +99,6 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v.0.1.0...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/daus95/tempa/compare/v.0.1.0...v0.2.0
 [0.1.0]: https://github.com/daus95/tempa/releases/tag/v.0.1.0
