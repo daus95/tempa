@@ -199,7 +199,9 @@ def _live_clarification_findings(files: list[dict]) -> dict:
     return totals
 
 
-def _clarify_finalize_status(findings: dict, last_action: str | None) -> dict:
+def _clarify_finalize_status(
+    findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0
+) -> dict:
     """Whether "Finalized Clarification" is currently allowed to run.
 
     Requires all of:
@@ -217,7 +219,11 @@ def _clarify_finalize_status(findings: dict, last_action: str | None) -> dict:
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
     stamped by tempa.py right after each `clarify` (evaluate) / `clarify --apply`
     (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
-    _run_apply_step(), and run_clarify_finalize() there."""
+    _run_apply_step(), and run_clarify_finalize() there.
+
+    `round_`/`max_round` are config.json's "last_clarification_round" /
+    "max_clarification_run" — passed straight through so the dashboard can show
+    "Round N of M" without a separate request."""
     fresh_evaluate = last_action == "evaluate"
     ready = fresh_evaluate and findings["critical"] == 0
     return {
@@ -225,6 +231,8 @@ def _clarify_finalize_status(findings: dict, last_action: str | None) -> dict:
         "lastAction": last_action,
         "critical": findings["critical"],
         "ready": ready,
+        "round": round_,
+        "maxRound": max_round,
     }
 
 

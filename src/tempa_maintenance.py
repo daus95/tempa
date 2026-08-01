@@ -99,6 +99,7 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("last_clarification_action", None)
     config.pop("last_clarification_findings", None)
     config.pop("clarify_applied_hashes", None)
+    config["last_clarification_round"] = 0
     config["last_auto_answer"] = 0
 
 
@@ -223,6 +224,7 @@ def run_clear_all() -> None:
     stale_clarify_state = (
         any(k in config for k in ("last_clarification_action", "last_clarification_findings", "clarify_applied_hashes"))
         or config.get("last_auto_answer", 0) != 0
+        or config.get("last_clarification_round", 0) != 0
     )
 
     if not qa_files and not log_files and not plan_files and epic_count == 0 and not clar_to_delete and not stale_clarify_state:

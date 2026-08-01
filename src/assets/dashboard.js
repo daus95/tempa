@@ -158,7 +158,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
   openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
-  finalizeGateHint = $("finalizeGateHint"),
+  finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
+  homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
@@ -213,7 +214,8 @@ const state = {
   workspaceRoot: INITIAL_WORKSPACE_ROOT || "",
   workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
-  clarifyFinalize: INITIAL_CLARIFY_FINALIZE || { hasRun: false, lastAction: null, critical: 0, ready: false },
+  clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
+    { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0 },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   epics: [],
   implTab: "status",
@@ -413,6 +415,13 @@ function renderHomeWorkflow() {
 
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
+  const homeFinalize = state.clarifyFinalize;
+  if (homeFinalize.maxRound > 0) {
+    homeClarifyRoundBadge.textContent = `Round ${homeFinalize.round} of ${homeFinalize.maxRound}`;
+    homeClarifyRoundBadge.classList.remove("hidden");
+  } else {
+    homeClarifyRoundBadge.classList.add("hidden");
+  }
   // Mirrors the Clarification page's own Start/Continue Clarification + Answer Findings
   // behavior (see setClarifyRunButtonsDisabled) so the two pages never disagree.
   const homeHasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
@@ -800,6 +809,12 @@ function renderGateChecklist(listEl, items) {
 //   3. that evaluate's findings show 0 critical
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
+  if (st.maxRound > 0) {
+    clarifyRoundBadge.textContent = `Round ${st.round} of ${st.maxRound}`;
+    clarifyRoundBadge.classList.remove("hidden");
+  } else {
+    clarifyRoundBadge.classList.add("hidden");
+  }
   renderGateChecklist(finalizeGateList, [
     { ok: st.hasRun, label: "Clarification has been run at least once" },
     { ok: st.lastAction === "evaluate",

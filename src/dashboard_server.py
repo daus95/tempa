@@ -127,7 +127,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 self.server.clar_dir, _load_clarify_applied_hashes()
             )
             findings = _live_clarification_findings(unanswered + answered)
-            last_action = _load_dashboard_config().get("last_clarification_action")
+            dashboard_config = _load_dashboard_config()
+            last_action = dashboard_config.get("last_clarification_action")
+            round_ = dashboard_config.get("last_clarification_round") or 0
+            max_round = dashboard_config.get("max_clarification_run") or 0
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -135,7 +138,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "spec": {"tree": build_tree(self.server.prd_dir)},
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
-                            "finalize": _clarify_finalize_status(findings, last_action)},
+                            "finalize": _clarify_finalize_status(findings, last_action, round_, max_round)},
                 "principles": {"set": bool(tempa_config.read_principles())},
             })
         elif route == "/api/spec/file":

@@ -1,8 +1,10 @@
-Read all the latest clarification result files in the folder: ${sources.clarifications}
+Read every clarification result file in the folder: ${sources.clarifications} (there may be several, one per past clarification round — read them all, not just the most recent).
 
 For each finding, use the content written under its "Your answer:" label if present; otherwise fall back to the finding's own "Recommendation:" line.
 
 Apply every resulting resolution to the related PRD and technical spec documents in the folder: ${sources.prd}
+
+Do NOT delete, rename, or modify the clarification result files themselves (in ${sources.clarifications}) — they are a historical record the user needs to keep seeing, even after their findings are fully resolved. Only ever write to the PRD/spec documents and ${config_path}.
 
 Repeat the following steps (LOOP) until there are no more critical or major findings:
 

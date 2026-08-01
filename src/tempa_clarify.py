@@ -92,6 +92,7 @@ def run_clarify_once(noui: bool = False) -> None:
     # finalize gate can tell "criticals were answered and applied" apart from "a
     # fresh evaluation independently confirmed 0 criticals remain".
     config["last_clarification_action"] = "evaluate"
+    config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     save_config(config)
     report_files = _clarification_report_files(clar_dir, start_ts)
 
@@ -225,6 +226,7 @@ def run_clarify_finalize() -> None:
         major = findings.get("major", 0)
         minor = findings.get("minor", 0)
         config["last_clarification_action"] = "evaluate"
+        config["last_clarification_round"] = run_number
         save_config(config)
 
         log(f"Round #{run_number} findings: critical={critical}, major={major}, minor={minor}")
