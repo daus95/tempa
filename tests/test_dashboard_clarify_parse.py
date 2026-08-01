@@ -237,7 +237,7 @@ def test_clarify_finalize_status_no_action_yet():
     result = dcp._clarify_finalize_status({"critical": 0}, None)
     assert result == {
         "hasRun": False, "lastAction": None, "critical": 0, "ready": False,
-        "round": 0, "maxRound": 0,
+        "round": 0, "maxRound": 0, "allowFinalizeWithCritical": False,
     }
 
 
@@ -260,6 +260,21 @@ def test_clarify_finalize_status_fresh_evaluate_zero_critical_ready():
 
 def test_clarify_finalize_status_fresh_evaluate_with_critical_not_ready():
     result = dcp._clarify_finalize_status({"critical": 2}, "evaluate")
+    assert result["ready"] is False
+
+
+def test_clarify_finalize_status_allow_with_critical_overrides():
+    result = dcp._clarify_finalize_status(
+        {"critical": 2}, "evaluate", allow_finalize_with_critical=True
+    )
+    assert result["ready"] is True
+    assert result["allowFinalizeWithCritical"] is True
+
+
+def test_clarify_finalize_status_allow_with_critical_still_needs_fresh_evaluate():
+    result = dcp._clarify_finalize_status(
+        {"critical": 2}, "apply", allow_finalize_with_critical=True
+    )
     assert result["ready"] is False
 
 

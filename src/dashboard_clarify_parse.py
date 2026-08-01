@@ -200,7 +200,8 @@ def _live_clarification_findings(files: list[dict]) -> dict:
 
 
 def _clarify_finalize_status(
-    findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0
+    findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
+    allow_finalize_with_critical: bool = False,
 ) -> dict:
     """Whether "Finalized Clarification" is currently allowed to run.
 
@@ -213,7 +214,14 @@ def _clarify_finalize_status(
         clarification files' severity tags either
       - the clarification files currently show zero critical findings (`findings`,
         from _live_clarification_findings — the actual tag count, not a
-        self-reported opinion)
+        self-reported opinion) — unless `allow_finalize_with_critical` overrides
+        this (config.json's "allow_finalize_with_critical", the dashboard Settings
+        toggle; off by default). With it on, Finalize is allowed to start with
+        critical findings still open, so its automated evaluate/apply loop attempts
+        to resolve them unsupervised instead of requiring a human to answer them
+        first. This never relaxes the separate Start Implementation gate
+        (_handle_implement_run_start), which always requires zero critical and zero
+        major findings regardless of this setting.
 
     `last_action` is config.json's "last_clarification_action" (caller's
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
@@ -225,7 +233,8 @@ def _clarify_finalize_status(
     "max_clarification_run" — passed straight through so the dashboard can show
     "Round N of M" without a separate request."""
     fresh_evaluate = last_action == "evaluate"
-    ready = fresh_evaluate and findings["critical"] == 0
+    critical_ok = findings["critical"] == 0 or allow_finalize_with_critical
+    ready = fresh_evaluate and critical_ok
     return {
         "hasRun": last_action is not None,
         "lastAction": last_action,
@@ -233,6 +242,7 @@ def _clarify_finalize_status(
         "ready": ready,
         "round": round_,
         "maxRound": max_round,
+        "allowFinalizeWithCritical": allow_finalize_with_critical,
     }
 
 

@@ -131,6 +131,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             last_action = dashboard_config.get("last_clarification_action")
             round_ = dashboard_config.get("last_clarification_round") or 0
             max_round = dashboard_config.get("max_clarification_run") or 0
+            allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -138,7 +139,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "spec": {"tree": build_tree(self.server.prd_dir)},
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
-                            "finalize": _clarify_finalize_status(findings, last_action, round_, max_round)},
+                            "finalize": _clarify_finalize_status(
+                                findings, last_action, round_, max_round, allow_finalize_with_critical)},
                 "principles": {"set": bool(tempa_config.read_principles())},
             })
         elif route == "/api/spec/file":
@@ -262,6 +264,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "features_per_session": config.get("features_per_session"),
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
+                "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
             },
         })
 
@@ -451,16 +454,21 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self.server.clar_dir, _load_clarify_applied_hashes()
         )
         findings = _live_clarification_findings(unanswered + answered)
-        last_action = _load_dashboard_config().get("last_clarification_action")
-        if mode == "finalize" and not _clarify_finalize_status(findings, last_action)["ready"]:
+        dashboard_config = _load_dashboard_config()
+        last_action = dashboard_config.get("last_clarification_action")
+        allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
+        if mode == "finalize" and not _clarify_finalize_status(
+            findings, last_action, allow_finalize_with_critical=allow_finalize_with_critical
+        )["ready"]:
             # Server-side gate, not just a disabled button client-side — mirrors the
             # implement gate below. `tempa clarify --finalize` itself has no awareness
             # of this precondition and would happily run regardless.
-            self._send_json(409, {
-                "ok": False,
-                "error": "Cannot finalize yet — run Start Clarification once more and confirm "
-                         "it shows zero critical findings first.",
-            })
+            error = ("Cannot finalize yet — run Start Clarification once more and confirm "
+                     "it shows zero critical findings first.")
+            if findings["critical"] > 0 and not allow_finalize_with_critical:
+                error += (" Or enable \"Allow finalizing with critical findings\" in "
+                          "Settings to skip this requirement.")
+            self._send_json(409, {"ok": False, "error": error})
             return
         if not _start_clarify_run(self.server, mode):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
@@ -663,12 +671,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if not ok:
             self._send_json(400, {"ok": False, "error": "Max Clarification Runs must be a positive whole number."})
             return
+        allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
 
         config = tempa_config.load_config()
         config["models"] = models
         config["features_per_session"] = features_per_session
         config["max_session_run"] = max_session_run
         config["max_clarification_run"] = max_clarification_run
+        config["allow_finalize_with_critical"] = allow_finalize_with_critical
         tempa_config.save_config(config)
         print("[settings] configuration saved")
         self._send_json(200, {
@@ -678,6 +688,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "features_per_session": features_per_session,
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,
+                "allow_finalize_with_critical": allow_finalize_with_critical,
             },
         })
 

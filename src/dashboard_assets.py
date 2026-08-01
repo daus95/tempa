@@ -70,8 +70,10 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     last_action = dashboard_config.get("last_clarification_action")
     round_ = dashboard_config.get("last_clarification_round") or 0
     max_round = dashboard_config.get("max_clarification_run") or 0
+    allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
     clarify_finalize_json = json.dumps(
-        _clarify_finalize_status(live_findings, last_action, round_, max_round), ensure_ascii=False
+        _clarify_finalize_status(live_findings, last_action, round_, max_round, allow_finalize_with_critical),
+        ensure_ascii=False,
     )
     return (
         _page_template()
