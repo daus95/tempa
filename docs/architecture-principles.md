@@ -5,8 +5,10 @@ Tempa behaves exactly as it did before.
 
 ## What it is
 
-Tempa runs a project through several independent Claude sessions: clarification, applying answers,
-planning epics, implementation, QA, and verification. None of them remembers the previous one.
+Tempa runs a project through several independent agent sessions: clarification, applying answers,
+planning epics, implementation, QA, and verification — each stage possibly running on a different
+CLI backend (Claude Code / GitHub Copilot CLI / OpenAI Codex CLI, see
+[ai-models.md](ai-models.md)). None of them remembers the previous one.
 Anything that should hold true across all of them — the database you use, whether an ORM is
 allowed, how API errors are shaped, what has to be true before code counts as done — has nowhere
 to live except repeated in every specification.

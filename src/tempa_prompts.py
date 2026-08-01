@@ -1,10 +1,10 @@
 """Prompt loading and construction.
 
-Loads the `.md` templates from PROMPT_DIR and builds the full prompt string sent to Claude
-for each harness stage (implementation, QA, clarification, apply, auto-answer, plan-epics,
-review-epics). `build_prompt` does the `${...}` placeholder substitution and prepends the
-workspace's architecture principles; the higher-level `build_*_prompt` functions assemble the
-per-stage substitution parameters.
+Loads the `.md` templates from PROMPT_DIR and builds the full prompt string sent to the
+configured backend CLI for each harness stage (implementation, QA, clarification, apply,
+auto-answer, plan-epics, review-epics). `build_prompt` does the `${...}` placeholder
+substitution and prepends the workspace's architecture principles; the higher-level
+`build_*_prompt` functions assemble the per-stage substitution parameters.
 """
 
 from __future__ import annotations

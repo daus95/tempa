@@ -2,9 +2,11 @@
 
 Thin dispatch layer: parse the command line, show help, and route each subcommand to its
 handler in the tempa_* modules. The actual work lives in tempa_config (paths + config I/O),
-tempa_logging (runner state + logging), tempa_prompts (prompt construction), tempa_session
-(the Claude session engine), tempa_implement (the implement loop), tempa_clarify (clarify),
-tempa_maintenance (clear/reset), and tempa_commands (workspace/model/status/spec/verify/test).
+tempa_logging (runner state + logging), tempa_prompts (prompt construction), tempa_backend
+(per-CLI backend adapters: Claude Code / GitHub Copilot CLI / OpenAI Codex CLI), tempa_session
+(the agent-runner session engine, driven by tempa_backend), tempa_implement (the implement
+loop), tempa_clarify (clarify), tempa_maintenance (clear/reset), and tempa_commands
+(workspace/model/backend/status/spec/verify/test).
 
 Imported and invoked (via run()) by the root tempa.py launcher, which puts this src/ folder
 on sys.path so the sibling tempa_*/dashboard_* modules import by top-level name. That keeps
@@ -138,7 +140,7 @@ USAGE
   tempa status               Show a progress summary of all sessions
 
 GLOBAL FLAGS
-  --show-prompt                   Show the prompt sent to Claude on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
+  --show-prompt                   Show the prompt sent to the backend CLI on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
 
 CONFIG OPTIONS (config.json)
   features_per_session            Max features per session (null = no limit)
@@ -188,7 +190,7 @@ PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in c
 SESSION STATUS
   pending        Not started yet
   on_progress    Currently running
-  done           Done (set by Claude)
+  done           Done (set by the agent)
   require_fixing Already implemented but has QA findings — will be fixed automatically
   failed         Error — fix it then run implement --reset-failed
 

@@ -105,7 +105,7 @@ explicit `sources.<key>` always overrides its computed default.
 > **Multi-service monorepo.** The application consists of many services (e.g.
 > `src/backend`, `src/web`, …), each holding both its own source code **and** its own
 > tests. That's why there's no `sources.implementation`/`sources.tests` pinned to a single
-> path — `sources.apps` is the one reference, and Claude opens whichever service is
+> path — `sources.apps` is the one reference, and the agent opens whichever service is
 > relevant to the epic's spec.
 
 > **PRD vs docs.** `sources.prd` (the PRD) contains ONLY the new specification to be worked
@@ -128,7 +128,7 @@ different workspace and back never loses or overwrites anything.
 |--------|-----|
 | `.tempa/config.json` | this workspace's config — epic/session history, models, workspace/sources overrides, etc. |
 | `.tempa/architecture-principles.md` | optional project-wide rules, prepended to every stage's prompt (see [architecture-principles.md](architecture-principles.md)). Absent = unset |
-| `.tempa/logs/` | logs for every Claude session + the runner process log |
+| `.tempa/logs/` | logs for every agent session + the runner process log (plus a `*.prompt.md` sidecar per session for backends that need the prompt delivered via a file — see [ai-models.md](ai-models.md)) |
 | `.tempa/qa/` | QA reports per epic |
 | `.tempa/verify/` | manual verification reports (`verify`) |
 | `.tempa/specs/` | new specifications to be worked on (`workspace.specs`, `sources.prd/epics/clarifications` — see above) |

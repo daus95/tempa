@@ -19,7 +19,7 @@ from pathlib import Path
 
 from tempa_config import get_logs_dir
 
-# The prompt sent to Claude is NOT shown on the console unless the user adds
+# The prompt sent to the backend CLI is NOT shown on the console unless the user adds
 # --show-prompt. (The prompt is always recorded to the log file regardless.)
 SHOW_PROMPT = "--show-prompt" in sys.argv
 

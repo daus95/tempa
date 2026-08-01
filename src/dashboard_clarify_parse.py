@@ -184,7 +184,7 @@ def _live_clarification_findings(files: list[dict]) -> dict:
     """True critical/major/minor counts, computed directly from the severity tags
     currently present across the given clarification files (as returned by
     _clarify_files_overview) — NOT config.json's "last_clarification_findings",
-    which is the Claude session's own self-reported opinion of what's "still
+    which is the agent session's own self-reported opinion of what's "still
     critical" and can say 0 right after an apply even though the finding's
     <!-- clarify:item ... severity="critical" --> tag is still sitting right there
     in the file, answered but not removed (applying edits the PRD, never the

@@ -28,7 +28,7 @@ def _epic_sessions() -> list:
 # dashboard poll its console output for the collapsible log panel.
 # ---------------------------------------------------------------------------
 # Matches the self-overwriting `\r[HH:MM:SS] [...] [rows]` progress line tempa.py
-# prints once a second while a Claude session is running (see _display_progress in
+# prints once a second while an agent session is running (see _display_progress in
 # tempa.py). Kept out of the appended `lines` history entirely (see `progress` below)
 # — tempa.py can go minutes between any other console output, so if this were folded
 # into `lines` in place, the dashboard's index-based polling would fetch it once and
@@ -200,10 +200,11 @@ def _start_implement_run(server) -> bool:
 
 def _stop_implement_run(server) -> bool:
     """Kill the running `tempa implement` subprocess. Uses `taskkill /T /F` on
-    Windows to kill its whole process tree — implement spawns the actual `claude`
-    CLI call as a child of this same process, and plain Popen.terminate() only
-    kills the immediate process, leaving that child running (and still burning
-    Claude usage) in the background. Returns False if nothing is running."""
+    Windows to kill its whole process tree — implement spawns the actual backend
+    CLI call (claude/copilot/codex) as a child of this same process, and plain
+    Popen.terminate() only kills the immediate process, leaving that child running
+    (and still burning usage) in the background. Returns False if nothing is
+    running."""
     run = server.implement_run
     with run["lock"]:
         process = run["process"]

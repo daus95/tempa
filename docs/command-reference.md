@@ -8,8 +8,10 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `set-folders --root <abs> [...]` | Sets the working folder in config only (root absolute; the rest relative) |
 | `show-folders` | Shows the active working folder + resolved absolute paths |
 | `close-folder` | Detaches the active workspace (drops the active-workspace pointer only — the workspace's own `.tempa/` folder is left untouched, ready to reopen) |
-| `set-model [--clarify m] [--plan m] [--implement m]` | Sets the AI model per stage (alias/id) |
+| `set-model [--clarify m] [--plan m] [--implement m]` | Sets the AI model per stage (alias/id — aliases are Claude-only) |
 | `show-models` | Shows the AI model per stage |
+| `set-backend [--clarify b] [--plan b] [--implement b]` | Sets the CLI backend per stage: `claude` \| `copilot` \| `codex` |
+| `show-backends` | Shows the CLI backend per stage |
 | `show-principles` | Shows the [architecture principles](architecture-principles.md) prepended to every stage's prompt (optional; edited in the dashboard) |
 | `dashboard` | Opens the web dashboard (Home / Specification / Clarification / Implementation) |
 | `spec --show` | Opens the dashboard directly on the Specification section |
@@ -30,9 +32,9 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `implement --reset-qa` | Forces re-QA for `done` epics |
 | `implement --clear [--yes]` | Deletes ALL files in `.tempa/qa/` and `.tempa/logs/` (asks for confirmation) |
 | `clear [--yes]` | Runs `implement --clear` + `implement --clear-plan` + `clarify --clear` together, behind a single confirmation |
-| `test` | Permission test (verifies the Claude CLI works) |
+| `test` | Permission test (verifies the `implement` stage's configured backend CLI works) |
 | `--help` | Full help text |
 
-**Global flag** — `--show-prompt`: shows the prompt sent to Claude in the console. By
+**Global flag** — `--show-prompt`: shows the prompt sent to the backend CLI in the console. By
 default the prompt is **not** shown (it's still logged to `.tempa/logs/`). Applies to every
-command that runs a Claude session — pass it after the subcommand, e.g. `tempa implement --show-prompt`.
+command that runs an agent session — pass it after the subcommand, e.g. `tempa implement --show-prompt`.
