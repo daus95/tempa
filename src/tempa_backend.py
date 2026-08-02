@@ -96,6 +96,24 @@ def resolve_exe(backend: Backend) -> str | None:
     return None
 
 
+def get_backend_status(workspace_writable: bool) -> dict[str, dict]:
+    """Per-backend readiness for the active workspace: whether the CLI executable resolves
+    on PATH (resolve_exe), whether the workspace folder is writable (same verdict for every
+    backend — see tempa_config.workspace_is_writable, computed once by the caller), and
+    ready = both. Cheap and synchronous (no CLI invocation) — safe to call on every
+    dashboard page load/refresh."""
+    status = {}
+    for name, backend in BACKENDS.items():
+        installed = resolve_exe(backend) is not None
+        status[name] = {
+            "label": backend.label,
+            "installed": installed,
+            "writable": workspace_writable,
+            "ready": installed and workspace_writable,
+        }
+    return status
+
+
 def is_valid_reasoning_effort(backend: Backend, model: str, effort: str) -> bool:
     """"" (unset — use the CLI/model's own default) is always valid; otherwise `effort`
     must be one of backend.reasoning_effort_choices(model)."""

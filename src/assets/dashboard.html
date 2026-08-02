@@ -56,6 +56,10 @@
             <span class="home-workspace-path" id="homeWorkspacePath" title="Open in Explorer"></span>
             <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder">✕</button>
           </div>
+          <div class="home-backend-status" id="homeBackendStatusPanel">
+            <div class="home-backend-status-label">CLI backends ready for this workspace:</div>
+            <ul class="gate-checklist" id="homeBackendStatusList"></ul>
+          </div>
           <div class="home-step home-step-optional" id="homeStepPrinciples">
             <div class="home-step-header">
               <span class="home-step-icon">📐</span>
@@ -238,6 +242,12 @@
         <div class="settings-group">
           <h3>AI Backend &amp; Model</h3>
           <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for. The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested. Reasoning Effort's options depend on the model typed — an unsupported combination is rejected when you save.</p>
+          <div class="settings-backend-status">
+            <ul class="gate-checklist" id="settingsBackendStatusList"></ul>
+            <button type="button" class="clarify-run-btn secondary" id="settingsDetectBackendsBtn">
+              <span>🔄</span><span>Detect CLI Backends</span>
+            </button>
+          </div>
           <div class="settings-field">
             <label for="settingsBackendClarify">Clarifications</label>
             <p class="settings-field-desc">Used for the Clarification stage — analyzes the specification for ambiguities and conflicts. It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model.</p>

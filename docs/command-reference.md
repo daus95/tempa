@@ -34,7 +34,7 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `implement --reset-qa` | Forces re-QA for `done` epics |
 | `implement --clear [--yes]` | Deletes ALL files in `.tempa/qa/` and `.tempa/logs/` (asks for confirmation) |
 | `clear [--yes]` | Runs `implement --clear` + `implement --clear-plan` + `clarify --clear` together, behind a single confirmation |
-| `test` | Permission test (verifies the `implement` stage's configured backend CLI works) |
+| `test` | Permission test (verifies the `implement` stage's configured backend CLI works). For a lighter, non-invoking check across all three backends, see the dashboard's readiness checklist: [cli-availability.md](cli-availability.md) |
 | `--help` | Full help text |
 
 **Global flag** — `--show-prompt`: shows the prompt sent to the backend CLI in the console. By

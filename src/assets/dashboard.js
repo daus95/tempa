@@ -11,6 +11,7 @@ const INITIAL_WORKSPACE_CAN_CLOSE = /*__WORKSPACE_CAN_CLOSE__*/null;
 const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
 const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
 const INITIAL_PRINCIPLES_SET = /*__PRINCIPLES_SET__*/null;
+const INITIAL_BACKENDS_STATUS = /*__BACKENDS_STATUS__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -166,6 +167,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
   homeSelectFolderBtn = $("homeSelectFolderBtn"), homeWorkspacePath = $("homeWorkspacePath"),
   homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),
+  homeBackendStatusList = $("homeBackendStatusList"), settingsBackendStatusList = $("settingsBackendStatusList"),
+  settingsDetectBackendsBtn = $("settingsDetectBackendsBtn"),
   homeStep1 = $("homeStep1"), homeStep2 = $("homeStep2"), homeStep3 = $("homeStep3"),
   homeStep1Status = $("homeStep1Status"), homeStep2Status = $("homeStep2Status"), homeStep3Status = $("homeStep3Status"),
   homeStep2FileList = $("homeStep2FileList"),
@@ -228,6 +231,7 @@ const state = {
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
       allowFinalizeWithCritical: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
+  backendsStatus: INITIAL_BACKENDS_STATUS || {},
   epics: [],
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
@@ -815,6 +819,50 @@ function renderGateChecklist(listEl, items) {
   ).join("");
 }
 
+// ---------------------------------------------------------------------------
+// CLI backend readiness (installed + workspace-writable) — shown on Home (workspace
+// info area) and Settings (AI Backend & Model), sourced from state.backendsStatus
+// (see refreshSpecTree / renderSettings, populated from /api/tree and /api/config).
+// ---------------------------------------------------------------------------
+function backendStatusLabel(info) {
+  if (!state.workspaceInitialized) return `${info.label} — no workspace open yet`;
+  if (!info.installed) return `${info.label} — CLI not found on PATH`;
+  if (!info.writable) return `${info.label} — workspace folder is not writable`;
+  return `${info.label} — ready`;
+}
+
+function renderBackendStatus() {
+  const items = Object.values(state.backendsStatus).map((info) => ({
+    ok: !!(info && info.ready),
+    label: backendStatusLabel(info),
+  }));
+  if (homeBackendStatusList) renderGateChecklist(homeBackendStatusList, items);
+  if (settingsBackendStatusList) renderGateChecklist(settingsBackendStatusList, items);
+}
+
+// Lets the user re-check CLI availability on demand (e.g. right after installing/logging
+// into a CLI, or fixing workspace folder permissions) without reloading the whole Settings
+// form — re-populating the backend <select>s below preserves whatever's currently chosen
+// (including unsaved edits), it only refreshes each option's "(not ready)" annotation.
+settingsDetectBackendsBtn.addEventListener("click", async () => {
+  settingsDetectBackendsBtn.disabled = true;
+  try {
+    const res = await fetch("/api/backends/status");
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Could not check CLI backends.", true); return; }
+    state.backendsStatus = data.backends || {};
+    renderBackendStatus();
+    populateBackendSelect(settingsBackendClarify, settingsBackendClarify.value);
+    populateBackendSelect(settingsBackendPlan, settingsBackendPlan.value);
+    populateBackendSelect(settingsBackendImplement, settingsBackendImplement.value);
+    toast("CLI backend availability refreshed.");
+  } catch (e) {
+    toast("Network error checking CLI backends.", true);
+  } finally {
+    settingsDetectBackendsBtn.disabled = false;
+  }
+});
+
 // The 3 preconditions gating "Finalized Clarification" — see _clarify_finalize_status()
 // in dashboard_ui.py for the server-side source of truth this mirrors:
 //   1. clarification has been run at least once
@@ -1347,7 +1395,8 @@ function populateBackendSelect(selectEl, currentValue) {
   for (const opt of BACKEND_OPTIONS) {
     const el = document.createElement("option");
     el.value = opt.value;
-    el.textContent = opt.label;
+    const info = state.backendsStatus[opt.value];
+    el.textContent = info && !info.ready ? `${opt.label} (not ready)` : opt.label;
     if (opt.value === currentValue) { el.selected = true; found = true; }
     selectEl.appendChild(el);
   }
@@ -1381,6 +1430,8 @@ wireBackendModelStage(settingsBackendPlan, settingsModelPlan, modelSuggestionsPl
 wireBackendModelStage(settingsBackendImplement, settingsModelImplement, modelSuggestionsImplement, settingsModelNoteImplement, settingsEffortImplement);
 
 function fillSettingsForm(config) {
+  state.backendsStatus = config.backends_status || state.backendsStatus;
+  renderBackendStatus();
   populateBackendSelect(settingsBackendClarify, config.backends.clarify);
   populateBackendSelect(settingsBackendPlan, config.backends.plan);
   populateBackendSelect(settingsBackendImplement, config.backends.implement);
@@ -1645,7 +1696,9 @@ async function refreshSpecTree() {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.principlesSet = !!(data.principles && data.principles.set);
+      state.backendsStatus = data.backends || {};
       renderSidebar();
+      renderBackendStatus();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
     }
@@ -1994,6 +2047,7 @@ function toast(msg, isErr) {
 // Initial paint
 // ---------------------------------------------------------------------------
 renderSidebar();
+renderBackendStatus();
 if (INITIAL_VIEW === "specification") {
   renderSpecOverview();
   showPane("specOverview");

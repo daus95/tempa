@@ -11,6 +11,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+import tempa_backend
 import tempa_config
 from dashboard_clarify_parse import _clarify_finalize_status, _live_clarification_findings
 from dashboard_config import (
@@ -75,6 +76,10 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         _clarify_finalize_status(live_findings, last_action, round_, max_round, allow_finalize_with_critical),
         ensure_ascii=False,
     )
+    backends_status_json = json.dumps(
+        tempa_backend.get_backend_status(tempa_config.workspace_is_writable(_workspace_root())),
+        ensure_ascii=False,
+    )
     return (
         _page_template()
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -88,6 +93,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__PRINCIPLES_SET__*/null", principles_set_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
+        .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)
     )
 
 

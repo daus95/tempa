@@ -53,6 +53,15 @@ else:
     _pick_folder_dialog = _open_and_focus_folder = None
 
 
+def _backend_status() -> dict:
+    """Per-CLI-backend readiness (installed + workspace-writable) for whichever workspace
+    is currently active. Shared by /api/tree and /api/config so the writability probe
+    (a real filesystem touch) only runs once per request, not once per handler."""
+    root = _workspace_root()
+    writable = tempa_config.workspace_is_writable(root) if root else False
+    return tempa_backend.get_backend_status(writable)
+
+
 def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
     """Write the given answers into `path` (one clarification result file) and return
     its updated (answered, total) counts."""
@@ -143,6 +152,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                             "finalize": _clarify_finalize_status(
                                 findings, last_action, round_, max_round, allow_finalize_with_critical)},
                 "principles": {"set": bool(tempa_config.read_principles())},
+                "backends": _backend_status(),
             })
         elif route == "/api/spec/file":
             self._handle_spec_file(parse_qs(parsed.query))
@@ -154,6 +164,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_implement_run_status(parse_qs(parsed.query))
         elif route == "/api/config":
             self._handle_config_get()
+        elif route == "/api/backends/status":
+            self._send_json(200, {"ok": True, "backends": _backend_status()})
         elif route == "/api/principles":
             self._send_json(200, {"ok": True, "content": tempa_config.read_principles()})
         else:
@@ -268,6 +280,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
+                "backends_status": _backend_status(),
             },
         })
 
@@ -716,6 +729,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
+                "backends_status": _backend_status(),
             },
         })
 

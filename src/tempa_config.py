@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 from pathlib import Path
 
 # Modules live in src/, so anchor to the parent of src/ (the Tempa install root) for
@@ -273,6 +274,26 @@ def resolve_workspace_paths(config: dict) -> dict:
         else:
             resolved[key] = str(root_path / workspace[key])
     return resolved
+
+
+def workspace_is_writable(root: str) -> bool:
+    """Best-effort check that the current OS user can write files under `root`. All three
+    CLI backends (claude/copilot/codex) run as this same OS user (see
+    tempa_session._stream_backend_process), so this is what actually gates whether any of
+    them can write to the workspace — their own --dangerously-skip-permissions-style flags
+    only bypass in-app approval prompts, not OS filesystem permissions. Returns False for an
+    unset/non-existent root or on any OSError (e.g. read-only mount, permission denied)."""
+    if not root:
+        return False
+    path = Path(root)
+    if not path.is_dir():
+        return False
+    try:
+        with tempfile.NamedTemporaryFile(dir=path, prefix=".tempa-write-check-"):
+            pass
+    except OSError:
+        return False
+    return True
 
 
 def resolve_source_path(config: dict, value: str) -> str:

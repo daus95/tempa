@@ -195,6 +195,12 @@ Full reference, including what happens to a resumed/interrupted session's histor
 stage's backend changes mid-epic and the exact reasoning-effort levels per backend/model:
 see [docs/ai-models.md](docs/ai-models.md).
 
+Not sure which of the three are actually usable on this machine? The dashboard's Home page
+and Settings page both show a live ✅/⬜ **CLI backend availability** checklist — installed
+on `PATH` and able to write to the current workspace — with a **Detect CLI Backends** button
+in Settings to re-check after installing or logging into one. See
+[docs/cli-availability.md](docs/cli-availability.md).
+
 ---
 
 ## Dashboard (Recommended)
@@ -523,6 +529,9 @@ recovering from problems, manual verification): see
 - **AI Backend & Model per Stage** — Claude Code / Copilot CLI / Codex CLI, why both are
   differentiated per stage, default table, how to change them:
   [docs/ai-models.md](docs/ai-models.md)
+- **CLI Backend Availability** — how the dashboard's ✅/⬜ readiness checklist (Home +
+  Settings) is computed, what "ready" means, and the **Detect CLI Backends** button:
+  [docs/cli-availability.md](docs/cli-availability.md)
 - **Command Reference** — full list of every command:
   [docs/command-reference.md](docs/command-reference.md)
 - **`config.json` structure** — every key and what it does:
