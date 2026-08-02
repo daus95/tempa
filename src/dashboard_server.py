@@ -168,6 +168,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "backends": _backend_status()})
         elif route == "/api/principles":
             self._send_json(200, {"ok": True, "content": tempa_config.read_principles()})
+        elif route == "/api/update/status":
+            self._handle_update_status()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -284,6 +286,23 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             },
         })
 
+    def _handle_update_status(self) -> None:
+        # Imported lazily: tempa_commands imports dashboard_ui (for run_dashboard), which
+        # imports this module — a top-level import here would be circular.
+        import tempa_commands
+        current = tempa_commands.get_local_version()
+        latest = tempa_commands.get_latest_release_version()
+        if latest is None:
+            self._send_json(200, {
+                "ok": True, "current": current, "latest": None, "updateAvailable": False,
+                "error": "Could not reach GitHub to check the latest release.",
+            })
+            return
+        self._send_json(200, {
+            "ok": True, "current": current, "latest": latest,
+            "updateAvailable": current == "unknown" or current != latest,
+        })
+
     # -- POST ---------------------------------------------------------------
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -315,6 +334,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_config_save()
         elif parsed.path == "/api/principles/save":
             self._handle_principles_save()
+        elif parsed.path == "/api/update/run":
+            self._handle_update_run()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -759,3 +780,33 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         print("[principles] " + ("cleared" if not content else "saved"))
         self._send_json(200, {"ok": True, "content": content})
+
+    def _handle_update_run(self) -> None:
+        """Apply the latest GitHub release on top of this install. Delegates to
+        `tempa.py update --yes` in a subprocess (rather than calling run_update() in-process)
+        because that function can sys.exit() on failure paths — isolating it in a child
+        process keeps a failed update from taking the dashboard server down with it."""
+        if self.server.clarify_run["running"] or self.server.implement_run["running"]:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot update while a clarify or implementation run is in progress.",
+            })
+            return
+        tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "update", "--yes"]
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=180,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._send_json(500, {"ok": False, "error": f"Could not run update: {e}"})
+            return
+        output = result.stdout or ""
+        if result.returncode != 0:
+            self._send_json(500, {"ok": False, "error": output.strip() or f"Update failed (exit code {result.returncode})."})
+            return
+        import tempa_commands
+        self._send_json(200, {"ok": True, "output": output, "version": tempa_commands.get_local_version()})
