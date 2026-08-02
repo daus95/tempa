@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-02
+
 ### Added
 
 - **`tempa version`** — shows the locally installed Tempa version (read from a `VERSION`
@@ -132,6 +134,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/daus95/tempa/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/daus95/tempa/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/daus95/tempa/compare/v.0.1.0...v0.2.0
 [0.1.0]: https://github.com/daus95/tempa/releases/tag/v.0.1.0
