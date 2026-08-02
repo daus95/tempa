@@ -10,6 +10,11 @@ once the first tagged release is cut.
 
 ### Added
 
+- **`tempa version`** — shows the locally installed Tempa version (read from a `VERSION`
+  file at the install root, bumped as part of cutting each release).
+- **`tempa check-update`** — checks GitHub for the latest published release and compares it
+  against the installed version, printing a download link if an update is available (fails
+  gracefully with a manual-check link if GitHub can't be reached).
 - **CLI backend readiness** — the Home page's workspace info area and the Settings page's
   AI Backend & Model section now show, per CLI backend (Claude Code, GitHub Copilot CLI,
   OpenAI Codex CLI), whether it's ready to use for the active workspace: installed/on PATH
