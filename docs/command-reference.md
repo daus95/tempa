@@ -37,6 +37,7 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `test` | Permission test (verifies the `implement` stage's configured backend CLI works). For a lighter, non-invoking check across all three backends, see the dashboard's readiness checklist: [cli-availability.md](cli-availability.md) |
 | `version` | Shows the locally installed Tempa version (read from the `VERSION` file at the install root) |
 | `check-update` | Checks GitHub for the latest published release and compares it against the installed version (works offline-gracefully — prints a message instead of failing if GitHub can't be reached) |
+| `update [--yes]` | If a newer release exists, downloads it and overwrites this install's files with it (asks for confirmation showing current → latest version; only files actually shipped in the release archive are touched — `.tempa/`, `.active-workspace`, and similar local-only files/folders are left alone) |
 | `--help` | Full help text |
 
 **Global flag** — `--show-prompt`: shows the prompt sent to the backend CLI in the console. By
