@@ -276,6 +276,15 @@ box removes the principles again.
 This is entirely optional — leave it empty and Tempa behaves exactly as it did before, with
 nothing injected. Full reference: [docs/architecture-principles.md](docs/architecture-principles.md).
 
+### Updates
+
+Settings has an **Updates** card showing your installed version against the latest published
+GitHub release. Click **Check for Updates** to refresh that comparison, and — only when a
+newer release actually exists — **Update Now** to download and apply it in place, no terminal
+needed. After a successful update, restart the running `tempa dashboard`/`tempa implement`
+process (not just reload this page) so it picks up the new code; the dashboard tells you this
+explicitly once the update finishes. Full reference: [docs/updates.md](docs/updates.md).
+
 ### Step 1 — Upload Specification
 
 Click **Add File** or **Add Folder** to upload your PRD/spec documents straight from the
@@ -532,6 +541,9 @@ recovering from problems, manual verification): see
 - **CLI Backend Availability** — how the dashboard's ✅/⬜ readiness checklist (Home +
   Settings) is computed, what "ready" means, and the **Detect CLI Backends** button:
   [docs/cli-availability.md](docs/cli-availability.md)
+- **Checking for Updates** — how the Settings page's Updates card (and the CLI equivalents)
+  check and apply new releases, and why a restart is required afterward:
+  [docs/updates.md](docs/updates.md)
 - **Command Reference** — full list of every command:
   [docs/command-reference.md](docs/command-reference.md)
 - **`config.json` structure** — every key and what it does:

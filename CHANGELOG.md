@@ -8,6 +8,14 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Documented the Settings page's Updates card** — new [docs/updates.md](docs/updates.md)
+  reference page, a summary section in README.md's Dashboard walkthrough, and cross-references
+  from README's Further Reference list and `docs/command-reference.md`'s `check-update`/`update`
+  rows. Covers where the check/update UI lives, how it works, and why the Tempa process needs
+  restarting afterward (a page reload alone doesn't pick up the new code).
+
 ## [0.4.1] - 2026-08-02
 
 ### Added
