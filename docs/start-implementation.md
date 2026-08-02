@@ -34,10 +34,12 @@ Work-selection priority each time the runner polls (this implements the 1–4 se
 6. Nothing left → **everything is done**, the runner stops (exit 0).
 
 The runner stops automatically when: every epic is done, an epic is `failed`, the
-`max_session_run` limit is reached, Claude's **usage limit** is hit (exit 2; the epic is
-left as-is so it can be resumed once the limit resets — just run `implement` again), or
-the `claude` CLI's **authentication fails** (exit 3; expired OAuth login or an invalid API
-key — re-authenticate with `claude` + `/login`, then run `implement` again).
+`max_session_run` limit is reached, the configured backend's **usage limit** is hit (exit 2;
+the epic is left as-is so it can be resumed once the limit resets — just run `implement`
+again), or that backend's **authentication fails** (exit 3; expired login or an invalid API
+key — re-authenticate with whichever CLI is configured for `implement` — `claude` + `/login`,
+`copilot login`, or `codex login` — then run `implement` again). See
+[ai-models.md](ai-models.md) for how to check/change the `implement` stage's backend.
 
 ## Epic Status Lifecycle
 
@@ -51,7 +53,7 @@ pending ──► on_progress ──► done ──►[QA]──► qa_passed=tr
 - **QA status** (`qa_status`): `idle` · `ongoing` · `done`.
 - **`qa_passed`**: `false` until QA passes, then `true`.
 
-Epic status is changed to `done` / `require_fixing` by **Claude itself** by editing
+Epic status is changed to `done` / `require_fixing` by **the agent itself** by editing
 config.json during the session; the harness only marks it `failed` when a session errors out
 (not on a usage-limit stop).
 

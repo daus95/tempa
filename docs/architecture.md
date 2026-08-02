@@ -44,14 +44,15 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `tempa_cli.py` | Argument parsing and dispatch only. No workflow logic lives here. |
-| `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models` resolution. The one module every other module can depend on — stdlib-only, imports nothing local. |
+| `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution. The one module every other module can depend on — stdlib-only, imports nothing local. |
 | `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
 | `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
-| `tempa_session.py` | The Claude session engine: spawns `claude`, streams/parses its `stream-json` output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too. |
+| `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too. |
+| `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, and each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`). |
 | `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
 | `tempa_implement.py` | The implement poll loop and scheduler (`check_and_run`): decides what to run next (resume QA, resume an in-progress epic, implement the next pending epic). |
 | `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
-| `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/status/spec/verify/test, plus opening the dashboard. |
+| `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/backend/reasoning-effort/status/spec/verify/test, plus opening the dashboard. |
 
 ### Dashboard side (`dashboard_*.py`)
 

@@ -258,6 +258,8 @@ def _reset_failed_epics() -> None:
             label = session.get("epic_name", f"epic_{i}")
             config["epic"][i]["status"] = "pending"
             config["epic"][i].pop("claude_session_id", None)
+            config["epic"][i].pop("session_id", None)
+            config["epic"][i].pop("session_backend", None)
             reset_count += 1
             log(f"Reset [{label}] → pending")
     if reset_count == 0:
@@ -276,6 +278,7 @@ def _reset_qa_state() -> None:
             config["epic"][i]["qa_passed"] = False
             config["epic"][i]["qa_status"] = "idle"
             config["epic"][i]["qa_session_id"] = ""
+            config["epic"][i].pop("qa_session_backend", None)
             config["epic"][i]["qa_total_run"] = 0
             config["epic"][i]["qa_report_filename"] = ""
             reset_count += 1
@@ -295,6 +298,8 @@ def _reset_on_progress_epics() -> None:
             label = session.get("epic_name", f"epic_{i}")
             config["epic"][i]["status"] = "pending"
             config["epic"][i].pop("claude_session_id", None)
+            config["epic"][i].pop("session_id", None)
+            config["epic"][i].pop("session_backend", None)
             reset_count += 1
             log(f"Reset [{label}] → pending (session_id cleared)")
     if reset_count == 0:

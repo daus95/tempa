@@ -263,6 +263,119 @@ def test_get_model_unknown_stage_falls_back_to_hardcoded_default():
 
 
 # ---------------------------------------------------------------------------
+# get_backends / get_backend
+# ---------------------------------------------------------------------------
+
+def test_get_backends_empty_config_returns_defaults():
+    assert tempa_config.get_backends({}) == tempa_config.DEFAULT_BACKENDS
+
+
+def test_get_backends_partial_override_merges():
+    backends = tempa_config.get_backends({"backends": {"implement": "codex"}})
+    assert backends["implement"] == "codex"
+    assert backends["clarify"] == tempa_config.DEFAULT_BACKENDS["clarify"]
+    assert backends["plan"] == tempa_config.DEFAULT_BACKENDS["plan"]
+
+
+def test_get_backend_stage_present():
+    config = {"backends": {"implement": "copilot"}}
+    assert tempa_config.get_backend(config, "implement") == "copilot"
+
+
+def test_get_backend_stage_absent_falls_back_to_claude():
+    assert tempa_config.get_backend({"backends": {}}, "clarify") == "claude"
+
+
+def test_get_backend_unknown_stage_falls_back_to_claude():
+    assert tempa_config.get_backend({}, "nonexistent-stage") == "claude"
+
+
+# ---------------------------------------------------------------------------
+# get_reasoning_efforts / get_reasoning_effort
+# ---------------------------------------------------------------------------
+
+def test_get_reasoning_efforts_empty_config_returns_defaults():
+    assert tempa_config.get_reasoning_efforts({}) == tempa_config.DEFAULT_REASONING_EFFORTS
+
+
+def test_get_reasoning_efforts_partial_override_merges():
+    efforts = tempa_config.get_reasoning_efforts({"reasoning_efforts": {"implement": "high"}})
+    assert efforts["implement"] == "high"
+    assert efforts["clarify"] == tempa_config.DEFAULT_REASONING_EFFORTS["clarify"]
+    assert efforts["plan"] == tempa_config.DEFAULT_REASONING_EFFORTS["plan"]
+
+
+def test_get_reasoning_effort_stage_present():
+    config = {"reasoning_efforts": {"implement": "xhigh"}}
+    assert tempa_config.get_reasoning_effort(config, "implement") == "xhigh"
+
+
+def test_get_reasoning_effort_stage_absent_falls_back_to_empty():
+    assert tempa_config.get_reasoning_effort({"reasoning_efforts": {}}, "clarify") == ""
+
+
+def test_get_reasoning_effort_unknown_stage_falls_back_to_empty():
+    assert tempa_config.get_reasoning_effort({}, "nonexistent-stage") == ""
+
+
+# ---------------------------------------------------------------------------
+# get_epic_session_id / set_epic_session_id
+# ---------------------------------------------------------------------------
+
+def test_get_epic_session_id_absent_returns_none():
+    assert tempa_config.get_epic_session_id({}, "claude", kind="implement") is None
+    assert tempa_config.get_epic_session_id({}, "claude", kind="qa") is None
+
+
+def test_set_epic_session_id_then_get_round_trips_for_matching_backend():
+    epic = {}
+    tempa_config.set_epic_session_id(epic, "codex", "thread-123", kind="implement")
+    assert tempa_config.get_epic_session_id(epic, "codex", kind="implement") == "thread-123"
+
+
+def test_get_epic_session_id_returns_none_when_backend_changed_since_capture():
+    epic = {}
+    tempa_config.set_epic_session_id(epic, "codex", "thread-123", kind="implement")
+    # The stage's backend was switched to claude after this id was captured under codex —
+    # resuming with it would be meaningless, so it must not be returned.
+    assert tempa_config.get_epic_session_id(epic, "claude", kind="implement") is None
+
+
+def test_get_epic_session_id_qa_kind_is_independent_of_implement_kind():
+    epic = {}
+    tempa_config.set_epic_session_id(epic, "claude", "impl-sid", kind="implement")
+    tempa_config.set_epic_session_id(epic, "codex", "qa-sid", kind="qa")
+    assert tempa_config.get_epic_session_id(epic, "claude", kind="implement") == "impl-sid"
+    assert tempa_config.get_epic_session_id(epic, "codex", kind="qa") == "qa-sid"
+
+
+def test_get_epic_session_id_legacy_bare_claude_session_id_treated_as_claude_backend():
+    # Configs written before multi-backend support only had "claude_session_id", no
+    # "session_backend" companion field — must still resolve for backend "claude" (the
+    # only backend that existed when they were written), and not for anything else.
+    epic = {"claude_session_id": "legacy-sid"}
+    assert tempa_config.get_epic_session_id(epic, "claude", kind="implement") == "legacy-sid"
+    assert tempa_config.get_epic_session_id(epic, "codex", kind="implement") is None
+
+
+def test_set_epic_session_id_drops_legacy_claude_session_id_key():
+    epic = {"claude_session_id": "legacy-sid"}
+    tempa_config.set_epic_session_id(epic, "codex", "new-sid", kind="implement")
+    assert "claude_session_id" not in epic
+    assert epic["session_id"] == "new-sid"
+    assert epic["session_backend"] == "codex"
+
+
+def test_get_epic_session_id_qa_has_no_legacy_key_fallback():
+    # "qa_session_id" was already backend-agnostic-looking before multi-backend support
+    # (no separate legacy key like implement's claude_session_id) — an old bare value with
+    # no qa_session_backend companion is still treated as backend "claude".
+    epic = {"qa_session_id": "old-qa-sid"}
+    assert tempa_config.get_epic_session_id(epic, "claude", kind="qa") == "old-qa-sid"
+    assert tempa_config.get_epic_session_id(epic, "codex", kind="qa") is None
+
+
+# ---------------------------------------------------------------------------
 # active-workspace pointer
 # ---------------------------------------------------------------------------
 

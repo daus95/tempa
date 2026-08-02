@@ -151,6 +151,8 @@ DEFAULT_MODELS = {
 }
 
 # Friendly aliases → full model id, so users can type e.g. "opus-5" or "sonnet-5".
+# Claude-only: Copilot/Codex model catalogs move independently of Tempa and are passed
+# through as-is (see _resolve_model_alias / get_backend).
 MODEL_ALIASES = {
     "opus-5": "claude-opus-5",
     "opus": "claude-opus-5",
@@ -162,12 +164,34 @@ MODEL_ALIASES = {
     "fable": "claude-fable-5",
 }
 
+# Which CLI backend drives each harness stage. Stored under the "backends" key in
+# config.json. One of "claude" (Claude Code), "copilot" (GitHub Copilot CLI), or "codex"
+# (OpenAI Codex CLI) — see tempa_backend.BACKENDS for what each one actually runs.
+DEFAULT_BACKENDS = {
+    "clarify": "claude",
+    "plan": "claude",
+    "implement": "claude",
+}
+
+# Reasoning effort per harness stage. Stored under the "reasoning_efforts" key in
+# config.json. "" means no override — the backend CLI/model's own default is used. A
+# non-empty value must be one of the stage's backend+model's valid choices (see
+# tempa_backend.is_valid_reasoning_effort) — enforced in dashboard_server.py and
+# tempa_commands.set_efforts, not here (this module has no tempa_backend dependency).
+DEFAULT_REASONING_EFFORTS = {
+    "clarify": "",
+    "plan": "",
+    "implement": "",
+}
+
 
 # Fresh-install / deleted-file fallback for load_config() below. Mirrors the shape
 # documented in docs/config-json.md — every key a brand-new config.json should have,
 # with no workspace linked yet (empty root) and no run history.
 DEFAULT_CONFIG = {
     "models": dict(DEFAULT_MODELS),
+    "backends": dict(DEFAULT_BACKENDS),
+    "reasoning_efforts": dict(DEFAULT_REASONING_EFFORTS),
     "features_per_session": 3,
     "max_session_run": 30,
     "max_clarification_run": 20,
@@ -338,3 +362,66 @@ def get_models(config: dict) -> dict:
 def get_model(config: dict, stage: str) -> str:
     """Return the model id configured for a stage (clarify | plan | implement)."""
     return get_models(config).get(stage, DEFAULT_MODELS.get(stage, "claude-sonnet-5"))
+
+
+def get_backends(config: dict) -> dict:
+    """Return the per-stage backends merged over DEFAULT_BACKENDS (missing stage → default)."""
+    backends = dict(DEFAULT_BACKENDS)
+    backends.update(config.get("backends", {}))
+    return backends
+
+
+def get_backend(config: dict, stage: str) -> str:
+    """Return the CLI backend configured for a stage (clarify | plan | implement):
+    "claude" | "copilot" | "codex"."""
+    return get_backends(config).get(stage, DEFAULT_BACKENDS.get(stage, "claude"))
+
+
+def get_reasoning_efforts(config: dict) -> dict:
+    """Return the per-stage reasoning efforts merged over DEFAULT_REASONING_EFFORTS
+    (missing stage → default, i.e. "" / no override)."""
+    efforts = dict(DEFAULT_REASONING_EFFORTS)
+    efforts.update(config.get("reasoning_efforts", {}))
+    return efforts
+
+
+def get_reasoning_effort(config: dict, stage: str) -> str:
+    """Return the reasoning effort configured for a stage (clarify | plan | implement).
+    "" means no override — the backend CLI/model's own default is used."""
+    return get_reasoning_efforts(config).get(stage, DEFAULT_REASONING_EFFORTS.get(stage, ""))
+
+
+# Field names used to persist a resumable session id on an epic entry, per kind. Kept
+# separate from the per-stage "implement" model/backend because QA sessions are resumed
+# independently of the main implementation session (see tempa_session.run_qa_session).
+_SESSION_ID_FIELDS = {
+    "implement": ("session_id", "session_backend", "claude_session_id"),
+    "qa": ("qa_session_id", "qa_session_backend", None),
+}
+
+
+def get_epic_session_id(epic: dict, current_backend: str, kind: str = "implement") -> str | None:
+    """Return the resumable session id stored on `epic` for `kind` ("implement" | "qa"),
+    but only if it was captured under `current_backend` — a session id from one CLI is
+    meaningless to another, so a stage's backend switching mid-epic starts fresh instead
+    of feeding a foreign id to --resume. Configs written before multi-backend support have
+    no `*_backend` companion field (and, for "implement", used the legacy `claude_session_id`
+    key instead of `session_id`); those are treated as backend "claude", Tempa's only
+    backend at the time they were written."""
+    id_key, backend_key, legacy_key = _SESSION_ID_FIELDS[kind]
+    sid = epic.get(id_key) or (epic.get(legacy_key) if legacy_key else None)
+    if not sid:
+        return None
+    stored_backend = epic.get(backend_key, "claude")
+    return sid if stored_backend == current_backend else None
+
+
+def set_epic_session_id(epic: dict, backend: str, session_id: str, kind: str = "implement") -> None:
+    """Persist a resumable session id + the backend it was captured under onto `epic`
+    (mutates in place — caller is responsible for saving config). Drops the legacy
+    `claude_session_id` key for "implement" so it can't be misread as still current."""
+    id_key, backend_key, legacy_key = _SESSION_ID_FIELDS[kind]
+    epic[id_key] = session_id
+    epic[backend_key] = backend
+    if legacy_key:
+        epic.pop(legacy_key, None)

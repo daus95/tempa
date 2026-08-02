@@ -1,4 +1,4 @@
-# Tempa — Claude Automation Harness
+# Tempa — Agentic Coding Automation Harness
 
 [![CI](https://github.com/daus95/tempa/actions/workflows/tests.yml/badge.svg)](https://github.com/daus95/tempa/actions/workflows/tests.yml)
 [![Release](https://img.shields.io/github/v/release/daus95/tempa?include_prereleases&label=release)](https://github.com/daus95/tempa/releases)
@@ -9,15 +9,16 @@
 
 Turning a spec into working software usually means endless manual back-and-forth:
 clarifying vague requirements, breaking the work into a plan, implementing it feature by
-feature, and catching bugs before they pile up — one `claude` session at a time, babysat
+feature, and catching bugs before they pile up — one agent session at a time, babysat
 from start to finish.
 
-**Tempa automates that entire loop.** It drives the **Claude CLI** repeatedly and
+**Tempa automates that entire loop.** It drives an agentic coding CLI — **Claude Code**,
+**GitHub Copilot CLI**, or **OpenAI Codex CLI**, your pick per stage — repeatedly and
 unattended: clarifying your PRD until nothing critical is left ambiguous, drafting a plan
 (epic → feature → task), implementing it, and running QA — start it once, walk away, and
-come back to real progress instead of a blank terminal. It runs on your existing Claude
-subscription via the `claude` CLI login you already have — no separate per-token API
-billing to provision or watch.
+come back to real progress instead of a blank terminal. It runs on whichever CLI's login
+you already have (Claude, GitHub Copilot, or ChatGPT/OpenAI) — no separate per-token API
+billing to provision or watch. See [Choosing a CLI Backend](#choosing-a-cli-backend) below.
 
 Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
@@ -32,15 +33,17 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 
 1. [Quick Start](#quick-start)
 2. [Setup (One-Time Only)](#setup-one-time-only)
-3. [Dashboard (Recommended)](#dashboard-recommended)
-4. [Command Line Interface (CLI)](#command-line-interface-cli)
-5. [Further Reference](#further-reference)
+3. [Choosing a CLI Backend](#choosing-a-cli-backend)
+4. [Dashboard (Recommended)](#dashboard-recommended)
+5. [Command Line Interface (CLI)](#command-line-interface-cli)
+6. [Further Reference](#further-reference)
 
 ---
 
 ## Quick Start
 
-> Already have Python 3 and an authenticated `claude` CLI installed? This is the fast path.
+> Already have Python 3 and an authenticated backend CLI installed (Claude Code, GitHub
+> Copilot CLI, or OpenAI Codex CLI — Claude Code is the default)? This is the fast path.
 > Missing one of those, or want the full explanation of each step? See
 > [Setup (One-Time Only)](#setup-one-time-only) below instead.
 
@@ -80,10 +83,14 @@ workflow (`tempa init`, `tempa clarify`, `tempa implement`).
 ### Step 1 — Prerequisites
 
 1. **Python 3** installed (`py` / `python` on PATH).
-2. **Claude CLI** installed and on PATH (`claude` or `claude.cmd`).
-   The harness calls it with `--dangerously-skip-permissions` (fully automated mode, no
-   human confirmation).
-3. Already logged in / authenticated with Claude.
+2. **At least one agentic coding CLI** installed and on PATH — Tempa defaults every stage to
+   **Claude Code** (`claude`), but you can point any stage at **GitHub Copilot CLI**
+   (`copilot`) or **OpenAI Codex CLI** (`codex`) instead, or mix them. See
+   [Choosing a CLI Backend](#choosing-a-cli-backend) below. The harness always runs its
+   chosen CLI in fully automated mode (no human confirmation) — Claude Code via
+   `--dangerously-skip-permissions`, Copilot via `--allow-all-tools`, Codex via
+   `--dangerously-bypass-approvals-and-sandbox`.
+3. Already logged in / authenticated with whichever of those CLI(s) you plan to use.
 
 ---
 
@@ -121,8 +128,8 @@ tempa <command>            # PATH set (any OS)
 ./tempa <command>          # macOS/Linux, without PATH
 ```
 
-Quickly check everything is ready before moving to the next step — it verifies the Claude CLI can
-Write/Read/Delete a file:
+Quickly check everything is ready before moving to the next step — it verifies the CLI backend
+configured for the `implement` stage (Claude Code by default) can Write/Read/Delete a file:
 
 ```bash
 tempa test                 # PATH set (any OS)
@@ -145,6 +152,48 @@ running `tempa dashboard`:
 Each one does exactly what `tempa dashboard` does and opens your browser to it. **Keep the
 window that opens alongside your browser open** — that's the server; closing it stops the
 dashboard. If Python isn't installed, the window explains that and waits so you can read it.
+
+---
+
+## Choosing a CLI Backend
+
+Tempa doesn't run its own model — it drives an existing agentic coding CLI on your machine.
+Three are supported, and every stage (Clarification / Planning / Implementation) picks its
+own **independently** — so, for example, Clarification can run on Claude Code while
+Implementation runs on OpenAI Codex CLI:
+
+| Backend | CLI | Auth |
+|---|---|---|
+| **Claude Code** (default) | `claude` | Your Claude subscription login (`claude` → `/login`) |
+| **GitHub Copilot CLI** | `copilot` | Your GitHub Copilot login (`copilot login`) |
+| **OpenAI Codex CLI** | `codex` | Your ChatGPT/OpenAI login (`codex login`) |
+
+Whichever you use must already be installed, on `PATH`, and logged in yourself — Tempa only
+invokes it, it never manages credentials for you.
+
+Set it per stage from the dashboard's **Settings** page (a dropdown next to each stage's
+model field), or from the CLI:
+
+```bash
+tempa set-backend --clarify claude --plan copilot --implement codex
+tempa show-backends
+```
+
+Each backend has its own model catalog, so changing a stage's backend usually means updating
+that stage's model too (the dashboard's model field suggests options based on the backend
+picked, but always accepts free text). Each stage also has an optional **Reasoning Effort**
+setting, right next to the model field — its valid choices depend on the backend *and* model
+picked (Codex varies per model; Claude/Copilot are uniform per backend), and Tempa rejects a
+combination that CLI doesn't actually support:
+
+```bash
+tempa set-effort --implement high
+tempa show-efforts
+```
+
+Full reference, including what happens to a resumed/interrupted session's history when a
+stage's backend changes mid-epic and the exact reasoning-effort levels per backend/model:
+see [docs/ai-models.md](docs/ai-models.md).
 
 ---
 
@@ -205,9 +254,11 @@ Above it sits one optional card you can ignore entirely:
 
 ### Architecture Principles (optional)
 
-Tempa runs your project through several separate Claude sessions — clarification, planning,
-implementation, QA, verification — and none of them remembers the previous one. **Architecture
-Principles** is where you write the rules that should hold across all of them: which database you
+Tempa runs your project through several separate agent sessions — clarification, planning,
+implementation, QA, verification — potentially on different CLI backends (see
+[Choosing a CLI Backend](#choosing-a-cli-backend)) — and none of them remembers the previous
+one. **Architecture Principles** is where you write the rules that should hold across all of
+them: which database you
 use, whether an ORM is allowed, how API errors are shaped, what has to be true before code counts
 as done. Tempa prepends them to *every* prompt it sends, so the same rules stay in force
 everywhere instead of each session falling back on generic defaults.
@@ -296,7 +347,7 @@ clean, which can mean several rounds depending on how much the PRD still needs r
 Expand the **Clarification log** panel to watch it live (running status plus streamed
 console output) so you can tell it's still working rather than stuck. Unlike
 **Stop Implementation** in Step 3 below, there's no way to cancel a Finalize run mid-way —
-leave the dashboard open until it finishes on its own or hits a Claude usage limit.
+leave the dashboard open until it finishes on its own or hits a usage limit.
 
 ### Step 3 — Start Implementation
 
@@ -469,7 +520,8 @@ recovering from problems, manual verification): see
   [docs/writing-a-spec.md](docs/writing-a-spec.md)
 - **Architecture Principles** — project-wide rules injected into every stage, how to write them:
   [docs/architecture-principles.md](docs/architecture-principles.md)
-- **AI Model per Stage** — why it's differentiated per stage, default table, how to change it:
+- **AI Backend & Model per Stage** — Claude Code / Copilot CLI / Codex CLI, why both are
+  differentiated per stage, default table, how to change them:
   [docs/ai-models.md](docs/ai-models.md)
 - **Command Reference** — full list of every command:
   [docs/command-reference.md](docs/command-reference.md)

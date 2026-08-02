@@ -7,7 +7,7 @@ STEP 1 — RE-READ:
 
 STEP 2 — CHECK QUALITY:
 a. COVERAGE — is there ANY new specification in the PRD (${sources.prd}) that was MISSED (not covered by any epic/feature)? Compare the PRD vs. the current system documentation (${sources.docs}) / code (${sources.apps}) vs. the new epics. Add epics/features if anything was missed.
-b. FEATURE SIZE — is any feature too LARGE for a single Claude session (< 300K tokens)? If so, SPLIT it into multiple features and adjust the numbering + config.json accordingly.
+b. FEATURE SIZE — is any feature too LARGE for a single agent session (< 300K tokens)? If so, SPLIT it into multiple features and adjust the numbering + config.json accordingly.
 c. TESTABILITY — does every feature have a clear way to test it (CURL/CLI/Playwright)? If not, ADD one.
 d. PARALLELISM — are the task ordering & parallelism notes sensible and consistent with their dependencies?
 e. CONSISTENCY — epic/feature/task numbering doesn't clash with existing ones; file format follows the existing epic template.

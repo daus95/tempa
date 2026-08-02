@@ -14,6 +14,8 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `workspace` | Working folder (root + docs/adr/specs/apps/infra/archive) — see [folders-and-paths.md](folders-and-paths.md) |
 | `sources` | Input/output paths for each command, derived from `workspace` by default (optional per-key override) — see [folders-and-paths.md](folders-and-paths.md) |
 | `models` | AI model per stage (`clarify`/`plan`/`implement`) — see [ai-models.md](ai-models.md) |
+| `backends` | CLI backend per stage (`claude`/`copilot`/`codex`) — see [ai-models.md](ai-models.md) |
+| `reasoning_efforts` | Reasoning effort per stage (`""` = no override); must be supported by that stage's backend+model — see [ai-models.md](ai-models.md) |
 | `features_per_session` | Max features per session (`null` = no limit) |
 | `max_session_run` | Max sessions per epic (anti-loop safeguard) |
 | `max_clarification_run` | Max rounds for the `clarify --finalize` loop |
@@ -21,7 +23,7 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `last_clarification_round` | Round number of the most recent evaluate pass (manual `clarify` or one iteration of `clarify --finalize`) — shown on the dashboard as "Round N of `max_clarification_run`" |
 | `last_auto_answer` | Number of findings answered by the last `clarify --auto-answer` |
 | `allow_finalize_with_critical` | Dashboard Settings toggle (default `false`). When `true`, "Finalized Clarification" is allowed to start even while critical findings remain open, letting its automated evaluate/apply loop attempt to resolve them unsupervised. Never relaxes the separate Start Implementation gate, which always requires zero critical and zero major findings |
-| `epic` | Array of state for every epic (status, features, QA, session_id, etc.) |
+| `epic` | Array of state for every epic (status, features, QA, session_id, etc.). Each entry's resumable session ids are tagged with the backend that produced them (`session_id`/`session_backend` for implement, `qa_session_id`/`qa_session_backend` for QA) — a stage's backend switching mid-epic starts fresh instead of resuming a foreign CLI's session id. Configs from before multi-backend support (bare `claude_session_id`, no `*_backend` companion) are treated as backend `claude` |
 
 Prompt templates are **no longer** in config.json — see [prompt-templates.md](prompt-templates.md).
 Architecture principles aren't in config.json either: they live in

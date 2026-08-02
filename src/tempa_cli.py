@@ -2,9 +2,11 @@
 
 Thin dispatch layer: parse the command line, show help, and route each subcommand to its
 handler in the tempa_* modules. The actual work lives in tempa_config (paths + config I/O),
-tempa_logging (runner state + logging), tempa_prompts (prompt construction), tempa_session
-(the Claude session engine), tempa_implement (the implement loop), tempa_clarify (clarify),
-tempa_maintenance (clear/reset), and tempa_commands (workspace/model/status/spec/verify/test).
+tempa_logging (runner state + logging), tempa_prompts (prompt construction), tempa_backend
+(per-CLI backend adapters: Claude Code / GitHub Copilot CLI / OpenAI Codex CLI), tempa_session
+(the agent-runner session engine, driven by tempa_backend), tempa_implement (the implement
+loop), tempa_clarify (clarify), tempa_maintenance (clear/reset), and tempa_commands
+(workspace/model/backend/status/spec/verify/test).
 
 Imported and invoked (via run()) by the root tempa.py launcher, which puts this src/ folder
 on sys.path so the sibling tempa_*/dashboard_* modules import by top-level name. That keeps
@@ -24,6 +26,8 @@ from tempa_clarify import (
     run_clarify_once,
 )
 from tempa_commands import (
+    print_backends,
+    print_efforts,
     print_models,
     print_principles,
     print_status,
@@ -34,10 +38,20 @@ from tempa_commands import (
     run_spec_show,
     run_test,
     run_verify,
+    set_backends,
+    set_efforts,
     set_models,
     set_working_folders,
 )
-from tempa_config import POLL_INTERVAL_SEC, WORKING_DIR, get_config_path, get_qa_dir, load_config
+from tempa_config import (
+    POLL_INTERVAL_SEC,
+    WORKING_DIR,
+    get_backend,
+    get_config_path,
+    get_epic_session_id,
+    get_qa_dir,
+    load_config,
+)
 from tempa_implement import main
 from tempa_maintenance import (
     _reset_failed_epics,
@@ -82,11 +96,18 @@ USAGE
   tempa close-folder         Detach the active workspace (its config/logs/qa/specs stay put in
                                   <root>/.tempa/, untouched — reopen it later with `init` to resume)
   tempa set-model [--clarify m] [--plan m] [--implement m]
-                                  Set the AI model per stage (alias: opus-5, sonnet-5, ...)
+                                  Set the AI model per stage (alias: opus-5, sonnet-5, ... — claude only)
   tempa show-models          Show the AI model per stage
+  tempa set-backend [--clarify b] [--plan b] [--implement b]
+                                  Set the CLI backend per stage: claude | copilot | codex
+  tempa show-backends        Show the CLI backend per stage
+  tempa set-effort [--clarify e] [--plan e] [--implement e]
+                                  Set the reasoning effort per stage (must be supported by that
+                                  stage's backend+model; "" clears it back to the CLI/model default)
+  tempa show-efforts         Show the reasoning effort per stage
   tempa show-principles      Show the architecture principles applied to every stage's prompt
                                   (optional; set them in the dashboard's Architecture Principles page)
-  tempa test                 Permission test (verifies the claude CLI runs)
+  tempa test                 Permission test (verifies the implement stage's backend CLI runs)
   tempa --help               Show this help
 
   -- Create Spec & Clarification --
@@ -125,7 +146,7 @@ USAGE
   tempa status               Show a progress summary of all sessions
 
 GLOBAL FLAGS
-  --show-prompt                   Show the prompt sent to Claude on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
+  --show-prompt                   Show the prompt sent to the backend CLI on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
 
 CONFIG OPTIONS (config.json)
   features_per_session            Max features per session (null = no limit)
@@ -152,6 +173,12 @@ CONFIG OPTIONS (config.json)
   models.clarify                  AI model for clarify (default: claude-opus-5)
   models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
+  backends.clarify                CLI backend for clarify: claude | copilot | codex (default: claude)
+  backends.plan                   CLI backend for the plan stage, run via implement (default: claude)
+  backends.implement              CLI backend for implement/QA/verify (default: claude)
+  reasoning_efforts.clarify       Reasoning effort for clarify ("" = backend/model default)
+  reasoning_efforts.plan          Reasoning effort for the plan stage, run via implement
+  reasoning_efforts.implement     Reasoning effort for implement/QA/verify
 
 PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in config.json)
   src/prompt/implementation.md        New implementation prompt
@@ -172,7 +199,7 @@ PROMPT TEMPLATES (src/prompt/ folder, one .md file per prompt — no longer in c
 SESSION STATUS
   pending        Not started yet
   on_progress    Currently running
-  done           Done (set by Claude)
+  done           Done (set by the agent)
   require_fixing Already implemented but has QA findings — will be fixed automatically
   failed         Error — fix it then run implement --reset-failed
 
@@ -188,8 +215,9 @@ PROGRESS ({done}/{total} epics done)""")
         total_f = on_progress.get("total_features", 0)
         completed_f = on_progress.get("completed_features", 0)
         progress_str = f"{completed_f}/{total_f}" if total_f else "?"
-        sid = on_progress.get("claude_session_id", "-")
-        print(f"  IN PROGRESS : {label} ({progress_str} features) — session_id: {sid}")
+        backend = get_backend(config, "implement")
+        sid = get_epic_session_id(on_progress, backend, kind="implement") or "-"
+        print(f"  IN PROGRESS : {label} ({progress_str} features) — backend: {backend} — session_id: {sid}")
     if failed:
         for s in failed:
             print(f"  FAILED      : {s.get('epic_name', '?')}")
@@ -225,6 +253,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--implement")
 
     sub.add_parser("show-models", parents=[common], add_help=False)
+
+    p = sub.add_parser("set-backend", parents=[common], add_help=False)
+    p.add_argument("--clarify")
+    p.add_argument("--plan")
+    p.add_argument("--implement")
+
+    sub.add_parser("show-backends", parents=[common], add_help=False)
+
+    p = sub.add_parser("set-effort", parents=[common], add_help=False)
+    p.add_argument("--clarify")
+    p.add_argument("--plan")
+    p.add_argument("--implement")
+
+    sub.add_parser("show-efforts", parents=[common], add_help=False)
     sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
@@ -329,6 +371,14 @@ def run() -> None:
         set_models(cli_args)
     elif cli_args.command == "show-models":
         print_models()
+    elif cli_args.command == "set-backend":
+        set_backends(cli_args)
+    elif cli_args.command == "show-backends":
+        print_backends()
+    elif cli_args.command == "set-effort":
+        set_efforts(cli_args)
+    elif cli_args.command == "show-efforts":
+        print_efforts()
     elif cli_args.command == "show-principles":
         print_principles()
     elif cli_args.command == "test":

@@ -16,7 +16,7 @@ Lay out epics/features/tasks for ALL new specifications in the PRD (${sources.pr
 
 STEP 3 — LAY OUT EPIC / FEATURE / TASK:
 - EPIC = a body of work carried out SEQUENTIALLY. Continue numbering from the HIGHEST existing epic number (check both the epics folder AND config.json). E.g. if the highest is EPIC-21 → the new epic starts at EPIC-22, etc.
-- FEATURE = a body of work that can be completed within ONE Claude session (roughly < 300K tokens). Features MUST be small enough; split them if too large. Every feature MUST be TESTABLE via CURL / CLI / Playwright so that if it doesn't match the spec it can be fixed — WRITE DOWN how to test it. Id format FEAT-NN-XX.
+- FEATURE = a body of work that can be completed within ONE agent session (roughly < 300K tokens). Features MUST be small enough; split them if too large. Every feature MUST be TESTABLE via CURL / CLI / Playwright so that if it doesn't match the spec it can be fixed — WRITE DOWN how to test it. Id format FEAT-NN-XX.
 - TASK = a concrete breakdown of work within a feature. Id format TASK-NN-XX-YY. For each feature, CONSIDER the task execution order AND whether tasks can be done in PARALLEL (subagents) or must be SEQUENTIAL — write the parallelism/dependency notes explicitly.
 
 STEP 4 — WRITE FILES:
