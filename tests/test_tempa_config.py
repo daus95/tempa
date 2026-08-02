@@ -5,6 +5,7 @@ autouse `isolate_tempa_paths` fixture in conftest.py."""
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -455,3 +456,37 @@ def test_path_getters_resolve_under_tempa_dir(tmp_path, isolate_tempa_paths, wor
     assert tempa_config.get_qa_dir() == base / ".tempa" / "qa"
     assert tempa_config.get_verify_dir() == base / ".tempa" / "verify"
     assert tempa_config.get_principles_path() == base / ".tempa" / "architecture-principles.md"
+
+
+# ---------------------------------------------------------------------------
+# workspace_is_writable
+# ---------------------------------------------------------------------------
+
+def test_workspace_is_writable_empty_root_returns_false():
+    assert tempa_config.workspace_is_writable("") is False
+
+
+def test_workspace_is_writable_nonexistent_root_returns_false(tmp_path):
+    assert tempa_config.workspace_is_writable(str(tmp_path / "does-not-exist")) is False
+
+
+def test_workspace_is_writable_real_writable_dir_returns_true(tmp_path):
+    assert tempa_config.workspace_is_writable(str(tmp_path)) is True
+
+
+def test_workspace_is_writable_leaves_no_probe_file_behind(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    tempa_config.workspace_is_writable(str(root))
+    assert list(root.iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod-based read-only dirs aren't reliable on Windows")
+def test_workspace_is_writable_read_only_dir_returns_false(tmp_path):
+    root = tmp_path / "readonly"
+    root.mkdir()
+    root.chmod(0o500)
+    try:
+        assert tempa_config.workspace_is_writable(str(root)) is False
+    finally:
+        root.chmod(0o700)  # restore so tmp_path cleanup can remove it

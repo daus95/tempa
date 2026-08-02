@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI backend readiness** — the Home page's workspace info area and the Settings page's
+  AI Backend & Model section now show, per CLI backend (Claude Code, GitHub Copilot CLI,
+  OpenAI Codex CLI), whether it's ready to use for the active workspace: installed/on PATH
+  and able to write to the workspace folder. Not-ready backends are also flagged inline in
+  each stage's Backend dropdown. Settings has a **Detect CLI Backends** button to re-check
+  on demand (e.g. right after installing or logging into a CLI) without reloading the form.
+
 ## [0.3.0] - 2026-08-02
 
 ### Added

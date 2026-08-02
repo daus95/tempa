@@ -284,3 +284,34 @@ def test_resolve_exe_uses_shutil_which_over_exe_names(monkeypatch):
 def test_resolve_exe_not_found_returns_none(monkeypatch):
     monkeypatch.setattr(tb.shutil, "which", lambda name: None)
     assert tb.resolve_exe(tb.CODEX) is None
+
+
+# ---------------------------------------------------------------------------
+# get_backend_status
+# ---------------------------------------------------------------------------
+
+def test_get_backend_status_all_installed_and_writable(monkeypatch):
+    monkeypatch.setattr(tb.shutil, "which", lambda name: f"/usr/bin/{name}")
+    status = tb.get_backend_status(workspace_writable=True)
+    assert set(status) == {"claude", "copilot", "codex"}
+    for name, backend in tb.BACKENDS.items():
+        assert status[name] == {
+            "label": backend.label, "installed": True, "writable": True, "ready": True,
+        }
+
+
+def test_get_backend_status_not_installed_is_never_ready_even_if_writable(monkeypatch):
+    monkeypatch.setattr(tb.shutil, "which", lambda name: None)
+    status = tb.get_backend_status(workspace_writable=True)
+    for name in tb.BACKENDS:
+        assert status[name]["installed"] is False
+        assert status[name]["ready"] is False
+
+
+def test_get_backend_status_not_writable_is_never_ready_even_if_installed(monkeypatch):
+    monkeypatch.setattr(tb.shutil, "which", lambda name: f"/usr/bin/{name}")
+    status = tb.get_backend_status(workspace_writable=False)
+    for name in tb.BACKENDS:
+        assert status[name]["installed"] is True
+        assert status[name]["writable"] is False
+        assert status[name]["ready"] is False

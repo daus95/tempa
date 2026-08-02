@@ -44,11 +44,11 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `tempa_cli.py` | Argument parsing and dispatch only. No workflow logic lives here. |
-| `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution. The one module every other module can depend on — stdlib-only, imports nothing local. |
+| `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution, plus `workspace_is_writable()` (see [cli-availability.md](cli-availability.md)). The one module every other module can depend on — stdlib-only, imports nothing local. |
 | `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
 | `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
 | `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too. |
-| `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, and each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`). |
+| `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`), and per-backend readiness (`get_backend_status()` — see [cli-availability.md](cli-availability.md)). |
 | `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
 | `tempa_implement.py` | The implement poll loop and scheduler (`check_and_run`): decides what to run next (resume QA, resume an in-progress epic, implement the next pending epic). |
 | `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
@@ -59,7 +59,7 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `dashboard_ui.py` | `run_dashboard()` — starts the `HTTPServer`, wires the handler and initial page render together. The dashboard's own entry point. |
-| `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
+| `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`), including `/api/backends/status` (see [cli-availability.md](cli-availability.md)). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
 | `dashboard_assets.py` | Reads `assets/dashboard.{html,css,js}` and the two guide `.html` files from disk once (`lru_cache`) and inlines CSS/JS into a self-contained document — no external requests from the page. |
 | `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
 | `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |

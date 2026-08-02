@@ -14,7 +14,7 @@ copy at `<tempa_install>/.tempa/config.json`. See
 | `workspace` | Working folder (root + docs/adr/specs/apps/infra/archive) — see [folders-and-paths.md](folders-and-paths.md) |
 | `sources` | Input/output paths for each command, derived from `workspace` by default (optional per-key override) — see [folders-and-paths.md](folders-and-paths.md) |
 | `models` | AI model per stage (`clarify`/`plan`/`implement`) — see [ai-models.md](ai-models.md) |
-| `backends` | CLI backend per stage (`claude`/`copilot`/`codex`) — see [ai-models.md](ai-models.md) |
+| `backends` | CLI backend per stage (`claude`/`copilot`/`codex`) — see [ai-models.md](ai-models.md). Whether each backend is currently *usable* (installed + workspace writable) is checked live, not stored here — see [cli-availability.md](cli-availability.md) |
 | `reasoning_efforts` | Reasoning effort per stage (`""` = no override); must be supported by that stage's backend+model — see [ai-models.md](ai-models.md) |
 | `features_per_session` | Max features per session (`null` = no limit) |
 | `max_session_run` | Max sessions per epic (anti-loop safeguard) |

@@ -25,6 +25,11 @@ Each CLI must already be installed and authenticated on your machine (`claude`/`
 manage credentials. Switching a stage's backend mid-epic starts that stage's next session
 fresh instead of trying to resume a session id captured under a different CLI.
 
+Not sure which backends are actually usable right now? The dashboard's Home and Settings
+pages show a live per-backend readiness checklist (installed on PATH + workspace folder
+writable), with a button to re-check on demand — see
+[cli-availability.md](cli-availability.md).
+
 ## Why differentiate per stage?
 
 Each stage has a different workload profile:
