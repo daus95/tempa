@@ -9,7 +9,10 @@ tempa_implement / tempa_clarify / tempa_maintenance.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +20,7 @@ from dashboard_ui import run_dashboard
 from tempa_backend import BACKENDS, get_backend_def, is_valid_reasoning_effort
 from tempa_config import (
     DEFAULT_WORKSPACE,
+    SCRIPT_DIR,
     WORKING_DIR,
     WORKSPACE_LABELS,
     _resolve_model_alias,
@@ -525,6 +529,62 @@ def print_status() -> None:
         for feat in s.get("features", []):
             feat_icon = feat_icons.get(feat["status"], "⬜")
             print(f"   {feat_icon} {feat['id']} — {feat['name']}")
+
+
+GITHUB_RELEASES_API = "https://api.github.com/repos/daus95/tempa/releases/latest"
+GITHUB_RELEASES_PAGE = "https://github.com/daus95/tempa/releases/latest"
+GITHUB_LATEST_DOWNLOAD_URL = "https://github.com/daus95/tempa/releases/latest/download/tempa.zip"
+
+
+def get_local_version() -> str:
+    """Read the installed Tempa version from the VERSION file at the install root
+    (SCRIPT_DIR) — that file is bumped as part of cutting each GitHub release."""
+    try:
+        return (SCRIPT_DIR / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def print_version() -> None:
+    """`tempa version` — show the locally installed Tempa version."""
+    print(f"Tempa {get_local_version()}", flush=True)
+
+
+def get_latest_release_version(timeout: float = 5.0) -> str | None:
+    """Query GitHub for the tag of the latest published release. Returns None (rather than
+    raising) on any network failure or unexpected response, since this is a best-effort
+    check, not something the rest of the CLI depends on."""
+    request = urllib.request.Request(
+        GITHUB_RELEASES_API,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "tempa-cli"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    tag = data.get("tag_name", "")
+    return tag.removeprefix("v") or None
+
+
+def print_check_update() -> None:
+    """`tempa check-update` — compare the installed version against GitHub's latest release."""
+    local = get_local_version()
+    _banner("CHECK FOR UPDATES")
+    print(f"  Installed version : {local}", flush=True)
+
+    latest = get_latest_release_version()
+    if latest is None:
+        print("  Could not reach GitHub to check the latest release (offline, or "
+              "api.github.com unreachable).", flush=True)
+        print(f"  Check manually: {GITHUB_RELEASES_PAGE}", flush=True)
+        return
+
+    print(f"  Latest release    : {latest}", flush=True)
+    if local != "unknown" and local == latest:
+        print("  You're up to date.", flush=True)
+    else:
+        print(f"  Update available — download: {GITHUB_LATEST_DOWNLOAD_URL}", flush=True)
 
 
 def run_spec_show() -> None:

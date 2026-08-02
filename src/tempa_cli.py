@@ -27,10 +27,12 @@ from tempa_clarify import (
 )
 from tempa_commands import (
     print_backends,
+    print_check_update,
     print_efforts,
     print_models,
     print_principles,
     print_status,
+    print_version,
     print_workspace,
     run_close_folder,
     run_dashboard_command,
@@ -144,6 +146,9 @@ USAGE
   tempa clear                Run implement --clear + implement --clear-plan + clarify --clear together,
                                   behind a single confirmation (asks for confirmation; --yes to skip)
   tempa status               Show a progress summary of all sessions
+  tempa version              Show the locally installed Tempa version
+  tempa check-update         Check GitHub for the latest released version and compare it to
+                                  the installed one
 
 GLOBAL FLAGS
   --show-prompt                   Show the prompt sent to the backend CLI on the console (default: off; the prompt is always recorded to the log). Applies to every command that runs a session — pass it AFTER the subcommand, e.g. `tempa implement --show-prompt`.
@@ -270,6 +275,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
     sub.add_parser("status", parents=[common], add_help=False)
+    sub.add_parser("version", parents=[common], add_help=False)
+    sub.add_parser("check-update", parents=[common], add_help=False)
 
     sub.add_parser("dashboard", parents=[common], add_help=False)
 
@@ -383,6 +390,10 @@ def run() -> None:
         print_principles()
     elif cli_args.command == "test":
         run_test()
+    elif cli_args.command == "version":
+        print_version()
+    elif cli_args.command == "check-update":
+        print_check_update()
     elif cli_args.command == "dashboard":
         run_dashboard_command()
     elif cli_args.command == "spec":
