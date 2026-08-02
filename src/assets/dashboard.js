@@ -198,6 +198,9 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
+  settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
+  settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
+  settingsUpdateStatus = $("settingsUpdateStatus"),
   homePrinciplesBtn = $("homePrinciplesBtn"), homeStepPrinciplesStatus = $("homeStepPrinciplesStatus"),
   principlesEditor = $("principlesEditor"), principlesSaveBtn = $("principlesSaveBtn"),
   principlesSaveStatus = $("principlesSaveStatus");
@@ -1464,7 +1467,92 @@ async function renderSettings() {
   } catch (e) {
     toast("Network error loading settings.", true);
   }
+  renderUpdateStatus();
 }
+
+async function renderUpdateStatus() {
+  settingsUpdateStatus.textContent = "";
+  settingsUpdateStatus.classList.remove("err");
+  settingsUpdateCurrent.textContent = "—";
+  settingsUpdateLatest.textContent = "Checking…";
+  settingsUpdateBtn.classList.add("hidden");
+  try {
+    const res = await fetch("/api/update/status");
+    const data = await res.json();
+    if (!data.ok) {
+      settingsUpdateLatest.textContent = "";
+      settingsUpdateStatus.textContent = data.error || "Could not check for updates.";
+      settingsUpdateStatus.classList.add("err");
+      return;
+    }
+    settingsUpdateCurrent.textContent = data.current;
+    if (data.latest == null) {
+      settingsUpdateLatest.textContent = "";
+      settingsUpdateStatus.textContent = data.error || "Could not reach GitHub to check the latest release.";
+      settingsUpdateStatus.classList.add("err");
+      return;
+    }
+    if (data.updateAvailable) {
+      settingsUpdateLatest.textContent = `Update available: ${data.latest}`;
+      settingsUpdateBtn.classList.remove("hidden");
+    } else {
+      settingsUpdateLatest.textContent = "Up to date.";
+    }
+  } catch (e) {
+    settingsUpdateLatest.textContent = "";
+    settingsUpdateStatus.textContent = "Network error checking for updates.";
+    settingsUpdateStatus.classList.add("err");
+  }
+}
+
+settingsCheckUpdateBtn.addEventListener("click", async () => {
+  settingsCheckUpdateBtn.disabled = true;
+  try {
+    await renderUpdateStatus();
+  } finally {
+    settingsCheckUpdateBtn.disabled = false;
+  }
+});
+
+settingsUpdateBtn.addEventListener("click", async () => {
+  const latestLabel = settingsUpdateLatest.textContent.replace("Update available: ", "");
+  const ok = await confirmModal(
+    `This will download and install Tempa ${latestLabel} over this installation.\n` +
+    "You will need to restart the Tempa application afterward — reloading this page is not enough.",
+    { title: "Update Tempa", okLabel: "Update Now" });
+  if (!ok) return;
+  settingsUpdateBtn.disabled = true;
+  settingsCheckUpdateBtn.disabled = true;
+  settingsUpdateStatus.textContent = "Downloading and applying update…";
+  settingsUpdateStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/update/run", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      settingsUpdateStatus.textContent = data.error || "Update failed.";
+      settingsUpdateStatus.classList.add("err");
+      toast(data.error || "Update failed.", true);
+      return;
+    }
+    settingsUpdateStatus.textContent = `Updated to ${data.version}.`;
+    settingsUpdateCurrent.textContent = data.version;
+    settingsUpdateLatest.textContent = "Up to date.";
+    settingsUpdateBtn.classList.add("hidden");
+    await alertModal(
+      `Tempa has been updated to version ${data.version}. Restart the Tempa application ` +
+      "(close this dashboard and run \"tempa dashboard\" again, or restart any running " +
+      "\"tempa implement\" session) so it picks up the new code. Reloading this page is " +
+      "NOT enough — the running process still has the old code loaded in memory.",
+      { title: "Restart Required" });
+  } catch (e) {
+    settingsUpdateStatus.textContent = "Network error while updating.";
+    settingsUpdateStatus.classList.add("err");
+    toast("Network error while updating.", true);
+  } finally {
+    settingsUpdateBtn.disabled = false;
+    settingsCheckUpdateBtn.disabled = false;
+  }
+});
 
 settingsSaveBtn.addEventListener("click", async () => {
   settingsSaveBtn.disabled = true;

@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Updates card in the Settings page** — check the installed Tempa version against the
+  latest GitHub release and apply the update directly from the dashboard (mirrors
+  `tempa check-update` / `tempa update --yes`), without needing a terminal. After a
+  successful update the dashboard tells the user to restart the Tempa application, since
+  the running process keeps its old code loaded in memory until then — reloading the page
+  alone does not pick up the new version.
+
 ## [0.4.0] - 2026-08-02
 
 ### Added

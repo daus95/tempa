@@ -324,6 +324,25 @@
             </div>
           </div>
         </div>
+        <div class="settings-group">
+          <h3>Updates</h3>
+          <p class="settings-field-desc">Check whether a newer Tempa release has been published on GitHub, and update this installation in place.</p>
+          <div class="settings-update-row">
+            <div class="settings-update-info">
+              <span>Installed version: <strong id="settingsUpdateCurrent">—</strong></span>
+              <span id="settingsUpdateLatest"></span>
+            </div>
+            <div class="settings-update-actions">
+              <button type="button" class="clarify-run-btn secondary" id="settingsCheckUpdateBtn">
+                <span>🔄</span><span>Check for Updates</span>
+              </button>
+              <button type="button" class="clarify-run-btn hidden" id="settingsUpdateBtn">
+                <span>⬆️</span><span>Update Now</span>
+              </button>
+            </div>
+          </div>
+          <p class="settings-save-status" id="settingsUpdateStatus"></p>
+        </div>
         <div class="settings-actions">
           <button type="button" class="clarify-run-btn" id="settingsSaveBtn">
             <span>💾</span><span>Save Settings</span>
