@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-02
+
 ### Changed
 
 - **Documented the Settings page's Updates card** — new [docs/updates.md](docs/updates.md)
@@ -153,7 +155,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/daus95/tempa/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/daus95/tempa/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/daus95/tempa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/daus95/tempa/compare/v0.2.0...v0.3.0
