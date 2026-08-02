@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+import tempfile
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -585,6 +588,101 @@ def print_check_update() -> None:
         print("  You're up to date.", flush=True)
     else:
         print(f"  Update available — download: {GITHUB_LATEST_DOWNLOAD_URL}", flush=True)
+
+
+def _confirm_update() -> None:
+    """Ask for interactive "yes" confirmation before downloading and applying an update
+    (skippable with --yes). Exits the process if not confirmed — never returns in that case."""
+    if "--yes" in sys.argv:
+        return
+    if not sys.stdin.isatty():
+        log("Aborted — confirmation required. Run in an interactive terminal, or add --yes.")
+        sys.exit(1)
+    try:
+        answer = input('Type "yes" to download and apply this update (anything else cancels): ').strip().lower()
+    except EOFError:
+        answer = ""
+    if answer != "yes":
+        log("UPDATE CANCELLED — nothing was changed.")
+        sys.exit(0)
+
+
+def _download_release_zip(dest: Path) -> None:
+    """Download the latest release's tempa.zip asset to `dest`, printing basic progress
+    (a self-overwriting line on a real terminal, periodic lines otherwise)."""
+    request = urllib.request.Request(GITHUB_LATEST_DOWNLOAD_URL, headers={"User-Agent": "tempa-cli"})
+    is_tty = sys.stdout.isatty()
+    with urllib.request.urlopen(request, timeout=30) as response, open(dest, "wb") as out_file:
+        total = int(response.headers.get("Content-Length") or 0)
+        downloaded = 0
+        while True:
+            chunk = response.read(65536)
+            if not chunk:
+                break
+            out_file.write(chunk)
+            downloaded += len(chunk)
+            if total:
+                line = f"  Downloading... {downloaded * 100 // total}% ({downloaded // 1024} KB / {total // 1024} KB)"
+            else:
+                line = f"  Downloading... {downloaded // 1024} KB"
+            if is_tty:
+                print(f"\r{line}   ", end="", flush=True)
+            elif downloaded // 65536 % 16 == 0:
+                print(line, flush=True)
+    if is_tty:
+        print(flush=True)
+
+
+def run_update() -> None:
+    """`tempa update` — check GitHub for a newer release and, once confirmed, download and
+    apply it on top of this install. Only overwrites files that are actually part of the
+    release archive (tracked repo files); anything else already on disk — `.tempa/`,
+    `.active-workspace`, `__pycache__`, a dev checkout's `.git`, etc. — is left untouched
+    since none of those are ever included in the archive in the first place."""
+    local = get_local_version()
+    _banner("UPDATE TEMPA")
+    print(f"  Installed version : {local}", flush=True)
+    print(f"  Install location  : {SCRIPT_DIR}", flush=True)
+
+    latest = get_latest_release_version()
+    if latest is None:
+        print("  Could not reach GitHub to check the latest release (offline, or "
+              "api.github.com unreachable). Nothing was changed.", flush=True)
+        sys.exit(1)
+
+    print(f"  Latest release    : {latest}", flush=True)
+    if local != "unknown" and local == latest:
+        print("  Already up to date — nothing to do.", flush=True)
+        return
+
+    print(f"  This will download release {latest} and overwrite the matching files in "
+          f"{SCRIPT_DIR}.", flush=True)
+    _confirm_update()
+
+    with tempfile.TemporaryDirectory(prefix="tempa-update-") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        zip_path = tmp_path / "tempa.zip"
+        log(f"Downloading release {latest}...")
+        try:
+            _download_release_zip(zip_path)
+        except (urllib.error.URLError, OSError) as exc:
+            log(f"Download failed: {exc}. Nothing was changed.")
+            sys.exit(1)
+
+        extract_dir = tmp_path / "extracted"
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(extract_dir)
+
+        source_root = extract_dir / "tempa"
+        if not source_root.is_dir():
+            log("Unexpected archive layout (no 'tempa/' folder inside it) — aborting, "
+                "nothing was changed.")
+            sys.exit(1)
+
+        shutil.copytree(source_root, SCRIPT_DIR, dirs_exist_ok=True)
+
+    log(f"Updated to {latest}. Restart any running 'tempa dashboard' or 'tempa implement' "
+        "session so it picks up the new code.")
 
 
 def run_spec_show() -> None:

@@ -15,6 +15,10 @@ once the first tagged release is cut.
 - **`tempa check-update`** — checks GitHub for the latest published release and compares it
   against the installed version, printing a download link if an update is available (fails
   gracefully with a manual-check link if GitHub can't be reached).
+- **`tempa update [--yes]`** — if a newer release exists, downloads it and applies it on top
+  of the current install after an interactive confirmation (current → latest version shown
+  first; `--yes` skips the prompt). Only overwrites files actually shipped in the release
+  archive, so local-only files/folders (`.tempa/`, `.active-workspace`, etc.) are untouched.
 - **CLI backend readiness** — the Home page's workspace info area and the Settings page's
   AI Backend & Model section now show, per CLI backend (Claude Code, GitHub Copilot CLI,
   OpenAI Codex CLI), whether it's ready to use for the active workspace: installed/on PATH
