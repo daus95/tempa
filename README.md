@@ -47,7 +47,7 @@ Official repo: [github.com/daus95/tempa](https://github.com/daus95/tempa)
 > Missing one of those, or want the full explanation of each step? See
 > [Setup (One-Time Only)](#setup-one-time-only) below instead.
 
-1. **Download & extract** — [⬇ Download tempa.zip](https://github.com/daus95/tempa/releases/download/v0.3.0/tempa.zip)
+1. **Download & extract** — [⬇ Download tempa.zip](https://github.com/daus95/tempa/releases/latest/download/tempa.zip)
    to a folder **outside** your project repo. Details:
    [Setup Step 2 — Download & Install](#step-2--download--install).
 
@@ -99,7 +99,7 @@ workflow (`tempa init`, `tempa clarify`, `tempa implement`).
 Download the Tempa code as a ZIP file (no clone needed), then extract it to the folder you
 want:
 
-[⬇ Download tempa.zip](https://github.com/daus95/tempa/releases/download/v0.3.0/tempa.zip)
+[⬇ Download tempa.zip](https://github.com/daus95/tempa/releases/latest/download/tempa.zip)
 
 Put the extracted contents in a folder **separate from, and outside**, the repo you're going
 to work on — don't put it inside your repo folder, so it doesn't get committed to your git
