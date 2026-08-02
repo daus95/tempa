@@ -8,6 +8,21 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-02
+
+### Added
+
+- **Multi-CLI backend support** — each pipeline stage (Clarification, Planning,
+  Implementation) can now be driven by GitHub Copilot CLI or OpenAI Codex CLI, not just
+  Claude Code. Configurable per stage from the dashboard's Settings page (a Backend
+  dropdown next to each stage's model field) or from the CLI (`tempa set-backend`/
+  `show-backends`). Switching a stage's backend mid-epic starts its next session fresh
+  instead of trying to resume a session under a different CLI.
+- **Reasoning Effort** setting per stage, next to the model field, validated against the
+  selected backend/model before it's ever sent to the CLI — per-model for OpenAI Codex CLI
+  (whose supported levels vary by model), per-backend for Claude Code/GitHub Copilot CLI.
+  Configurable via the dashboard or `tempa set-effort`/`show-efforts`.
+
 ## [0.2.0] - 2026-08-01
 
 ### Added
