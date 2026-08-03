@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-03
+
 ### Fixed
 
 - **Fixed two stale tests in `test_dashboard_clarify_parse.py`** left over from the 0.4.3
@@ -210,7 +212,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/daus95/tempa/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/daus95/tempa/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/daus95/tempa/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/daus95/tempa/compare/v0.4.0...v0.4.1
