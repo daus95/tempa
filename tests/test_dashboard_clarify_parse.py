@@ -214,19 +214,19 @@ def test_file_severity_stats_unreadable_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _live_clarification_findings
+# _latest_evaluation_findings
 # ---------------------------------------------------------------------------
 
-def test_live_clarification_findings_sums_across_files():
+def test_latest_evaluation_findings_uses_only_the_most_recently_started_file():
     files = [
-        {"critical": {"total": 2}, "major": {"total": 1}, "minor": {"total": 0}},
-        {"critical": {"total": 1}, "major": {"total": 0}, "minor": {"total": 3}},
+        {"started_at": 100, "critical": {"total": 2}, "major": {"total": 1}, "minor": {"total": 0}},
+        {"started_at": 200, "critical": {"total": 1}, "major": {"total": 0}, "minor": {"total": 3}},
     ]
-    assert dcp._live_clarification_findings(files) == {"critical": 3, "major": 1, "minor": 3}
+    assert dcp._latest_evaluation_findings(files) == {"critical": 1, "major": 0, "minor": 3}
 
 
-def test_live_clarification_findings_empty_list():
-    assert dcp._live_clarification_findings([]) == {"critical": 0, "major": 0, "minor": 0}
+def test_latest_evaluation_findings_empty_list():
+    assert dcp._latest_evaluation_findings([]) == {"critical": 0, "major": 0, "minor": 0}
 
 
 # ---------------------------------------------------------------------------
