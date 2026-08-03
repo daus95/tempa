@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-03
+
 ### Fixed
 
 - **Finalize/implement readiness now checks only the most recent evaluation round** —
@@ -193,7 +195,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/daus95/tempa/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/daus95/tempa/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/daus95/tempa/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/daus95/tempa/compare/v0.3.0...v0.4.0
