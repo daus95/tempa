@@ -22,13 +22,15 @@ from dashboard_assets import principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
     _clarify_files_overview,
     _clarify_finalize_status,
-    _live_clarification_findings,
+    _implement_readiness_status,
+    _latest_evaluation_findings,
     file_answer_status,
     parse_file,
 )
 from dashboard_clarify_render import _render_blocks_html
 from dashboard_config import (
     _load_clarify_applied_hashes,
+    _load_clarify_file_timings,
     _load_dashboard_config,
     _resolve_source_dir,
     _workspace_can_close,
@@ -134,14 +136,15 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                        spec_guide_page().encode("utf-8"))
         elif route == "/api/tree":
             unanswered, answered = _clarify_files_overview(
-                self.server.clar_dir, _load_clarify_applied_hashes()
+                self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
             )
-            findings = _live_clarification_findings(unanswered + answered)
+            findings = _latest_evaluation_findings(unanswered + answered)
             dashboard_config = _load_dashboard_config()
             last_action = dashboard_config.get("last_clarification_action")
             round_ = dashboard_config.get("last_clarification_round") or 0
             max_round = dashboard_config.get("max_clarification_run") or 0
             allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
+            implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -150,7 +153,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
                             "finalize": _clarify_finalize_status(
-                                findings, last_action, round_, max_round, allow_finalize_with_critical)},
+                                findings, last_action, round_, max_round, allow_finalize_with_critical),
+                            "implementReadiness": _implement_readiness_status(
+                                findings, last_action is not None, implementation_requirement)},
                 "principles": {"set": bool(tempa_config.read_principles())},
                 "backends": _backend_status(),
             })
@@ -282,6 +287,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
+                "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
                 "backends_status": _backend_status(),
             },
         })
@@ -488,9 +494,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
         unanswered, answered = _clarify_files_overview(
-            self.server.clar_dir, _load_clarify_applied_hashes()
+            self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
         )
-        findings = _live_clarification_findings(unanswered + answered)
+        findings = _latest_evaluation_findings(unanswered + answered)
         dashboard_config = _load_dashboard_config()
         last_action = dashboard_config.get("last_clarification_action")
         allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
@@ -516,26 +522,33 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # Server-side gate, not just a disabled button client-side — tempa.py's
         # `implement` itself has no awareness of clarification findings and will
         # happily start regardless, so this is the only thing actually enforcing it.
-        last_action = _load_dashboard_config().get("last_clarification_action")
+        dashboard_config = _load_dashboard_config()
+        last_action = dashboard_config.get("last_clarification_action")
         if last_action is None:
             # Same "hasRun" check the finalize gate uses (_clarify_finalize_status) —
             # without it, a workspace where clarification was never run at all has zero
             # findings by simple absence of any clarification file, which would
-            # otherwise trivially satisfy the critical/major checks below.
+            # otherwise trivially satisfy every requirement level below, including the
+            # default.
             self._send_json(409, {
                 "ok": False,
                 "error": "Cannot start implementation before clarification has been run at least once.",
             })
             return
         unanswered, answered = _clarify_files_overview(
-            self.server.clar_dir, _load_clarify_applied_hashes()
+            self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
         )
-        findings = _live_clarification_findings(unanswered + answered)
-        if findings["critical"] or findings["major"]:
-            self._send_json(409, {
-                "ok": False,
-                "error": "Cannot start implementation while critical/major clarification findings remain.",
-            })
+        findings = _latest_evaluation_findings(unanswered + answered)
+        requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
+        if not _implement_readiness_status(findings, True, requirement)["ready"]:
+            # Wording matches the requirement actually configured (dashboard Settings'
+            # "Start Implementation requires") rather than always assuming the strictest
+            # ("no_critical_or_major") level.
+            if requirement == "no_critical":
+                error = "Cannot start implementation while critical clarification findings remain."
+            else:
+                error = "Cannot start implementation while critical/major clarification findings remain."
+            self._send_json(409, {"ok": False, "error": error})
             return
         if not _start_implement_run(self.server):
             self._send_json(409, {"ok": False, "error": "Implementation is already running."})
@@ -729,6 +742,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Max Clarification Runs must be a positive whole number."})
             return
         allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
+        implementation_start_requirement = payload.get("implementation_start_requirement")
+        if implementation_start_requirement not in tempa_config.IMPLEMENTATION_START_REQUIREMENTS:
+            self._send_json(400, {
+                "ok": False,
+                "error": "Start Implementation requirement must be one of: "
+                         f"{', '.join(tempa_config.IMPLEMENTATION_START_REQUIREMENTS)}.",
+            })
+            return
 
         config = tempa_config.load_config()
         config["models"] = models
@@ -738,6 +759,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["max_session_run"] = max_session_run
         config["max_clarification_run"] = max_clarification_run
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
+        config["implementation_start_requirement"] = implementation_start_requirement
         tempa_config.save_config(config)
         print("[settings] configuration saved")
         self._send_json(200, {
@@ -750,6 +772,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
+                "implementation_start_requirement": implementation_start_requirement,
                 "backends_status": _backend_status(),
             },
         })

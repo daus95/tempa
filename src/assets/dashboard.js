@@ -10,6 +10,7 @@ const INITIAL_WORKSPACE_ROOT = /*__WORKSPACE_ROOT__*/null;
 const INITIAL_WORKSPACE_CAN_CLOSE = /*__WORKSPACE_CAN_CLOSE__*/null;
 const INITIAL_CLARIFY_FINDINGS = /*__CLARIFY_FINDINGS__*/null;
 const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
+const INITIAL_IMPLEMENT_READINESS = /*__IMPLEMENT_READINESS__*/null;
 const INITIAL_PRINCIPLES_SET = /*__PRINCIPLES_SET__*/null;
 const INITIAL_BACKENDS_STATUS = /*__BACKENDS_STATUS__*/null;
 
@@ -161,7 +162,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
-  implementReadyBanner = $("implementReadyBanner"), clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
+  implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
+  clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
   clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
   clarifyLogStatus = $("clarifyLogStatus"),
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
@@ -181,7 +183,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   implTabStatusBtn = $("implTabStatusBtn"), implTabLogBtn = $("implTabLogBtn"),
   implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
   implStatusBody = $("implStatusBody"), implLogBody = $("implLogBody"),
-  modalOverlay = $("modalOverlay"), modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
+  modalOverlay = $("modalOverlay"), modalBox = $("modalBox"),
+  modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
   modalExtraBtn = $("modalExtraBtn"),
   settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
@@ -197,6 +200,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
+  settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),
+  settingsImplementRequirementWarning = $("settingsImplementRequirementWarning"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
   settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
@@ -233,6 +238,8 @@ const state = {
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
       allowFinalizeWithCritical: false },
+  implementReadiness: INITIAL_IMPLEMENT_READINESS ||
+    { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   epics: [],
@@ -254,16 +261,23 @@ function closeModal(result) {
 }
 
 function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = false, prompt = false,
-    value = "", showCancel = true, extraLabel = "" }) {
+    value = "", showCancel = true, extraLabel = "", html = false }) {
   return new Promise((resolve) => {
     modalResolve = resolve;
     modalIsPrompt = prompt;
     modalTitle.textContent = title;
-    modalMessage.innerHTML = "";
-    String(message).split("\n").forEach((line, i) => {
-      if (i > 0) modalMessage.appendChild(document.createElement("br"));
-      modalMessage.appendChild(document.createTextNode(line));
-    });
+    modalBox.classList.toggle("wide", html);
+    if (html) {
+      // Only ever called with strings this file builds itself (see
+      // clarifyRowDetailHtml) — never with unescaped user/observed input.
+      modalMessage.innerHTML = message;
+    } else {
+      modalMessage.innerHTML = "";
+      String(message).split("\n").forEach((line, i) => {
+        if (i > 0) modalMessage.appendChild(document.createElement("br"));
+        modalMessage.appendChild(document.createTextNode(line));
+      });
+    }
     modalOkBtn.textContent = okLabel;
     modalOkBtn.classList.toggle("danger", danger);
     modalCancelBtn.classList.toggle("hidden", !showCancel);
@@ -483,20 +497,21 @@ function renderHomeWorkflow() {
     }
   }
 
-  // Requiring hasRun matters because a workspace where clarification was never run has
-  // zero findings simply from having no clarification files yet, which would otherwise
-  // trivially satisfy the critical/major checks below.
-  const findingsClean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
-  const step3Locked = step2Locked || !findingsClean;
+  // See implementReadyMessage/implementBlockedMessage — mirrors the Clarification
+  // page's ready banner and the Implementation page's own gate, all driven by the same
+  // server-computed state.implementReadiness (see _implement_readiness_status in
+  // dashboard_clarify_parse.py) so the three surfaces never disagree.
+  const ir = state.implementReadiness;
+  const step3Locked = step2Locked || !ir.ready;
   homeStep3.classList.toggle("locked", step3Locked);
   homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
-    : !state.clarifyFinalize.hasRun
+    : !ir.hasRun
       ? "Run clarification first (step 2)."
-      : findingsClean
-        ? "No critical or major findings remain — ready to start implementation."
-        : `Still ${findings.critical} critical and ${findings.major} major finding(s) that must be resolved.`;
+      : ir.ready
+        ? implementReadyMessage(ir)
+        : implementBlockedMessage(ir);
 }
 
 homeSelectFolderBtn.addEventListener("click", async () => {
@@ -735,10 +750,43 @@ function renderClarifyFileRow(file) {
 // ---------------------------------------------------------------------------
 // Clarification overview (right panel shown when "Clarification" itself is selected)
 // ---------------------------------------------------------------------------
-function severityCell(counts) {
-  if (!counts || !counts.total) return "–";
-  const cls = counts.answered === counts.total ? "count-ok" : "count-pending";
-  return `<span class="${cls}">${counts.answered}/${counts.total}</span>`;
+const SEVERITY_ICON = { critical: "🔴", major: "🟠", minor: "🟡" };
+const SEVERITY_LABEL = { critical: "Critical", major: "Major", minor: "Minor" };
+
+// One icon per severity that actually has findings, each carrying a native-tooltip
+// title (e.g. "Critical: 2/2") — replaces the old separate Critical/Major/Minor
+// columns so the table has room for the Started column.
+function findingsCell(file) {
+  const parts = [];
+  for (const sev of ["critical", "major", "minor"]) {
+    const counts = file[sev];
+    if (!counts || !counts.total) continue;
+    const cls = counts.answered === counts.total ? "count-ok" : "count-pending";
+    parts.push(
+      `<span class="findings-icon" title="${SEVERITY_LABEL[sev]}: ${counts.answered}/${counts.total}">` +
+        `<span class="findings-icon-glyph">${SEVERITY_ICON[sev]}</span>` +
+        `<span class="${cls}">${counts.answered}/${counts.total}</span>` +
+      `</span>`
+    );
+  }
+  return parts.length ? parts.join(" ") : "–";
+}
+
+// dd/MM HH:mm, local time — matches the wall-clock timestamps used everywhere else in
+// the app (banners, log lines). `startedAt` is epoch seconds, falsy/missing -> "–".
+function formatClarifyStartedAt(startedAt) {
+  if (!startedAt) return "–";
+  const d = new Date(startedAt * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatClarifyDuration(seconds) {
+  if (seconds == null) return "–";
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 function statusCell(file) {
@@ -755,7 +803,7 @@ function appliedCell(file) {
 
 function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
   tbody.innerHTML = "";
-  const colspan = showApplied ? 6 : 5;
+  const colspan = showApplied ? 5 : 4;
   if (!files.length) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td colspan="${colspan}" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
@@ -765,12 +813,11 @@ function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
   for (const file of files) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${escapeHtml(file.name)}</td>` +
-      `<td>${severityCell(file.critical)}</td>` +
-      `<td>${severityCell(file.major)}</td>` +
-      `<td>${severityCell(file.minor)}</td>` +
+      `<td>${formatClarifyStartedAt(file.started_at)}</td>` +
+      `<td>${findingsCell(file)}</td>` +
       `<td>${statusCell(file)}</td>` +
       (showApplied ? `<td>${appliedCell(file)}</td>` : "");
-    tr.addEventListener("click", () => openClarifyFile(file));
+    tr.addEventListener("click", () => openClarifyRowDetail(file));
     if (showApplied && !file.applied) {
       // This file's own row also offers a one-off Apply — same underlying `tempa
       // clarify --apply` as the top Apply Answers button (it always applies every
@@ -783,6 +830,39 @@ function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
   }
 }
 
+// Clicking an Unanswered/Fully answered row shows this info dialog (file, started time,
+// per-severity findings, status, and the clarify/apply durations recorded for it —
+// see clarify_file_timings in config.json) rather than jumping straight into the
+// full answer-editing view; "Open File" inside the dialog still does that.
+function clarifyRowDetailRow(label, value) {
+  return `<div class="clarify-detail-row"><span class="clarify-detail-label">${escapeHtml(label)}</span>` +
+    `<span>${value}</span></div>`;
+}
+
+function clarifyRowDetailHtml(file) {
+  const sevRow = (label, counts) => clarifyRowDetailRow(
+    label, counts && counts.total ? `${counts.answered}/${counts.total} answered` : "None"
+  );
+  let html = "" +
+    clarifyRowDetailRow("Started", formatClarifyStartedAt(file.started_at)) +
+    sevRow("Critical", file.critical) +
+    sevRow("Major", file.major) +
+    sevRow("Minor", file.minor) +
+    clarifyRowDetailRow("Status", file.answered === file.total
+      ? "Complete" : `${file.answered}/${file.total} answered`);
+  if ("applied" in file) html += clarifyRowDetailRow("Applied", file.applied ? "Yes" : "No");
+  html += clarifyRowDetailRow("Clarification duration", formatClarifyDuration(file.clarify_seconds));
+  html += clarifyRowDetailRow("Apply duration", formatClarifyDuration(file.apply_seconds));
+  return html;
+}
+
+async function openClarifyRowDetail(file) {
+  const openFile = await confirmModal(clarifyRowDetailHtml(file), {
+    title: file.name, okLabel: "Open File", html: true,
+  });
+  if (openFile) openClarifyFile(file);
+}
+
 function renderClarifyOverview() {
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
     "No unanswered files.", false);
@@ -792,16 +872,46 @@ function renderClarifyOverview() {
   renderImplementReadyBanner();
 }
 
-// Mirrors the same "clarification has run + no critical/major findings left" gate as
-// the Home page's step 3 (see renderHomeWorkflow) — shown on the Clarification overview
-// so the user doesn't have to go back to Home to notice they can move on to
-// implementation. Requiring hasRun matters because a workspace where clarification was
-// never run has zero findings simply from having no clarification files yet — without
-// this check that would trivially look "ready".
+// Shared copy for state.implementReadiness (see _implement_readiness_status in
+// dashboard_clarify_parse.py), used by the Home page's step 3, the Clarification
+// overview's ready-for-implementation banner, and the toast shown if Start
+// Implementation is somehow clicked while blocked (client-side disabling should
+// normally prevent that, this is the fallback).
+function implementReadyMessage(ir) {
+  if (ir.requirement === "none") {
+    return "No clarification-findings requirement is configured — ready to start implementation.";
+  }
+  if (ir.requirement === "no_critical") {
+    return "No critical findings remain — ready to start implementation. Any open major/minor findings " +
+      "will carry into implementation.";
+  }
+  return "No critical or major findings remain — ready to start implementation. Minor findings will be " +
+    "resolved during implementation.";
+}
+
+function implementBlockedMessage(ir) {
+  if (ir.requirement === "no_critical") {
+    return `Still ${ir.critical} critical finding(s) that must be resolved.`;
+  }
+  return `Still ${ir.critical} critical and ${ir.major} major finding(s) that must be resolved.`;
+}
+
+function implementBlockedToast(ir) {
+  if (!ir.hasRun) return "Run clarification first.";
+  if (ir.requirement === "no_critical") return "There are still critical findings — resolve clarification first.";
+  return "There are still critical/major findings — resolve clarification first.";
+}
+
+// Mirrors the same gate as the Home page's step 3 (see renderHomeWorkflow) — shown on
+// the Clarification overview so the user doesn't have to go back to Home to notice
+// they can move on to implementation. Both are driven by the same server-computed
+// state.implementReadiness, which already accounts for "hasRun" (a workspace where
+// clarification was never run has zero findings simply from having no clarification
+// files yet — without that check this would trivially look "ready").
 function renderImplementReadyBanner() {
-  const findings = state.clarifyFindings;
-  const ready = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
-  implementReadyBanner.classList.toggle("hidden", !ready);
+  const ir = state.implementReadiness;
+  implementReadyBanner.classList.toggle("hidden", !ir.ready);
+  if (ir.ready) implementReadyBannerText.innerHTML = `<strong>✅ Ready for implementation.</strong> ${implementReadyMessage(ir)}`;
 }
 
 clarifyStartImplementBtn.addEventListener("click", async () => {
@@ -1158,30 +1268,37 @@ function renderImplementLog() {
   implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
-// The 3 preconditions gating "Start Implementation": clarification has run at least
-// once, and no critical/major clarification findings remain (server-enforced too — see
-// _handle_implement_run_start in dashboard_server.py). The hasRun check matters because
-// a workspace where clarification was never run has zero findings simply from having no
-// clarification files yet, which would otherwise trivially pass the checks below.
+// The preconditions gating "Start Implementation": clarification has run at least
+// once, plus whatever the configured requirement demands of the most recent
+// evaluation's critical/major findings (server-enforced too — see
+// _handle_implement_run_start in dashboard_server.py, and _implement_readiness_status
+// in dashboard_clarify_parse.py for the shared source of truth). A finding row is
+// shown as satisfied ("ok") both when it's actually clean and when the current
+// requirement doesn't care about that severity at all, so the checklist always
+// reflects what's actually gating the button.
 function renderImplementGate() {
-  const findings = state.clarifyFindings;
+  const ir = state.implementReadiness;
+  const requiresCritical = ir.requirement !== "none";
+  const requiresMajor = ir.requirement === "no_critical_or_major";
   renderGateChecklist(implGateList, [
-    { ok: state.clarifyFinalize.hasRun, label: "Clarification has been run at least once" },
-    { ok: findings.critical === 0,
-      label: findings.critical === 0
-        ? "No critical findings remain"
-        : `${findings.critical} critical finding(s) remain` },
-    { ok: findings.major === 0,
-      label: findings.major === 0
-        ? "No major findings remain"
-        : `${findings.major} major finding(s) remain` },
+    { ok: ir.hasRun, label: "Clarification has been run at least once" },
+    { ok: !requiresCritical || ir.critical === 0,
+      label: !requiresCritical
+        ? `${ir.critical} critical finding(s) — allowed by the current requirement`
+        : ir.critical === 0
+          ? "No critical findings remain"
+          : `${ir.critical} critical finding(s) remain` },
+    { ok: !requiresMajor || ir.major === 0,
+      label: !requiresMajor
+        ? `${ir.major} major finding(s) — allowed by the current requirement`
+        : ir.major === 0
+          ? "No major findings remain"
+          : `${ir.major} major finding(s) remain` },
   ]);
 }
 
 function updateImplementControls() {
-  const findings = state.clarifyFindings;
-  const clean = state.clarifyFinalize.hasRun && findings.critical === 0 && findings.major === 0;
-  startImplementBtn.disabled = state.implementRun.running || !clean;
+  startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
   renderImplementGate();
@@ -1214,8 +1331,7 @@ async function refreshImplementRun() {
     const wasRunning = state.implementRun.running;
     state.implementRun.running = data.running;
     updateImplementControls();
-    homeStartImplementBtn.disabled = data.running ||
-      !(state.clarifyFinalize.hasRun && state.clarifyFindings.critical === 0 && state.clarifyFindings.major === 0);
+    homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready;
     if (data.running && !state.implementRun.pollTimer) startImplementPolling();
     if (!data.running) {
       stopImplementPolling();
@@ -1234,9 +1350,8 @@ function startImplementPolling() {
 
 async function startImplementRun() {
   if (state.implementRun.running) return;
-  const findings = state.clarifyFindings;
-  if (findings.critical > 0 || findings.major > 0) {
-    toast("There are still critical/major findings — resolve clarification first.", true);
+  if (!state.implementReadiness.ready) {
+    toast(implementBlockedToast(state.implementReadiness), true);
     return;
   }
   startImplementBtn.disabled = true;
@@ -1455,6 +1570,10 @@ function fillSettingsForm(config) {
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
   settingsAllowFinalizeWithCritical.checked = !!config.allow_finalize_with_critical;
   settingsAllowFinalizeWithCriticalWarning.classList.toggle("hidden", !config.allow_finalize_with_critical);
+  const requirement = config.implementation_start_requirement || "no_critical_or_major";
+  for (const input of settingsImplementRequirementInputs) input.checked = input.value === requirement;
+  updateImplementRequirementWarning(requirement);
+  lastImplementRequirement = requirement;
 }
 
 async function renderSettings() {
@@ -1582,6 +1701,7 @@ settingsSaveBtn.addEventListener("click", async () => {
         max_session_run: settingsMaxSessionRun.value,
         max_clarification_run: settingsMaxClarificationRun.value,
         allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
+        implementation_start_requirement: selectedImplementRequirement(),
       }),
     });
     const data = await res.json();
@@ -1616,9 +1736,9 @@ settingsAllowFinalizeWithCritical.addEventListener("change", async () => {
     "issues on its own instead of requiring you to answer them by hand first. Critical findings " +
     "are the ones most likely to affect correctness, so letting automation resolve them " +
     "unsupervised carries real risk of a wrong or incomplete answer being applied to the PRD/spec " +
-    "— review its results carefully afterward. This does not relax the separate requirement " +
-    "for Start Implementation, which always needs zero critical and zero major findings regardless " +
-    "of this setting.\n\nEnable anyway? (Remember to click Save Settings to apply.)",
+    "— review its results carefully afterward. This does not relax the separate Start " +
+    "Implementation requirement, which is configured independently under \"Start Implementation\" " +
+    "below.\n\nEnable anyway? (Remember to click Save Settings to apply.)",
     { title: "Allow Finalizing With Critical Findings?", okLabel: "Enable", danger: true });
   if (!ok) {
     settingsAllowFinalizeWithCritical.checked = false;
@@ -1626,6 +1746,62 @@ settingsAllowFinalizeWithCritical.addEventListener("change", async () => {
   }
   settingsAllowFinalizeWithCriticalWarning.classList.remove("hidden");
 });
+
+// ---------------------------------------------------------------------------
+// Start Implementation requirement (Settings) — 3-way radio: the default (safest)
+// "no critical or major", a relaxed "no critical" (major findings allowed), or "none"
+// (no clarification-findings condition at all). See _implement_readiness_status in
+// dashboard_clarify_parse.py for the shared server-side definition every dashboard
+// surface (Home step 3, the Clarification ready banner, the Implementation gate, and
+// the server-side gate in _handle_implement_run_start) is driven by.
+// ---------------------------------------------------------------------------
+function selectedImplementRequirement() {
+  for (const input of settingsImplementRequirementInputs) if (input.checked) return input.value;
+  return "no_critical_or_major";
+}
+
+const IMPLEMENT_REQUIREMENT_RISK = {
+  no_critical: "Major findings are still allowed to affect implementation correctness and completeness, " +
+    "not just polish — starting with open major findings means the implementation may need rework once " +
+    "they're eventually resolved. Double-check the open major findings before proceeding.",
+  none: "Critical findings are the ones most likely to affect correctness. Starting implementation while " +
+    "critical (or major) findings are still open means the implementation may be built on ambiguous or " +
+    "conflicting requirements, and could require significant rework once those findings are resolved. Use " +
+    "this only if you're confident the open findings don't matter for what you're about to implement.",
+};
+
+function updateImplementRequirementWarning(requirement) {
+  const risk = IMPLEMENT_REQUIREMENT_RISK[requirement];
+  settingsImplementRequirementWarning.classList.toggle("hidden", !risk);
+  if (risk) settingsImplementRequirementWarning.textContent = "⚠️ " + risk;
+}
+
+// Explain the risk before letting the user actually select a relaxed option — reverts
+// to the previous selection if they back out, same pattern as "Allow finalizing with
+// critical findings" above. No confirmation needed when moving back to the default.
+let lastImplementRequirement = null;
+for (const input of settingsImplementRequirementInputs) {
+  input.addEventListener("change", async () => {
+    const value = input.value;
+    const risk = IMPLEMENT_REQUIREMENT_RISK[value];
+    if (!risk) {
+      lastImplementRequirement = value;
+      updateImplementRequirementWarning(value);
+      return;
+    }
+    const ok = await confirmModal(
+      risk + "\n\nUse this setting anyway? (Remember to click Save Settings to apply.)",
+      { title: "Relax the Start Implementation Requirement?", okLabel: "Use Anyway", danger: true });
+    if (!ok) {
+      for (const i of settingsImplementRequirementInputs) {
+        i.checked = i.value === (lastImplementRequirement || "no_critical_or_major");
+      }
+      return;
+    }
+    lastImplementRequirement = value;
+    updateImplementRequirementWarning(value);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Architecture Principles
@@ -1783,6 +1959,7 @@ async function refreshSpecTree() {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.implementReadiness = data.clarify.implementReadiness;
       state.principlesSet = !!(data.principles && data.principles.set);
       state.backendsStatus = data.backends || {};
       renderSidebar();
@@ -2053,6 +2230,7 @@ async function refreshClarifyList() {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.implementReadiness = data.clarify.implementReadiness;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
@@ -2093,6 +2271,7 @@ $("refreshBtn").addEventListener("click", async () => {
       state.workspaceCanClose = !!data.workspace.canClose;
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
+      state.implementReadiness = data.clarify.implementReadiness;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
