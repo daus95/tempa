@@ -8,6 +8,44 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Finalize/implement readiness now checks only the most recent evaluation round** —
+  previously the "Most recent evaluation still shows N critical finding(s)" check (and the
+  Start Implementation gate) summed critical/major/minor tags across every clarification
+  file ever produced, including past rounds kept as historical record with their findings
+  already resolved. Since those tags are never removed from old files, the count could
+  never return to 0 once a single critical finding had ever appeared in any round. It now
+  reads only the most-recently-started evaluation round's file.
+- **Higher-contrast critical/major/minor severity colors** — the old major badge color
+  (`#d97706`) failed WCAG AA contrast against its white badge text, and the old minor color
+  was identical to the app's own accent blue, so a minor-severity badge/border was
+  indistinguishable from an ordinary link or button. Now `#b91c1c` / `#c2410c` / `#a16207`.
+
+### Added
+
+- **"Started" column on the Clarification overview's Unanswered/Fully answered tables** —
+  shows when each file's evaluation round began (`dd/MM HH:mm`, parsed from the
+  `clarification-YYYYMMDD-HHMMSS.md` filename, falling back to file mtime), with both
+  tables now sorted most-recent-first instead of alphabetically.
+- **Merged Critical/Major/Minor columns into a single "Findings" column** with one icon per
+  severity present (🔴/🟠/🟡), each carrying a native hover tooltip (e.g. "Critical: 2/2") —
+  frees up table width for the new Started column.
+- **Clicking a Clarification overview row now opens a detail dialog** (started time,
+  per-severity findings, status, and — new — how long that file's evaluation and its most
+  recent apply pass took) instead of jumping straight into the answer-editing view; an
+  "Open File" button in the dialog still does that.
+- **Configurable "Start Implementation requires" setting** — previously Start
+  Implementation always required zero critical *and* zero major findings in the most
+  recent clarification evaluation, with no way to relax it. A new Settings control lets
+  you choose "No critical or major findings" (the previous, still-default behavior), "No
+  critical findings" (major findings may remain open), or "No condition" (clarification
+  must have run at least once, but its findings never block). The two relaxed options
+  show an inline risk warning and a confirmation prompt before they can be selected. The
+  gate is enforced both client-side (Home, Clarification, and Implementation pages) and
+  server-side (`_handle_implement_run_start`), all driven by the same
+  `implementation_start_requirement` config.json setting.
+
 ## [0.4.2] - 2026-08-02
 
 ### Changed

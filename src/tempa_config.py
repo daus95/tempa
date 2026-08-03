@@ -185,6 +185,17 @@ DEFAULT_REASONING_EFFORTS = {
     "implement": "",
 }
 
+# Valid values for config.json's "implementation_start_requirement" (the dashboard
+# Settings "Start Implementation requires" control) — how strictly Start Implementation
+# is gated on the most recent evaluation round's clarification findings:
+#   "no_critical_or_major" (default): zero critical AND zero major findings required —
+#     the original, safest behavior.
+#   "no_critical": zero critical findings required; major findings may remain open.
+#   "none": no clarification-findings condition at all (clarification must still have
+#     been run at least once — see _implement_readiness_status in
+#     dashboard_clarify_parse.py).
+IMPLEMENTATION_START_REQUIREMENTS = ("no_critical_or_major", "no_critical", "none")
+
 
 # Fresh-install / deleted-file fallback for load_config() below. Mirrors the shape
 # documented in docs/config-json.md — every key a brand-new config.json should have,
@@ -200,6 +211,7 @@ DEFAULT_CONFIG = {
     "last_clarification_round": 0,
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
+    "implementation_start_requirement": "no_critical_or_major",
     "epic": [],
     "workspace": dict(DEFAULT_WORKSPACE),
 }
@@ -410,6 +422,14 @@ def get_reasoning_effort(config: dict, stage: str) -> str:
     """Return the reasoning effort configured for a stage (clarify | plan | implement).
     "" means no override — the backend CLI/model's own default is used."""
     return get_reasoning_efforts(config).get(stage, DEFAULT_REASONING_EFFORTS.get(stage, ""))
+
+
+def get_implementation_start_requirement(config: dict) -> str:
+    """Return config.json's "implementation_start_requirement" — one of
+    IMPLEMENTATION_START_REQUIREMENTS — falling back to the default
+    ("no_critical_or_major") for a missing or invalid value."""
+    value = config.get("implementation_start_requirement")
+    return value if value in IMPLEMENTATION_START_REQUIREMENTS else "no_critical_or_major"
 
 
 # Field names used to persist a resumable session id on an epic entry, per kind. Kept

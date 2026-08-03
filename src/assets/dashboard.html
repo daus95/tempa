@@ -182,10 +182,7 @@
           </button>
         </div>
         <div class="ready-banner hidden" id="implementReadyBanner">
-          <div class="ready-banner-text">
-            <strong>✅ Ready for implementation.</strong> No critical or major findings remain —
-            minor findings will be resolved during implementation.
-          </div>
+          <div class="ready-banner-text" id="implementReadyBannerText"></div>
           <button type="button" class="clarify-run-btn" id="clarifyStartImplementBtn">
             <span>🚀</span><span>Start Implementation</span>
           </button>
@@ -197,14 +194,14 @@
         <div class="group">
           <h3>Unanswered</h3>
           <table>
-            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th></tr></thead>
+            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
             <tbody id="clarifyUnansweredTbody"></tbody>
           </table>
         </div>
         <div class="group">
           <h3>Fully answered</h3>
           <table>
-            <thead><tr><th>File</th><th>Critical</th><th>Major</th><th>Minor</th><th>Status</th><th>Applied</th></tr></thead>
+            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th><th>Applied</th></tr></thead>
             <tbody id="clarifyAnsweredTbody"></tbody>
           </table>
         </div>
@@ -315,13 +312,50 @@
               evaluate/apply loop it runs is meant for mopping up remaining major findings and confirming nothing has
               regressed, not for unsupervised critical fixes. Turning this on lets Finalized Clarification start (and
               its automated loop run) even with critical findings still open, so the automation will attempt to
-              resolve them on its own — review its answers carefully afterward. This never changes Start
-              Implementation, which always requires zero critical and zero major findings regardless of this
-              setting.</p>
+              resolve them on its own — review its answers carefully afterward. This setting only affects Finalized
+              Clarification — Start Implementation has its own separate requirement, configured independently below
+              under "Start Implementation".</p>
             <div class="settings-warning hidden" id="settingsAllowFinalizeWithCriticalWarning">
               ⚠️ Enabled — Finalized Clarification can start with critical findings still open, and its automation
               will try to resolve them unsupervised. Double-check the results before relying on them.
             </div>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h3>Start Implementation</h3>
+          <div class="settings-field">
+            <label>Start Implementation requires</label>
+            <p class="settings-field-desc">What the most recent clarification evaluation must show before Start
+              Implementation is allowed to run (clarification must have been run at least once either way).</p>
+            <div class="settings-radio-group" id="settingsImplementRequirementGroup">
+              <label class="settings-radio-row">
+                <input type="radio" name="settingsImplementRequirement" value="no_critical_or_major"
+                  id="settingsImplementReqStrict">
+                <span>
+                  <span class="settings-radio-option-label">No critical or major findings (default)</span>
+                  <span class="settings-radio-option-desc">The original, safest behavior — every critical and major
+                    finding must be resolved first.</span>
+                </span>
+              </label>
+              <label class="settings-radio-row">
+                <input type="radio" name="settingsImplementRequirement" value="no_critical"
+                  id="settingsImplementReqNoCritical">
+                <span>
+                  <span class="settings-radio-option-label">No critical findings (major findings allowed)</span>
+                  <span class="settings-radio-option-desc">Only critical findings block Start Implementation; open
+                    major findings are carried into implementation instead.</span>
+                </span>
+              </label>
+              <label class="settings-radio-row">
+                <input type="radio" name="settingsImplementRequirement" value="none" id="settingsImplementReqNone">
+                <span>
+                  <span class="settings-radio-option-label">No condition</span>
+                  <span class="settings-radio-option-desc">Start Implementation is never blocked by clarification
+                    findings, critical or major.</span>
+                </span>
+              </label>
+            </div>
+            <div class="settings-warning hidden" id="settingsImplementRequirementWarning"></div>
           </div>
         </div>
         <div class="settings-group">
@@ -386,7 +420,7 @@
   <button type="button" id="rowMenuDelete" class="danger">Delete</button>
 </div>
 <div class="modal-overlay hidden" id="modalOverlay">
-  <div class="modal-box" role="dialog" aria-modal="true">
+  <div class="modal-box" id="modalBox" role="dialog" aria-modal="true">
     <div class="modal-title" id="modalTitle"></div>
     <div class="modal-message" id="modalMessage"></div>
     <input type="text" class="modal-input hidden" id="modalInput">

@@ -36,6 +36,30 @@ from tempa_prompts import (
 from tempa_session import run_apply_clarification_session, run_clarification_session
 
 
+def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> None:
+    """Merge a per-file clarify/apply duration into config.json's
+    "clarify_file_timings" ({filename: {"clarify_seconds": ..., "apply_seconds": ...}}),
+    surfaced by the dashboard's clarification-row detail modal. `key` is
+    "clarify_seconds" (how long the evaluate session that produced the file took) or
+    "apply_seconds" (how long the apply session that most recently covered the file
+    took — apply always reads every existing clarification file, not just the one(s)
+    it changed, so every file present at apply time gets stamped). Reads config fresh
+    right before writing so a concurrent update (e.g. the agent session's own
+    last_clarification_findings write) isn't clobbered."""
+    if not filenames:
+        return
+    config = load_config()
+    timings = config.get("clarify_file_timings")
+    if not isinstance(timings, dict):
+        timings = {}
+    for f in filenames:
+        entry = dict(timings.get(f.name) or {})
+        entry[key] = round(seconds, 1)
+        timings[f.name] = entry
+    config["clarify_file_timings"] = timings
+    save_config(config)
+
+
 def _clarification_report_files(folder: Path, since: float) -> list[Path]:
     """Return .md files in `folder` last modified at/after `since` (epoch seconds) —
     i.e. the report files produced/updated by the evaluation that just ran."""
@@ -103,6 +127,7 @@ def run_clarify_once(noui: bool = False) -> None:
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     save_config(config)
     report_files = _clarification_report_files(clar_dir, start_ts)
+    _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
     _banner(f"CLARIFICATION EVALUATION RESULT — critical={critical} major={major} minor={minor}")
     if report_files:
@@ -200,7 +225,8 @@ def run_clarify_finalize() -> None:
         log("ERROR: sources.clarifications not found in config.json")
         sys.exit(1)
 
-    Path(clarifications_path).mkdir(parents=True, exist_ok=True)
+    clar_dir = Path(clarifications_path)
+    clar_dir.mkdir(parents=True, exist_ok=True)
 
     max_run = config.get("max_clarification_run", 20)
     run_number = 0
@@ -218,6 +244,7 @@ def run_clarify_finalize() -> None:
         config = load_config()
         prompt = build_clarification_prompt(config)
 
+        start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
         success = run_clarification_session(prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
@@ -236,6 +263,8 @@ def run_clarify_finalize() -> None:
         config["last_clarification_action"] = "evaluate"
         config["last_clarification_round"] = run_number
         save_config(config)
+        report_files = _clarification_report_files(clar_dir, start_ts)
+        _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
         log(f"Round #{run_number} findings: critical={critical}, major={major}, minor={minor}")
 
@@ -249,6 +278,7 @@ def run_clarify_finalize() -> None:
 
         config = load_config()
         apply_prompt = build_apply_clarification_prompt(config)
+        apply_start_ts = time.time()
         apply_success = run_apply_clarification_session(apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
         if _state.auth_error_hit:
             sys.exit(3)
@@ -262,6 +292,7 @@ def run_clarify_finalize() -> None:
         config = load_config()
         config["last_clarification_action"] = "apply"
         save_config(config)
+        _stamp_clarify_timing(_clarification_result_files(clar_dir), "apply_seconds", time.time() - apply_start_ts)
 
         log("Resolutions applied. Running re-evaluation...")
 
@@ -292,6 +323,7 @@ def _run_apply_step(config: dict) -> bool:
     process directly on an auth error or usage-limit hit, matching every other clarify
     subcommand's behavior."""
     prompt = build_apply_clarification_prompt(config)
+    apply_start_ts = time.time()
     if not run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
         if _state.auth_error_hit:
             sys.exit(3)
@@ -311,7 +343,9 @@ def _run_apply_step(config: dict) -> bool:
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
     config["last_clarification_action"] = "apply"
-    _record_clarify_applied_state(config, Path(get_sources(config).get("clarifications", "")))
+    clar_dir = Path(get_sources(config).get("clarifications", ""))
+    _record_clarify_applied_state(config, clar_dir)
+    _stamp_clarify_timing(_clarification_result_files(clar_dir), "apply_seconds", time.time() - apply_start_ts)
     return True
 
 

@@ -4,7 +4,7 @@
     --text: #1f2328; --muted: #6b7280; --accent: #2563eb; --accent-soft: #e8f0fe;
     --hover: #eef1f5; --sel: #dbe7ff; --sel-text: #16418f;
     --code-bg: #f5f6f8; --danger: #b91c1c; --ok: #15803d;
-    --critical: #dc2626; --major: #d97706; --minor: #2563eb;
+    --critical: #b91c1c; --major: #c2410c; --minor: #a16207;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -251,6 +251,9 @@
   .clarify-overview-pane .count-pending { color: var(--major); font-weight: 600; }
   .clarify-overview-pane .status-complete { color: var(--ok); font-weight: 600; }
   .clarify-overview-pane .status-pending { color: var(--major); font-weight: 600; }
+  .findings-icon { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px;
+    cursor: default; }
+  .findings-icon-glyph { font-size: 0.85rem; line-height: 1; }
 
   /* ---- clarification run (Start / Finalized buttons + log panel) ---- */
   .clarify-run-actions { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -361,6 +364,11 @@
   .settings-switch input:focus-visible + .settings-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .settings-warning { max-width: 640px; margin-top: 10px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--danger); background: var(--accent-soft); color: var(--danger); font-size: 0.85rem; }
+  .settings-radio-group { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
+  .settings-radio-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+  .settings-radio-row input[type="radio"] { flex: none; margin-top: 3px; cursor: pointer; }
+  .settings-radio-option-label { display: block; font-weight: 600; font-size: 0.92rem; }
+  .settings-radio-option-desc { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
   .principles-editor { width: 100%; min-height: 340px; resize: vertical; padding: 12px 14px;
     font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace; tab-size: 4;
     border: 1px solid var(--border-strong); border-radius: 6px;
@@ -386,8 +394,14 @@
   .modal-box { width: 420px; max-width: calc(100vw - 40px); background: var(--panel);
     border: 1px solid var(--border-strong); border-radius: 12px; padding: 22px 24px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
-  .modal-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px; }
+  .modal-box.wide { width: 480px; }
+  .modal-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px;
+    overflow-wrap: anywhere; }
   .modal-message { color: var(--text); font-size: 0.92rem; line-height: 1.6; }
+  .clarify-detail-row { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  .clarify-detail-row:last-child { border-bottom: none; }
+  .clarify-detail-label { color: var(--muted); font-weight: 600; flex: none; }
   .modal-input { width: 100%; margin-top: 14px; padding: 8px 10px; font-size: 0.92rem;
     border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg);
     color: var(--text); }

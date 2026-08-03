@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,30 @@ LABEL_RE = re.compile(r'\*\*(Where|Question|Recommendation|Your answer):\*\*')
 HEADING_RE = re.compile(r'^\s{0,3}#{1,6}\s+(.+?)\s*$', re.MULTILINE)
 
 
+FILENAME_TS_RE = re.compile(r'(\d{8})-(\d{6})')
+
+
 SEVERITY_LABELS = {"critical": "Critical", "major": "Major", "minor": "Minor"}
+
+
+def _file_started_at(path: Path) -> float:
+    """Best-effort epoch-seconds timestamp for when this clarification round
+    started: parsed from the `clarification-YYYYMMDD-HHMMSS.md` naming convention
+    (see prompt/clarification.md, which stamps the name at creation and never
+    renames it) so it stays stable even after the file is edited later — answering
+    a finding rewrites the file and bumps its mtime, which would otherwise make an
+    old round look like it just started. Falls back to the file's mtime for any
+    file that doesn't match the naming convention."""
+    m = FILENAME_TS_RE.search(path.name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").timestamp()
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 @dataclass
@@ -155,10 +179,15 @@ def file_answer_status(path: Path) -> tuple[int, int]:
     return (sum(1 for it in items if it.existing_answer), len(items))
 
 
-def _file_severity_stats(path: Path) -> dict | None:
+def _file_severity_stats(path: Path, timings: dict | None = None) -> dict | None:
     """Return per-file finding stats: name/path, an {answered,total} pair per severity
-    (critical/major/minor), and the overall answered/total. None if the file has no
-    recognized clarification items."""
+    (critical/major/minor), the overall answered/total, when the evaluation round that
+    produced this file started ("started_at", see _file_started_at), and — if present in
+    `timings` (caller's responsibility to load it, e.g. via
+    dashboard_config._load_clarify_file_timings(), keyed by filename) — how long that
+    evaluation and its most recent apply took ("clarify_seconds"/"apply_seconds", either
+    may be None if that step hasn't happened yet or predates timing instrumentation).
+    None if the file has no recognized clarification items."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
@@ -172,31 +201,43 @@ def _file_severity_stats(path: Path) -> dict | None:
         if it.existing_answer:
             by_severity[it.severity]["answered"] += 1
     answered = sum(v["answered"] for v in by_severity.values())
+    file_timing = (timings or {}).get(path.name, {})
     return {
         "name": path.name, "path": path.name,
         "critical": by_severity["critical"], "major": by_severity["major"], "minor": by_severity["minor"],
         "answered": answered, "total": len(items),
         "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "started_at": _file_started_at(path),
+        "clarify_seconds": file_timing.get("clarify_seconds"),
+        "apply_seconds": file_timing.get("apply_seconds"),
     }
 
 
-def _live_clarification_findings(files: list[dict]) -> dict:
-    """True critical/major/minor counts, computed directly from the severity tags
-    currently present across the given clarification files (as returned by
-    _clarify_files_overview) — NOT config.json's "last_clarification_findings",
-    which is the agent session's own self-reported opinion of what's "still
-    critical" and can say 0 right after an apply even though the finding's
+def _latest_evaluation_findings(files: list[dict]) -> dict:
+    """True critical/major/minor counts from ONLY the most recently started
+    evaluation round's file (by "started_at", see _file_started_at) — NOT summed
+    across every clarification file ever produced. Every past round's file is
+    deliberately kept forever as a historical record (see prompt/clarification.md)
+    and its severity tags are never removed even once answered/applied, so summing
+    across all of them would mean the count could never go back to 0 once a single
+    critical finding had ever appeared, in any round, ever — which is exactly what
+    made the finalize/implement gates get stuck reporting stale critical counts
+    long after they'd actually been resolved. "Ready to finalize"/"ready to
+    implement" only care about what the LATEST evaluation pass found.
+
+    Also NOT config.json's "last_clarification_findings", which is the agent
+    session's own self-reported opinion of what's "still critical" and can say 0
+    right after an apply even though the finding's
     <!-- clarify:item ... severity="critical" --> tag is still sitting right there
     in the file, answered but not removed (applying edits the PRD, never the
     clarification file itself — see _record_clarify_applied_state's docstring
     below). A finding counts here whether or not it's been answered: being
     answered means a resolution was proposed, not that the file stopped listing it
     as a finding."""
-    totals = {"critical": 0, "major": 0, "minor": 0}
-    for f in files:
-        for sev in totals:
-            totals[sev] += f[sev]["total"]
-    return totals
+    if not files:
+        return {"critical": 0, "major": 0, "minor": 0}
+    latest = max(files, key=lambda f: f.get("started_at", 0))
+    return {sev: latest[sev]["total"] for sev in ("critical", "major", "minor")}
 
 
 def _clarify_finalize_status(
@@ -212,9 +253,10 @@ def _clarify_finalize_status(
         enough on its own, since applying doesn't independently re-verify against
         the live PRD the way a fresh evaluate does, and doesn't touch the
         clarification files' severity tags either
-      - the clarification files currently show zero critical findings (`findings`,
-        from _live_clarification_findings — the actual tag count, not a
-        self-reported opinion) — unless `allow_finalize_with_critical` overrides
+      - the most recent evaluation round's file shows zero critical findings
+        (`findings`, from _latest_evaluation_findings — the actual tag count for
+        that one round, not a self-reported opinion and not summed across every
+        past round) — unless `allow_finalize_with_critical` overrides
         this (config.json's "allow_finalize_with_critical", the dashboard Settings
         toggle; off by default). With it on, Finalize is allowed to start with
         critical findings still open, so its automated evaluate/apply loop attempts
@@ -246,14 +288,49 @@ def _clarify_finalize_status(
     }
 
 
-def _clarify_files_overview(clar_dir: Path, applied_hashes: dict) -> tuple[list[dict], list[dict]]:
+def _implement_readiness_status(findings: dict, has_run: bool, requirement: str) -> dict:
+    """Whether "Start Implementation" is currently allowed to run, per config.json's
+    "implementation_start_requirement" (the dashboard Settings "Start Implementation
+    requires" control; one of tempa_config.IMPLEMENTATION_START_REQUIREMENTS):
+      - "no_critical_or_major" (default): zero critical AND zero major findings in the
+        most recent evaluation round — the original, safest behavior.
+      - "no_critical": zero critical findings; major findings may remain open.
+      - "none": no clarification-findings condition at all.
+
+    `has_run` always gates regardless of `requirement` (config.json's
+    "last_clarification_action" is not None) — a workspace where clarification was
+    never run has zero findings simply from having no clarification files yet, which
+    would otherwise trivially satisfy every requirement level, including the default.
+
+    This is the single source of truth shared by the server-side gate
+    (_handle_implement_run_start in dashboard_server.py) and every dashboard surface
+    that shows Start Implementation readiness (Home step 3, the Clarification
+    overview's ready-for-implementation banner, and the Implementation page's
+    readiness gate) — see /api/tree's "clarify.implementReadiness"."""
+    critical_ok = requirement == "none" or findings["critical"] == 0
+    major_ok = requirement in ("none", "no_critical") or findings["major"] == 0
+    return {
+        "hasRun": has_run,
+        "critical": findings["critical"],
+        "major": findings["major"],
+        "requirement": requirement,
+        "ready": has_run and critical_ok and major_ok,
+    }
+
+
+def _clarify_files_overview(
+    clar_dir: Path, applied_hashes: dict, timings: dict | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Every clarification result file (flat, excluding claude.md) with recognized
-    findings, split into (unanswered, fully_answered), each sorted by name. Fully
+    findings, split into (unanswered, fully_answered), each sorted by "started_at"
+    (most recently started evaluation round first — see _file_started_at). Fully
     answered files also get an "applied" bool: whether their current content (i.e.
     current answers) matches what was last applied to the PRD/spec, per
     `applied_hashes` (caller's responsibility to load it, e.g. via
     dashboard_config._load_clarify_applied_hashes()) — so the dashboard knows
-    whether an "Apply Answer(s)" action is actually needed or would be a no-op."""
+    whether an "Apply Answer(s)" action is actually needed or would be a no-op.
+    `timings` (dashboard_config._load_clarify_file_timings()) is passed straight
+    through to _file_severity_stats for the per-file clarify/apply duration."""
     unanswered: list[dict] = []
     answered: list[dict] = []
     if not clar_dir.exists():
@@ -261,7 +338,7 @@ def _clarify_files_overview(clar_dir: Path, applied_hashes: dict) -> tuple[list[
     for p in sorted(clar_dir.glob("*.md")):
         if p.name.lower() == "claude.md":
             continue
-        stats = _file_severity_stats(p)
+        stats = _file_severity_stats(p, timings)
         if stats is None:
             continue
         if stats["answered"] == stats["total"]:
@@ -269,4 +346,6 @@ def _clarify_files_overview(clar_dir: Path, applied_hashes: dict) -> tuple[list[
             answered.append(stats)
         else:
             unanswered.append(stats)
+    unanswered.sort(key=lambda f: f["started_at"], reverse=True)
+    answered.sort(key=lambda f: f["started_at"], reverse=True)
     return unanswered, answered

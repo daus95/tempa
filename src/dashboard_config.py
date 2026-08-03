@@ -28,6 +28,14 @@ def _load_clarify_applied_hashes() -> dict:
     return hashes if isinstance(hashes, dict) else {}
 
 
+def _load_clarify_file_timings() -> dict:
+    """config.json's "clarify_file_timings" — {filename: {clarify_seconds, apply_seconds}},
+    stamped by tempa_clarify.py right after the evaluate/apply session that produced or
+    last touched each clarification file."""
+    timings = _load_dashboard_config().get("clarify_file_timings")
+    return timings if isinstance(timings, dict) else {}
+
+
 def _workspace_initialized() -> bool:
     """Whether `tempa init` has ever been run — workspace.root is set once on first
     init and never cleared afterward, so it's the only reliable signal (specs/prd

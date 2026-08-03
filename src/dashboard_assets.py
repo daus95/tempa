@@ -13,7 +13,11 @@ from pathlib import Path
 
 import tempa_backend
 import tempa_config
-from dashboard_clarify_parse import _clarify_finalize_status, _live_clarification_findings
+from dashboard_clarify_parse import (
+    _clarify_finalize_status,
+    _implement_readiness_status,
+    _latest_evaluation_findings,
+)
 from dashboard_config import (
     _load_dashboard_config,
     _workspace_can_close,
@@ -65,15 +69,20 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     workspace_root_json = json.dumps(_workspace_root())
     workspace_can_close_json = json.dumps(_workspace_can_close())
     principles_set_json = json.dumps(bool(tempa_config.read_principles()))
-    live_findings = _live_clarification_findings(clarify_unanswered + clarify_answered)
-    clarify_findings_json = json.dumps(live_findings, ensure_ascii=False)
+    latest_findings = _latest_evaluation_findings(clarify_unanswered + clarify_answered)
+    clarify_findings_json = json.dumps(latest_findings, ensure_ascii=False)
     dashboard_config = _load_dashboard_config()
     last_action = dashboard_config.get("last_clarification_action")
     round_ = dashboard_config.get("last_clarification_round") or 0
     max_round = dashboard_config.get("max_clarification_run") or 0
     allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
     clarify_finalize_json = json.dumps(
-        _clarify_finalize_status(live_findings, last_action, round_, max_round, allow_finalize_with_critical),
+        _clarify_finalize_status(latest_findings, last_action, round_, max_round, allow_finalize_with_critical),
+        ensure_ascii=False,
+    )
+    implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
+    implement_readiness_json = json.dumps(
+        _implement_readiness_status(latest_findings, last_action is not None, implementation_requirement),
         ensure_ascii=False,
     )
     backends_status_json = json.dumps(
@@ -93,6 +102,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__PRINCIPLES_SET__*/null", principles_set_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
+        .replace("/*__IMPLEMENT_READINESS__*/null", implement_readiness_json)
         .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)
     )
 
