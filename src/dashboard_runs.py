@@ -12,7 +12,8 @@ import sys
 import threading
 from pathlib import Path
 
-from dashboard_config import _load_dashboard_config
+from dashboard_clarify_parse import _clarify_files_overview
+from dashboard_config import _load_clarify_applied_hashes, _load_dashboard_config
 
 
 def _epic_sessions() -> list:
@@ -20,6 +21,15 @@ def _epic_sessions() -> list:
     `tempa status` (print_status()) formats to the console."""
     epics = _load_dashboard_config().get("epic")
     return epics if isinstance(epics, list) else []
+
+
+def _unapplied_answered_count(server) -> int:
+    """How many fully-answered clarification files still don't match config.json's
+    "clarify_applied_hashes" — i.e. still need an Apply pass. Used by the apply
+    auto-chain below to keep applying rather than moving on to evaluate while any
+    ready file is still waiting."""
+    _, answered = _clarify_files_overview(server.clar_dir, _load_clarify_applied_hashes())
+    return sum(1 for f in answered if not f["applied"])
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +67,16 @@ def _start_clarify_run(server, mode: str) -> bool:
     starting anything if a run is already in progress (defense in depth alongside the
     dashboard disabling the buttons client-side).
 
-    A successful "apply" run automatically chains straight into a fresh "run" (evaluate)
-    pass — see run_once()/worker() below — since applying never re-verifies against the
-    live PRD itself, and the dashboard's finalize gate requires a fresh evaluate before
-    it'll allow "Finalized Clarification" to proceed (see _clarify_finalize_status in
-    dashboard_clarify_parse.py). Without this, users who only ever click Apply get stuck
-    unable to finalize with no clear next step."""
+    If more than one fully-answered clarification file is still waiting to be applied
+    when "apply" is requested, this keeps re-running `clarify --apply` — one file's worth
+    of backlog at a time — until every ready file is applied, INSTEAD of chaining to a
+    fresh evaluate after only the first one. Only once nothing is left to apply does it
+    chain into a fresh "run" (evaluate) pass — see run_once()/worker() below — since
+    applying never re-verifies against the live PRD itself, and the dashboard's finalize
+    gate requires a fresh evaluate before it'll allow "Finalized Clarification" to
+    proceed (see _clarify_finalize_status in dashboard_clarify_parse.py). Without this,
+    users who only ever click Apply get stuck unable to finalize with no clear next
+    step."""
     run = server.clarify_run
     with run["lock"]:
         if run["running"]:
@@ -109,14 +123,40 @@ def _start_clarify_run(server, mode: str) -> bool:
 
         returncode = run_once(_CLARIFY_RUN_ARGS[mode])
         if mode == "apply" and returncode == 0:
-            with run["lock"]:
-                run["lines"].append(
-                    "Apply finished — automatically starting a new Start Clarification "
-                    "run to refresh critical/major status..."
-                )
-                run["mode"] = "run"
-                run["progress"] = None
-            returncode = run_once(_CLARIFY_RUN_ARGS["run"])
+            remaining = _unapplied_answered_count(server)
+            while returncode == 0 and remaining > 0:
+                with run["lock"]:
+                    run["lines"].append(
+                        f"{remaining} more fully-answered clarification file(s) still "
+                        "need to be applied — running Apply Answers again before "
+                        "evaluating..."
+                    )
+                    run["progress"] = None
+                returncode = run_once(_CLARIFY_RUN_ARGS["apply"])
+                if returncode != 0:
+                    break
+                next_remaining = _unapplied_answered_count(server)
+                if next_remaining >= remaining:
+                    # Not making progress (e.g. a file apply can't resolve) — stop
+                    # looping rather than spinning forever, and evaluate with
+                    # whatever has actually been applied so far.
+                    with run["lock"]:
+                        run["lines"].append(
+                            f"Apply Answers isn't clearing the remaining "
+                            f"{next_remaining} file(s) — stopping the auto-apply loop "
+                            "and evaluating with what's been applied so far."
+                        )
+                    break
+                remaining = next_remaining
+            if returncode == 0:
+                with run["lock"]:
+                    run["lines"].append(
+                        "Apply finished — automatically starting a new Start Clarification "
+                        "run to refresh critical/major status..."
+                    )
+                    run["mode"] = "run"
+                    run["progress"] = None
+                returncode = run_once(_CLARIFY_RUN_ARGS["run"])
         with run["lock"]:
             run["running"] = False
             run["progress"] = None
