@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Apply Answers" now applies every ready clarification file before evaluating again** —
+  previously, whenever more than one fully-answered file was still waiting to be applied,
+  the dashboard chained straight into a fresh Start Clarification (evaluate) run after
+  the first successful apply, stranding the rest of the backlog until the user came back
+  and clicked Apply again for each remaining file. It now keeps re-running `clarify
+  --apply` while any ready file is still unapplied, and only starts a fresh evaluate once
+  every one of them has been applied.
+
 ## [0.4.3] - 2026-08-03
 
 ### Fixed
