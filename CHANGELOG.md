@@ -10,6 +10,11 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **Fixed two stale tests in `test_dashboard_clarify_parse.py`** left over from the 0.4.3
+  finalize/implement-readiness fix that renamed `_live_clarification_findings` (summed
+  findings across every clarification file ever produced) to `_latest_evaluation_findings`
+  (only the most-recently-started round) — the tests still called the old name and had
+  been failing on every run since.
 - **"Apply Answers" now applies every ready clarification file before evaluating again** —
   previously, whenever more than one fully-answered file was still waiting to be applied,
   the dashboard chained straight into a fresh Start Clarification (evaluate) run after
