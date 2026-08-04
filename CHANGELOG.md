@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-08-04
+
 ### Added
 
 - **A backend usage limit no longer stops `clarify`/`implement`/`verify` — they wait 30
