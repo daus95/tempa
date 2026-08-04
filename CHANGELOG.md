@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-08-05
+
 ### Added
 
 - **`clarify`/`clarify --finalize` can now skip minor findings entirely** via a new
