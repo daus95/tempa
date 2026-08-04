@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-08-04
+
 ### Added
 
 - **`clarify --finalize` now resolves any pre-existing clarification backlog before its
