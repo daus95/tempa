@@ -8,6 +8,23 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`clarify --finalize` now resolves any pre-existing clarification backlog before its
+  loop starts** — previously, running Finalize while some clarification files still had
+  unanswered findings or fully-answered-but-unapplied files left that backlog untouched
+  (the dashboard's Finalize button was in fact gated closed in exactly this situation,
+  requiring a fresh zero-critical evaluate on record first). Finalize now checks
+  `sources.clarifications` up front: files with every finding answered but not yet
+  applied get applied, and files with unanswered findings get each one filled in with
+  its own Recommendation text (mechanically, no agent call — the same resolution the
+  dashboard's "Follow the recommendation" button would save) and then applied too — all
+  in a single apply pass, since apply always processes the whole clarifications folder
+  regardless. Only once that's done does the usual evaluate/apply loop start. The
+  dashboard's "Finalized Clarification" button (Home and Clarification Overview) is no
+  longer disabled by the old precondition either — its readiness checklist is now
+  informational rather than blocking.
+
 ## [0.4.4] - 2026-08-03
 
 ### Fixed

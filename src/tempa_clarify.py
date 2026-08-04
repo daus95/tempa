@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dashboard_clarify_parse import file_answer_status
+from dashboard_clarify_parse import file_answer_status, parse_file
 from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
 from tempa_config import (
@@ -214,6 +214,109 @@ def run_clarify_answer() -> None:
     sys.exit(0)
 
 
+def _clarification_backlog(clar_dir: Path, applied_hashes: dict) -> tuple[list[Path], list[Path]]:
+    """Split every existing clarification result file into (unanswered_files,
+    unapplied_answered_files), mirroring the dashboard's Clarification Overview split
+    (see _clarify_files_overview in dashboard_clarify_parse.py) but returning bare
+    Paths instead of display dicts:
+      - unanswered_files: at least one finding in the file has no "Your answer" yet.
+      - unapplied_answered_files: every finding is answered, but the file's current
+        content hash doesn't match `applied_hashes` (config.json's
+        "clarify_applied_hashes") — i.e. an apply pass hasn't picked up this exact
+        content yet (either never applied, or edited since the last apply).
+    A file that's fully answered AND already applied appears in neither list."""
+    unanswered: list[Path] = []
+    unapplied: list[Path] = []
+    for p in _clarification_result_files(clar_dir):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        items, _ = parse_file(p, text, 0)
+        if not items:
+            continue
+        if any(not it.existing_answer for it in items):
+            unanswered.append(p)
+            continue
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if applied_hashes.get(p.name) != content_hash:
+            unapplied.append(p)
+    return unanswered, unapplied
+
+
+def _fill_unanswered_with_recommendations(paths: list[Path]) -> int:
+    """For every finding in `paths` that has no answer yet, write its own
+    Recommendation text verbatim into the "Your answer" section — mechanically,
+    with no agent/LLM call — the same content the dashboard's "Follow the
+    recommendation" button would save for that finding. Findings that already have
+    an answer, or (unexpectedly) have no recommendation text, are left untouched.
+    Returns how many findings were filled in."""
+    filled = 0
+    for p in paths:
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        items, _ = parse_file(p, text, 0)
+        new_text = text
+        # Rewrite back-to-front so each item's recorded (answer_start, answer_end)
+        # offsets — computed against the original text — stay valid for the items
+        # processed after it.
+        for it in sorted(items, key=lambda i: i.answer_start, reverse=True):
+            if it.existing_answer or not it.recommendation:
+                continue
+            if it.has_markers:
+                replacement = f"<!-- clarify:answer-start -->\n{it.recommendation}\n<!-- clarify:answer-end -->"
+            else:
+                replacement = it.recommendation
+            new_text = new_text[: it.answer_start] + replacement + new_text[it.answer_end:]
+            filled += 1
+        if new_text != text:
+            p.write_text(new_text, encoding="utf-8")
+    return filled
+
+
+def _resolve_clarification_backlog(config: dict, clar_dir: Path) -> bool:
+    """Pre-flight step for `clarify --finalize` (and, by extension, the dashboard's
+    Finalize button, which just spawns `tempa clarify --finalize` — see
+    dashboard_runs.py): before finalize's own evaluate/apply loop starts, resolve
+    whatever's already sitting in `sources.clarifications` from earlier manual/
+    partial work, so finalize can be run at any time regardless of backlog state
+    instead of requiring it to be cleared by hand first:
+      - files with every finding answered but not yet applied -> just need applying
+      - files with at least one unanswered finding -> answer it by mechanically
+        copying that finding's own Recommendation text (no agent call — the
+        "follow recommendation" resolution), THEN apply
+    A single `clarify --apply` pass (an agent session that reads every clarification
+    file under sources.clarifications and writes their recorded answers into the
+    PRD/spec) covers both cases at once, since it always processes the whole
+    folder — there's no need to apply the already-answered files and the
+    freshly-recommendation-filled files separately.
+    Returns True if the loop below is clear to start (either there was no backlog,
+    or the backlog was resolved successfully); False if an apply attempt failed and
+    the whole finalize run should stop (mirrors every other failure path in this
+    module — the caller still exits non-zero)."""
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
+    if not unanswered_files and not unapplied_files:
+        log("No pre-existing unanswered/unapplied clarification backlog — starting the finalize loop.")
+        return True
+
+    _banner("Clarify (finalize) — resolving pre-existing backlog before the loop starts")
+    if unanswered_files:
+        filled = _fill_unanswered_with_recommendations(unanswered_files)
+        log(f"Filled {filled} unanswered finding(s) across {len(unanswered_files)} file(s) "
+            "with their own recommendation (backlog pre-check).")
+    total_backlog = len(unanswered_files) + len(unapplied_files)
+    log(f"Applying {total_backlog} backlog file(s) to the PRD/spec before the finalize loop starts...")
+    config = load_config()
+    if not _run_apply_step(config):
+        log("Backlog apply failed — stopping before the finalize loop.")
+        return False
+    log("Backlog resolved. Starting the finalize loop.")
+    return True
+
+
 def run_clarify_finalize() -> None:
     _init_process_log()
 
@@ -233,6 +336,9 @@ def run_clarify_finalize() -> None:
 
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | max_runs={max_run}")
+
+    if not _resolve_clarification_backlog(config, clar_dir):
+        sys.exit(1)
 
     while run_number < max_run:
         run_number += 1
