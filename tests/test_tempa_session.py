@@ -241,3 +241,75 @@ def test_log_session_result_nonzero_exit_fails(tmp_path):
     log_path = tmp_path / "log.txt"
     log_path.write_text("boom", encoding="utf-8")
     assert ts._log_session_result("Session [X]", 1, log_path) is False
+
+
+# ---------------------------------------------------------------------------
+# wait_out_usage_limit / run_with_usage_limit_retry
+# ---------------------------------------------------------------------------
+# A usage-limit stop is a pause, not a failure: run_with_usage_limit_retry keeps
+# re-calling its run_fn, waiting out the limit between attempts, for as long as
+# _state.usage_limit_hit stays set. USAGE_LIMIT_RETRY_WAIT_SEC/HEARTBEAT_SEC are
+# monkeypatched to ~0 here so these tests don't actually sleep 30 minutes.
+
+@pytest.fixture(autouse=True)
+def _no_real_wait(monkeypatch):
+    monkeypatch.setattr(ts, "USAGE_LIMIT_RETRY_WAIT_SEC", 0.01)
+    monkeypatch.setattr(ts, "USAGE_LIMIT_HEARTBEAT_SEC", 0.01)
+
+
+def _fake_run_fn(results):
+    """A run_fn stub that pops one (ok, sets_usage_limit) pair per call, setting
+    _state.usage_limit_hit accordingly before returning `ok` — mirrors how a real
+    run_*_session leaves usage_limit_hit set alongside a False return."""
+    calls = []
+
+    def run_fn() -> bool:
+        ok, hits_limit = results[len(calls)]
+        calls.append(ok)
+        ts._state.usage_limit_hit = hits_limit
+        return ok
+
+    run_fn.calls = calls
+    return run_fn
+
+
+def test_run_with_usage_limit_retry_returns_immediately_on_success():
+    run_fn = _fake_run_fn([(True, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is True
+    assert len(run_fn.calls) == 1
+
+
+def test_run_with_usage_limit_retry_returns_immediately_on_a_real_failure():
+    run_fn = _fake_run_fn([(False, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is False
+    assert len(run_fn.calls) == 1
+
+
+def test_run_with_usage_limit_retry_retries_until_success():
+    run_fn = _fake_run_fn([(False, True), (False, True), (True, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is True
+    assert len(run_fn.calls) == 3
+    # The wait clears the flags so the caller sees a clean state after retrying succeeds.
+    assert ts._state.usage_limit_hit is False
+
+
+def test_run_with_usage_limit_retry_stops_retrying_once_a_real_failure_occurs():
+    run_fn = _fake_run_fn([(False, True), (False, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is False
+    assert len(run_fn.calls) == 2
+
+
+def test_run_with_usage_limit_retry_does_not_retry_an_auth_error():
+    # An auth error never sets usage_limit_hit — run_fn should only be called once.
+    ts._state.auth_error_hit = True
+    run_fn = _fake_run_fn([(False, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is False
+    assert len(run_fn.calls) == 1
+
+
+def test_wait_out_usage_limit_clears_state():
+    ts._state.usage_limit_hit = True
+    ts._state.stop_event.set()
+    ts.wait_out_usage_limit("Thing", 1)
+    assert ts._state.usage_limit_hit is False
+    assert not ts._state.stop_event.is_set()

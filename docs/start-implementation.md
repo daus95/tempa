@@ -33,13 +33,23 @@ Work-selection priority each time the runner polls (this implements the 1–4 se
 5. An epic marked **`pending`** → implement from scratch.
 6. Nothing left → **everything is done**, the runner stops (exit 0).
 
-The runner stops automatically when: every epic is done, an epic is `failed`, the
-`max_session_run` limit is reached, the configured backend's **usage limit** is hit (exit 2;
-the epic is left as-is so it can be resumed once the limit resets — just run `implement`
-again), or that backend's **authentication fails** (exit 3; expired login or an invalid API
-key — re-authenticate with whichever CLI is configured for `implement` — `claude` + `/login`,
-`copilot login`, or `codex login` — then run `implement` again). See
-[ai-models.md](ai-models.md) for how to check/change the `implement` stage's backend.
+The runner stops automatically when: every epic is done (exit 0), an epic is `failed` (exit 1),
+the `max_session_run` limit is reached, or the configured backend's **authentication fails**
+(exit 3; expired login or an invalid API key — re-authenticate with whichever CLI is configured
+for `implement` — `claude` + `/login`, `copilot login`, or `codex login` — then run `implement`
+again). See [ai-models.md](ai-models.md) for how to check/change the `implement` stage's backend.
+
+**A usage limit does not stop the runner.** If the configured backend's usage/session limit
+is hit — during plan drafting or mid-epic — `implement` doesn't exit: it logs that it's
+pausing (explicitly "not an error"), waits **30 minutes** for the limit to reset, then
+retries automatically, repeating for as long as the limit is still in effect. The epic/QA
+state it was working on is untouched while it waits (`on_progress`/`qa_status=ongoing`, same
+as always), so the retry resumes exactly where it left off rather than starting the epic
+over. This is core `implement` behavior — it applies the same way whether you run
+`tempa implement` directly or via the dashboard's **Start Implementation** (which just runs
+`tempa implement` as a subprocess and streams its output). Leave it running; there's nothing
+to re-trigger by hand. `clarify`/`clarify --finalize`/`clarify --apply` behave the same way
+for their own usage-limit stops.
 
 ## Epic Status Lifecycle
 

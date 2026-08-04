@@ -50,7 +50,12 @@ from tempa_config import resolve_clar_dir as _resolve_clar_dir
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _print_log_tail, _state, log
 from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
-from tempa_session import _run_backend_session, _stream_backend_process, prepare_backend_invocation
+from tempa_session import (
+    _run_backend_session,
+    _stream_backend_process,
+    prepare_backend_invocation,
+    run_with_usage_limit_retry,
+)
 
 
 def run_test() -> None:
@@ -132,22 +137,29 @@ def run_verify(epic: str) -> None:
         if data.get("type") == "result" and data.get("result"):
             result_holder[0] = data["result"]
 
-    exit_code, log_path = _run_backend_session(
-        get_backend_def(get_backend(config, "implement")),
-        prompt,
-        get_model(config, "implement"),
-        log_prefix=f"verify_{epic}",
-        banner_label=f"Verification for [{epic}]",
-        reasoning_effort=get_reasoning_effort(config, "implement"),
-        progress_tag=f"VERIFY {epic}",
-        on_json_event=_on_json_event,
-    )
+    session_result: list[tuple[int, Path]] = [(-1, Path())]
+
+    def _run_once() -> bool:
+        exit_code, log_path = _run_backend_session(
+            get_backend_def(get_backend(config, "implement")),
+            prompt,
+            get_model(config, "implement"),
+            log_prefix=f"verify_{epic}",
+            banner_label=f"Verification for [{epic}]",
+            reasoning_effort=get_reasoning_effort(config, "implement"),
+            progress_tag=f"VERIFY {epic}",
+            on_json_event=_on_json_event,
+        )
+        session_result[0] = (exit_code, log_path)
+        return exit_code == 0
+
+    # A usage-limit hit is waited out and retried in place (see run_with_usage_limit_retry
+    # in tempa_session.py) rather than failing verification over it.
+    run_with_usage_limit_retry(_run_once, f"Verification for [{epic}]")
+    exit_code, log_path = session_result[0]
 
     if _state.auth_error_hit:
         sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Verification stopped — usage limit reached.")
-        sys.exit(2)
 
     if exit_code != 0:
         log(f"Verification FAILED for [{epic}] — exit code {exit_code}")

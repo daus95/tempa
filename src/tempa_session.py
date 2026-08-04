@@ -6,6 +6,8 @@ its output to a log file, showing live progress, and detecting the two "stop eve
 failure modes (usage-limit and authentication errors) lives here — generically, driven by
 the active `tempa_backend.Backend`. Also the concrete session runners built on top of that
 core: implementation, QA, one-shot (plan/review), clarification, and apply-clarification.
+The usage-limit pause/retry helpers (`wait_out_usage_limit`, `run_with_usage_limit_retry`)
+live here too, since every caller that hits a usage-limit stop needs them.
 
 Callers pass a fully-built prompt string in (see tempa_prompts) — this module never builds
 prompts, only runs them.
@@ -18,6 +20,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +83,69 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
     with contextlib.suppress(Exception):
         process.terminate()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Usage-limit pause & retry
+# ---------------------------------------------------------------------------
+# A usage-limit stop (see _handle_usage_limit above) is not a real failure — nothing is
+# broken, the backend CLI's subscription/session token allowance simply ran out for now.
+# Every clarify/implement/verify entry point that can hit one waits this long for it to
+# reset and then retries the exact step that was interrupted, instead of failing the whole
+# command over it — see run_with_usage_limit_retry below, used throughout tempa_clarify.py
+# and tempa_implement.py. Whatever state that step depends on (clarification files and
+# their recorded answers, config.json's epic/feature/QA progress) already lives on disk, so
+# the retried step picks up where it left off rather than starting over. This is also what
+# the dashboard's background clarify/implement runs (dashboard_runs.py) inherit for free —
+# they just spawn `tempa.py clarify`/`tempa.py implement` as a subprocess and stream its
+# console output, so this same wait-then-continue happens inside that subprocess with no
+# dashboard-side logic of its own needed. Authentication errors (see _handle_auth_error)
+# are deliberately NOT retried this way — waiting can't fix an expired/invalid credential,
+# only re-authenticating can.
+USAGE_LIMIT_RETRY_WAIT_SEC = 30 * 60
+# How often to log a "still waiting" heartbeat during that wait, so a long-running
+# terminal/log doesn't look hung for the full 30 minutes with no output at all.
+USAGE_LIMIT_HEARTBEAT_SEC = 5 * 60
+
+
+def wait_out_usage_limit(label: str, attempt: int) -> None:
+    """Block for USAGE_LIMIT_RETRY_WAIT_SEC (emitting periodic heartbeat log lines), then
+    clear `_state.usage_limit_hit` and `_state.stop_event` so the caller can retry
+    `label`'s just-interrupted step. `attempt` (1, 2, 3, ...) only affects the log
+    wording — callers increment it themselves across repeated calls."""
+    resume_at = datetime.now().timestamp() + USAGE_LIMIT_RETRY_WAIT_SEC
+    resume_str = datetime.fromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S")
+    log(f"{label} paused — usage limit reached on the configured backend. This is not an "
+        f"error: waiting {USAGE_LIMIT_RETRY_WAIT_SEC // 60} minutes for the limit to reset, "
+        f"then retrying automatically (retry #{attempt}, around {resume_str}).")
+    remaining = USAGE_LIMIT_RETRY_WAIT_SEC
+    while remaining > 0:
+        chunk = min(USAGE_LIMIT_HEARTBEAT_SEC, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+        if remaining > 0:
+            log(f"Still waiting for the usage limit to reset — about {remaining // 60} "
+                "more minute(s)...")
+    log(f"Usage-limit wait over — retrying {label} now (retry #{attempt})...")
+    _state.usage_limit_hit = False
+    _state.stop_event.clear()
+
+
+def run_with_usage_limit_retry(run_fn: Callable[[], bool], label: str) -> bool:
+    """Call the zero-arg `run_fn` — one clarify/implement/verify session already bound to
+    its arguments, returning True on success like every `run_*_session` in this module —
+    and, for as long as it fails specifically because the backend's usage limit was hit,
+    wait it out (wait_out_usage_limit) and call it again. Returns `run_fn()`'s own result
+    once it either succeeds or fails for any other reason (a real failure, or an auth
+    error) — the caller still checks `_state.auth_error_hit` itself afterward, exactly as
+    if this retry loop weren't here."""
+    attempt = 0
+    while True:
+        ok = run_fn()
+        if ok or not _state.usage_limit_hit:
+            return ok
+        attempt += 1
+        wait_out_usage_limit(label, attempt)
 
 
 def _session_feature_lines(config: dict, epic_label: str, features_override: int | None) -> list[str]:
