@@ -155,7 +155,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                             "finalize": _clarify_finalize_status(
                                 findings, last_action, round_, max_round, allow_finalize_with_critical),
                             "implementReadiness": _implement_readiness_status(
-                                findings, last_action is not None, implementation_requirement)},
+                                findings, last_action is not None, implementation_requirement),
+                            "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config)},
                 "principles": {"set": bool(tempa_config.read_principles())},
                 "backends": _backend_status(),
             })
@@ -324,6 +325,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_save()
         elif parsed.path == "/api/clarify/run":
             self._handle_clarify_run_start()
+        elif parsed.path == "/api/clarify/skip-minor":
+            self._handle_clarify_skip_minor_save()
         elif parsed.path == "/api/implement/run":
             self._handle_implement_run_start()
         elif parsed.path == "/api/implement/stop":
@@ -504,6 +507,23 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
             return
         self._send_json(200, {"ok": True})
+
+    def _handle_clarify_skip_minor_save(self) -> None:
+        """Persist the Clarification page's "Only evaluate critical & major findings"
+        switch (config.json's "skip_minor_findings") — a narrow, single-purpose save
+        endpoint rather than routing through /api/config/save, since that handler
+        requires the full Settings form payload (including a required
+        max_clarification_run) which isn't loaded if the Settings pane was never
+        opened this session."""
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict) or not isinstance(payload.get("skip_minor_findings"), bool):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        skip_minor_findings = payload["skip_minor_findings"]
+        config = tempa_config.load_config()
+        config["skip_minor_findings"] = skip_minor_findings
+        tempa_config.save_config(config)
+        self._send_json(200, {"ok": True, "skipMinorFindings": skip_minor_findings})
 
     def _handle_implement_run_start(self) -> None:
         # Server-side gate, not just a disabled button client-side — tempa.py's

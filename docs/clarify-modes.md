@@ -38,6 +38,17 @@ Runs **one evaluation pass**, then stops:
 tempa clarify --noui   # skip opening the web UI; just write the file and print the summary
 ```
 
+```bash
+tempa clarify --skip-minor   # evaluate for critical/major only — minor findings aren't looked for at all
+```
+
+`--skip-minor` (combinable with `--noui`/`--finalize`) tells the evaluation pass to skip
+minor findings entirely instead of finding and reporting them — since minor findings never
+block `--finalize` or Start Implementation anyway, this just saves the evaluation effort of
+producing them. When the flag isn't passed, config.json's `skip_minor_findings` (the
+dashboard Clarification page's "Only evaluate critical & major findings" switch, default
+`true`) is used instead.
+
 You can also open the result file in a text editor and **answer the clarifications
 manually** (editing the PRD/spec per your decisions), then run `clarify --apply` to apply
 those answers into the PRD/spec, or call `clarify` again to re-evaluate for the next
@@ -146,6 +157,9 @@ rounds) without pausing: evaluate → if `critical`/`major` findings remain, the
 its own resolution to the PRD/spec document → repeat until `critical == 0` and `major == 0`
 (remaining `minor` findings are considered acceptable). Here the agent decides the answers,
 not you — run this once you're confident its recommended answers can be trusted.
+
+`--skip-minor` also applies here (`tempa clarify --finalize --skip-minor`), skipping minor
+findings on every evaluate pass in the loop.
 
 ## Clarification history and round tracking
 

@@ -89,6 +89,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         tempa_backend.get_backend_status(tempa_config.workspace_is_writable(_workspace_root())),
         ensure_ascii=False,
     )
+    skip_minor_findings_json = json.dumps(tempa_config.get_skip_minor_findings(dashboard_config))
     return (
         _page_template()
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -104,6 +105,7 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
         .replace("/*__IMPLEMENT_READINESS__*/null", implement_readiness_json)
         .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)
+        .replace("/*__SKIP_MINOR_FINDINGS__*/null", skip_minor_findings_json)
     )
 
 

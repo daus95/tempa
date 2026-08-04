@@ -1,6 +1,6 @@
 Re-evaluate all PRD documents at (${sources.prd}) to check whether any specifications are still conflicting or need clarification. The PRD may consist of multiple document files — check all of them.
 
-For EVERY finding (critical, major, or minor), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
+For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
 
 ```
 <!-- clarify:item id="<unique-id>" severity="critical|major|minor" -->

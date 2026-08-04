@@ -19,6 +19,7 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `spec --show` | Opens the dashboard directly on the Specification section |
 | `clarify` | Clarify the PRD — one manual evaluation pass (human-in-the-loop), then opens the clarification-answer web UI on the result (unless `--noui`); saving in the UI auto-applies the answers, then asks whether to run another round |
 | `clarify --noui` | Same as `clarify`, but skip opening the answer web UI |
+| `clarify --skip-minor` | Evaluate for critical/major findings only — minor findings are skipped entirely. Combinable with `--noui`/`--finalize`. Config.json's `skip_minor_findings` (dashboard toggle, default `true`) is used whenever this flag is omitted |
 | `answer` | Scans `sources.clarifications` for clarification files and, if any finding is still unanswered, reopens the clarification-answer web UI on ALL of them (one tab per file, badged complete/incomplete); saving auto-applies the answers, then asks whether to run another round |
 | `clarify --auto-answer` | Automatically answers findings that are still unanswered (no re-evaluation) |
 | `clarify --apply` | Applies answers from the clarification file into the PRD/spec document (no re-evaluation), then asks whether to run another round |

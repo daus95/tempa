@@ -173,6 +173,20 @@
             <span>📤</span><span>Apply Answers</span>
           </button>
         </div>
+        <div class="gate-panel" id="skipMinorCard">
+          <h3>Evaluation scope</h3>
+          <div class="settings-field">
+            <label class="settings-switch-row" for="skipMinorFindingsToggle">
+              <span class="settings-switch">
+                <input type="checkbox" id="skipMinorFindingsToggle" checked>
+                <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+              </span>
+              <span>Only evaluate critical &amp; major findings</span>
+            </label>
+            <p class="gate-hint">When on, Start Clarification and Finalized Clarification skip minor
+              findings entirely instead of finding and reporting them.</p>
+          </div>
+        </div>
         <div class="gate-panel" id="finalizeGate">
           <h3>Finalize readiness <span class="clarify-round-badge hidden" id="clarifyRoundBadge"></span></h3>
           <p class="gate-hint hidden" id="finalizeGateHint"></p>

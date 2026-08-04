@@ -53,6 +53,7 @@ from tempa_config import (
     get_config_path,
     get_epic_session_id,
     get_qa_dir,
+    get_skip_minor_findings,
     load_config,
 )
 from tempa_implement import main
@@ -296,6 +297,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--auto-answer", action="store_true")
     p.add_argument("--yes", action="store_true")
     p.add_argument("--noui", action="store_true")
+    p.add_argument("--skip-minor", action="store_true")
 
     sub.add_parser("answer", parents=[common], add_help=False)
 
@@ -326,13 +328,15 @@ def _dispatch_clarify(args: argparse.Namespace) -> None:
     if args.clear:
         run_clarify_clear()
     elif args.finalize:
-        run_clarify_finalize()
+        skip_minor = args.skip_minor or get_skip_minor_findings(load_config())
+        run_clarify_finalize(skip_minor=skip_minor)
     elif args.apply:
         run_clarify_apply()
     elif args.auto_answer:
         run_clarify_answer()
     else:
-        run_clarify_once(noui=args.noui)
+        skip_minor = args.skip_minor or get_skip_minor_findings(load_config())
+        run_clarify_once(noui=args.noui, skip_minor=skip_minor)
 
 
 def _dispatch_implement(args: argparse.Namespace) -> None:

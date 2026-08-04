@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`clarify`/`clarify --finalize` can now skip minor findings entirely** via a new
+  `--skip-minor` CLI flag, or persistently through `config.json`'s `skip_minor_findings`
+  (default `true`). A new "Evaluation scope" card on the dashboard's Clarification page —
+  above "Finalize readiness" — exposes this as an "Only evaluate critical & major findings"
+  switch that persists immediately (`POST /api/clarify/skip-minor`) and is honored by any
+  dashboard-triggered clarify/finalize run automatically.
+
 ## [0.4.6] - 2026-08-04
 
 ### Added
