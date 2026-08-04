@@ -47,7 +47,7 @@ functions directly in-process.
 | `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution, plus `workspace_is_writable()` (see [cli-availability.md](cli-availability.md)). The one module every other module can depend on — stdlib-only, imports nothing local. |
 | `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
 | `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
-| `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too. |
+| `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too, along with the usage-limit pause/retry helpers (`wait_out_usage_limit`, `run_with_usage_limit_retry`) every caller in `tempa_clarify.py`/`tempa_implement.py` uses to wait a usage-limit stop out and retry the interrupted step instead of failing. |
 | `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`), and per-backend readiness (`get_backend_status()` — see [cli-availability.md](cli-availability.md)). |
 | `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
 | `tempa_implement.py` | The implement poll loop and scheduler (`check_and_run`): decides what to run next (resume QA, resume an in-progress epic, implement the next pending epic). |
@@ -99,6 +99,12 @@ boundary, not just an implementation detail:
 - The dashboard staying up doesn't hold a `_RunnerState` for a run that's actually happening in a
   different process; live status is read back from `config.json` and the log tail instead
   (see `dashboard_runs.py`).
+- The usage-limit pause/retry behavior (wait 30 minutes, then retry the interrupted step —
+  see `tempa_session.wait_out_usage_limit`/`run_with_usage_limit_retry`) lives entirely on the
+  CLI side and needs nothing dashboard-specific: the child process just blocks for the wait
+  (logging a heartbeat) instead of exiting, so the dashboard's plain stdout-streaming shows
+  that as ordinary log lines, and **Stop Implementation**'s existing kill-the-process-tree
+  already interrupts a paused wait exactly like it interrupts a running session.
 
 If you're adding a new heavy workflow reachable from both the CLI and the dashboard, follow this
 pattern: put the logic in a `tempa_*.py` module reachable from `tempa_cli.py`, and if the

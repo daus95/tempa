@@ -34,7 +34,13 @@ from tempa_prompts import (
     build_review_epics_prompt,
     build_session_prompt,
 )
-from tempa_session import _run_oneshot_session, run_qa_session, run_session
+from tempa_session import (
+    _run_oneshot_session,
+    run_qa_session,
+    run_session,
+    run_with_usage_limit_retry,
+    wait_out_usage_limit,
+)
 
 
 def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
@@ -325,9 +331,6 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
         if not _plan_epics_run(config):
             if _state.auth_error_hit:
                 sys.exit(3)
-            if _state.usage_limit_hit:
-                log("Plan stopped — usage limit reached.")
-                sys.exit(2)
             log("Plan failed — agent runner stopping.")
             sys.exit(1)
 
@@ -351,29 +354,34 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
     if features_override is not None:
         log(f"features_per_session override: {features_override}", to_console=False)
 
-    while not _state.stop_event.is_set():
-        try:
-            check_and_run(features_override=features_override)
-        except SystemExit:
-            raise
-        except Exception as e:
-            log(f"Unexpected error in check_and_run: {e}")
+    usage_limit_retries = 0
+    while True:
+        while not _state.stop_event.is_set():
+            try:
+                check_and_run(features_override=features_override)
+            except SystemExit:
+                raise
+            except Exception as e:
+                log(f"Unexpected error in check_and_run: {e}")
 
-        _state.stop_event.wait(timeout=POLL_INTERVAL_SEC)
+            _state.stop_event.wait(timeout=POLL_INTERVAL_SEC)
 
-    if _state.auth_error_hit:
-        log("Agent runner stopped — authentication failed (see message above). "
-            "Re-authenticate the configured CLI backend, then run this command again.")
-        sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Agent runner stopped — usage limit reached. "
-            "Run it again once the limit resets.")
-        sys.exit(2)
-    if _state.all_done:
-        log("All epics done. Agent runner stopped successfully.")
-        sys.exit(0)
-    log("Agent runner stopped due to session failure.")
-    sys.exit(1)
+        if _state.auth_error_hit:
+            log("Agent runner stopped — authentication failed (see message above). "
+                "Re-authenticate the configured CLI backend, then run this command again.")
+            sys.exit(3)
+        if _state.usage_limit_hit:
+            # Not a real stop — the epic/QA in progress was left exactly as check_and_run
+            # would resume it (on_progress / qa_status=ongoing), so waiting out the limit
+            # and re-entering the poll loop continues it rather than starting over.
+            usage_limit_retries += 1
+            wait_out_usage_limit("Implementation", usage_limit_retries)
+            continue
+        if _state.all_done:
+            log("All epics done. Agent runner stopped successfully.")
+            sys.exit(0)
+        log("Agent runner stopped due to session failure.")
+        sys.exit(1)
 
 
 def _plan_epics_run(config: dict) -> bool:
@@ -381,7 +389,10 @@ def _plan_epics_run(config: dict) -> bool:
     write .md files to specs/pbi/epics + append to config.json, then review & fix.
 
     Called from within implement (not a separate command) — see main(). Returns True if
-    generate + review succeed; False on failure (check _state.usage_limit_hit for the cause)."""
+    generate + review succeed; False on a real failure or an auth error (check
+    _state.auth_error_hit) — a usage-limit stop during either step is waited out and
+    retried in place (run_with_usage_limit_retry), so it never causes this to return
+    False."""
     sources = get_sources(config)
     epics_path = sources.get("epics", "")
     if not epics_path:
@@ -398,11 +409,14 @@ def _plan_epics_run(config: dict) -> bool:
     log("Laying out new epics/features/tasks from the PRD (only what's not yet implemented)...")
     gen_prompt = build_plan_epics_prompt(config)
     backend = get_backend_def(get_backend(config, "plan"))
-    if not _run_oneshot_session(
-        gen_prompt, "PLAN-EPICS", "plan_epics_generate", backend,
-        get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+    if not run_with_usage_limit_retry(
+        lambda: _run_oneshot_session(
+            gen_prompt, "PLAN-EPICS", "plan_epics_generate", backend,
+            get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+        ),
+        "Plan (generate epics)",
     ):
-        if not _state.usage_limit_hit and not _state.auth_error_hit:
+        if not _state.auth_error_hit:
             log("Generate epic failed — stopping.")
         return False
 
@@ -411,11 +425,14 @@ def _plan_epics_run(config: dict) -> bool:
     config = load_config()
     backend = get_backend_def(get_backend(config, "plan"))
     review_prompt = build_review_epics_prompt(config)
-    if not _run_oneshot_session(
-        review_prompt, "REVIEW-EPICS", "plan_epics_review", backend,
-        get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+    if not run_with_usage_limit_retry(
+        lambda: _run_oneshot_session(
+            review_prompt, "REVIEW-EPICS", "plan_epics_review", backend,
+            get_model(config, "plan"), get_reasoning_effort(config, "plan"),
+        ),
+        "Plan (review epics)",
     ):
-        if not _state.usage_limit_hit and not _state.auth_error_hit:
+        if not _state.auth_error_hit:
             log("Review epic failed — stopping.")
         return False
 

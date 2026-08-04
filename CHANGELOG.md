@@ -8,6 +8,26 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **A backend usage limit no longer stops `clarify`/`implement`/`verify` — they wait 30
+  minutes and retry the interrupted step automatically** — previously, whenever the
+  configured CLI backend's usage/session limit was hit, these commands exited immediately
+  (exit code 2), leaving the user to notice and re-run the command by hand once the limit
+  reset. Every entry point that can hit this (`clarify`, `clarify --auto-answer`,
+  `clarify --apply`, `clarify --finalize`'s evaluate/apply loop, `implement`'s plan step and
+  its per-epic/QA poll loop, and `verify`) now treats it as a pause instead: it logs that
+  it's waiting (explicitly "this is not an error"), a periodic heartbeat during the wait, then
+  automatically retries — repeating for as long as the limit is still in effect. Nothing is
+  lost across the wait, since the retried step resumes from what's already recorded in the
+  clarification files and `config.json` (epic/feature/QA progress left exactly as it was),
+  instead of starting over. This is core CLI behavior (`tempa_session.run_with_usage_limit_retry`),
+  so the dashboard's background clarify/implement runs get it for free too — they just spawn
+  `tempa.py clarify`/`tempa.py implement` as a subprocess and stream its console output, and
+  **Stop Implementation**'s existing kill-the-process-tree already cancels a paused wait the
+  same way it cancels a running session. Authentication failures (exit 3) are unaffected —
+  waiting can't fix a bad credential, so those still stop immediately.
+
 ## [0.4.5] - 2026-08-04
 
 ### Added

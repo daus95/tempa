@@ -33,7 +33,11 @@ from tempa_prompts import (
     build_auto_answer_prompt,
     build_clarification_prompt,
 )
-from tempa_session import run_apply_clarification_session, run_clarification_session
+from tempa_session import (
+    run_apply_clarification_session,
+    run_clarification_session,
+    run_with_usage_limit_retry,
+)
 
 
 def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> None:
@@ -100,19 +104,16 @@ def run_clarify_once(noui: bool = False) -> None:
 
     start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
     prompt = build_clarification_prompt(config)
-    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
+    if not run_with_usage_limit_retry(
+        lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
+        "Clarification evaluation",
+    ):
         if _state.auth_error_hit:
             sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Clarify stopped — usage limit reached.")
-            sys.exit(2)
         log("Clarification evaluation failed.")
         sys.exit(1)
     if _state.auth_error_hit:
         sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Clarify stopped — usage limit reached.")
-        sys.exit(2)
 
     config = load_config()
     findings = config.get("last_clarification_findings", {})
@@ -187,19 +188,16 @@ def run_clarify_answer() -> None:
 
     start_ts = time.time() - 1
     prompt = build_auto_answer_prompt(config)
-    if not run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
+    if not run_with_usage_limit_retry(
+        lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
+        "Auto-answer",
+    ):
         if _state.auth_error_hit:
             sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Auto-answer stopped — usage limit reached.")
-            sys.exit(2)
         log("Auto-answer failed.")
         sys.exit(1)
     if _state.auth_error_hit:
         sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Auto-answer stopped — usage limit reached.")
-        sys.exit(2)
 
     config = load_config()
     answered = config.get("last_auto_answer", 0)
@@ -351,12 +349,17 @@ def run_clarify_finalize() -> None:
         prompt = build_clarification_prompt(config)
 
         start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
-        success = run_clarification_session(prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
+        # Retry's lambda binds the loop variables as defaults (not by closure) so a retry
+        # can't accidentally pick up a later iteration's prompt/run_number/config.
+        success = run_with_usage_limit_retry(
+            lambda prompt=prompt, run_number=run_number, config=config: run_clarification_session(
+                prompt, run_number, get_backend_def(get_backend(config, "clarify")),
+                get_model(config, "clarify"), get_reasoning_effort(config, "clarify"),
+            ),
+            f"Clarify (finalize) round #{run_number} — evaluate",
+        )
         if _state.auth_error_hit:
             sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Clarify (finalize) stopped — usage limit reached.")
-            sys.exit(2)
         if not success:
             log(f"Clarification run #{run_number} failed — stopping the loop.")
             sys.exit(1)
@@ -385,12 +388,15 @@ def run_clarify_finalize() -> None:
         config = load_config()
         apply_prompt = build_apply_clarification_prompt(config)
         apply_start_ts = time.time()
-        apply_success = run_apply_clarification_session(apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify"))
+        apply_success = run_with_usage_limit_retry(
+            lambda apply_prompt=apply_prompt, run_number=run_number, config=config: run_apply_clarification_session(
+                apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")),
+                get_model(config, "clarify"), get_reasoning_effort(config, "clarify"),
+            ),
+            f"Clarify (finalize) round #{run_number} — apply",
+        )
         if _state.auth_error_hit:
             sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Clarify (finalize) stopped — usage limit reached.")
-            sys.exit(2)
         if not apply_success:
             log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
             sys.exit(1)
@@ -426,23 +432,21 @@ def _record_clarify_applied_state(config: dict, clar_dir: Path) -> None:
 def _run_apply_step(config: dict) -> bool:
     """Run one apply-clarification session (writes answers/resolutions into the PRD/spec
     documents) and log the outcome. Returns True on success, False on failure. Exits the
-    process directly on an auth error or usage-limit hit, matching every other clarify
-    subcommand's behavior."""
+    process directly on an auth error, matching every other clarify subcommand's behavior
+    (a usage-limit hit is not a failure — it's retried in place; see
+    run_with_usage_limit_retry)."""
     prompt = build_apply_clarification_prompt(config)
     apply_start_ts = time.time()
-    if not run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")):
+    if not run_with_usage_limit_retry(
+        lambda: run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
+        "Apply",
+    ):
         if _state.auth_error_hit:
             sys.exit(3)
-        if _state.usage_limit_hit:
-            log("Apply stopped — usage limit reached.")
-            sys.exit(2)
         log("Apply clarification failed.")
         return False
     if _state.auth_error_hit:
         sys.exit(3)
-    if _state.usage_limit_hit:
-        log("Apply stopped — usage limit reached.")
-        sys.exit(2)
 
     config = load_config()
     f = config.get("last_clarification_findings", {})

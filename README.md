@@ -362,7 +362,20 @@ clean, which can mean several rounds depending on how much the PRD still needs r
 Expand the **Clarification log** panel to watch it live (running status plus streamed
 console output) so you can tell it's still working rather than stuck. Unlike
 **Stop Implementation** in Step 3 below, there's no way to cancel a Finalize run mid-way —
-leave the dashboard open until it finishes on its own or hits a usage limit.
+leave the dashboard open until it finishes on its own.
+
+**Running out of tokens doesn't break the run.** If the configured backend's usage/session
+limit is hit mid-way — during **Start Clarification**, **Apply Answers**, **Finalized
+Clarification**, or **Start Implementation** in Step 3 below — the run doesn't fail. The
+log reports that it's pausing ("this is not an error"), waits **30 minutes** for the limit
+to reset, then continues automatically — repeating for as long as the limit is still in
+effect. Nothing is lost while it waits: answers, applied resolutions, and epic/feature
+progress all live in files + `config.json`, so it picks up exactly where it left off rather
+than starting over. This is built into `tempa clarify`/`tempa implement` themselves, so it
+works the same way whether you're running them from the CLI or through the dashboard (which
+just runs those same commands as a background process) — just leave it running. An
+**authentication** failure is different — that one stops immediately, since only
+re-authenticating can fix it.
 
 ### Step 3 — Start Implementation
 
