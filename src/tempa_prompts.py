@@ -204,13 +204,17 @@ def build_qa_prompt(config: dict, epic_name: str, qa_output_file: Path, is_conti
     return build_prompt(template, params)
 
 
-def build_clarification_prompt(config: dict) -> str:
+def build_clarification_prompt(config: dict, skip_minor: bool = False) -> str:
     sources = get_sources(config)
     template = load_prompt("clarification")
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
+        "finding_scope": (
+            "critical or major — do NOT look for, evaluate, or report MINOR findings at all"
+            if skip_minor else "critical, major, or minor"
+        ),
     }
     return build_prompt(template, params)
 

@@ -211,6 +211,7 @@ DEFAULT_CONFIG = {
     "last_clarification_round": 0,
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
+    "skip_minor_findings": True,
     "implementation_start_requirement": "no_critical_or_major",
     "epic": [],
     "workspace": dict(DEFAULT_WORKSPACE),
@@ -430,6 +431,12 @@ def get_implementation_start_requirement(config: dict) -> str:
     ("no_critical_or_major") for a missing or invalid value."""
     value = config.get("implementation_start_requirement")
     return value if value in IMPLEMENTATION_START_REQUIREMENTS else "no_critical_or_major"
+
+
+def get_skip_minor_findings(config: dict) -> bool:
+    """Return config.json's "skip_minor_findings" (dashboard toggle + CLI --skip-minor
+    default), defaulting to True for a missing value."""
+    return bool(config.get("skip_minor_findings", True))
 
 
 # Field names used to persist a resumable session id on an epic entry, per kind. Kept

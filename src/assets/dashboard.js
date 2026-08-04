@@ -13,6 +13,7 @@ const INITIAL_CLARIFY_FINALIZE = /*__CLARIFY_FINALIZE__*/null;
 const INITIAL_IMPLEMENT_READINESS = /*__IMPLEMENT_READINESS__*/null;
 const INITIAL_PRINCIPLES_SET = /*__PRINCIPLES_SET__*/null;
 const INITIAL_BACKENDS_STATUS = /*__BACKENDS_STATUS__*/null;
+const INITIAL_SKIP_MINOR_FINDINGS = /*__SKIP_MINOR_FINDINGS__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -161,6 +162,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
+  skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
   clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
@@ -242,6 +244,7 @@ const state = {
     { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
+  skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
   epics: [],
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
@@ -868,6 +871,7 @@ async function openClarifyRowDetail(file) {
 }
 
 function renderClarifyOverview() {
+  skipMinorFindingsToggle.checked = !!state.skipMinorFindings;
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
     "No unanswered files.", false);
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
@@ -921,6 +925,28 @@ function renderImplementReadyBanner() {
 clarifyStartImplementBtn.addEventListener("click", async () => {
   await selectTop("implementation");
   startImplementRun();
+});
+
+skipMinorFindingsToggle.addEventListener("change", async () => {
+  const checked = skipMinorFindingsToggle.checked;
+  state.skipMinorFindings = checked;
+  try {
+    const res = await fetch("/api/clarify/skip-minor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skip_minor_findings: checked }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      state.skipMinorFindings = !checked;
+      skipMinorFindingsToggle.checked = !checked;
+      toast(data.error || "Could not save this setting.", true);
+    }
+  } catch (e) {
+    state.skipMinorFindings = !checked;
+    skipMinorFindingsToggle.checked = !checked;
+    toast("Network error while saving.", true);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1974,6 +2000,7 @@ async function refreshSpecTree() {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       state.backendsStatus = data.backends || {};
       renderSidebar();
@@ -2245,6 +2272,7 @@ async function refreshClarifyList() {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
@@ -2286,6 +2314,7 @@ $("refreshBtn").addEventListener("click", async () => {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();

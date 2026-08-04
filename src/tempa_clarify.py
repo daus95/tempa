@@ -79,7 +79,7 @@ def _clarification_report_files(folder: Path, since: float) -> list[Path]:
     return out
 
 
-def run_clarify_once(noui: bool = False) -> None:
+def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     """Manual clarification — run ONE evaluation pass, report findings + report file(s),
     then suggest the next step based on severity:
       - critical==0 & major==0 : clarification done → suggest moving on to implement (auto plan)
@@ -87,7 +87,8 @@ def run_clarify_once(noui: bool = False) -> None:
       - critical>0             : suggest reviewing/answering manually then clarify again
     Unless `noui` is set, also opens the clarification-answer web UI on the freshly
     written report file(s) so the user can answer right away instead of hand-editing
-    the markdown."""
+    the markdown. `skip_minor` instructs the evaluation pass to skip minor findings
+    entirely (config.json's "skip_minor_findings" / CLI --skip-minor)."""
     _init_process_log()
 
     config = load_config()
@@ -103,7 +104,7 @@ def run_clarify_once(noui: bool = False) -> None:
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
     start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
-    prompt = build_clarification_prompt(config)
+    prompt = build_clarification_prompt(config, skip_minor)
     if not run_with_usage_limit_retry(
         lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
         "Clarification evaluation",
@@ -315,7 +316,9 @@ def _resolve_clarification_backlog(config: dict, clar_dir: Path) -> bool:
     return True
 
 
-def run_clarify_finalize() -> None:
+def run_clarify_finalize(skip_minor: bool = False) -> None:
+    """`skip_minor` instructs every evaluate pass in the loop to skip minor findings
+    entirely (config.json's "skip_minor_findings" / CLI --skip-minor)."""
     _init_process_log()
 
     config = load_config()
@@ -346,7 +349,7 @@ def run_clarify_finalize() -> None:
         log(round_header, to_console=False)
 
         config = load_config()
-        prompt = build_clarification_prompt(config)
+        prompt = build_clarification_prompt(config, skip_minor)
 
         start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
         # Retry's lambda binds the loop variables as defaults (not by closure) so a retry
