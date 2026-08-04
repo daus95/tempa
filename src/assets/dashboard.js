@@ -467,7 +467,11 @@ function renderHomeWorkflow() {
     ? "Answer the remaining findings or apply your saved answers first." : "";
   homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
   homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
-  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
+  // Not gated on state.clarifyFinalize.ready — `clarify --finalize` now resolves its
+  // own pre-existing backlog (unanswered findings filled in with their recommendation,
+  // then applied) before its loop starts, so it's safe to start regardless of the most
+  // recent evaluate's outcome. See the matching change in renderFinalizeGate above.
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
@@ -976,13 +980,16 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
   }
 });
 
-// The 3 preconditions gating "Finalized Clarification" — see _clarify_finalize_status()
-// in dashboard_ui.py for the server-side source of truth this mirrors:
-//   1. clarification has been run at least once
-//   2. the most recent result comes from a fresh evaluate (Start Clarification), not
-//      just an apply — answering + applying criticals isn't enough on its own
-//   3. that evaluate's findings show 0 critical — unless the Settings toggle "Allow
-//      finalizing with critical findings" (st.allowFinalizeWithCritical) overrides it
+// Status snapshot shown above "Finalized Clarification" — see _clarify_finalize_status()
+// in dashboard_clarify_parse.py for the server-side source of truth this mirrors. This
+// used to also gate whether the button could be clicked at all (requiring a fresh
+// zero-critical evaluate on record); it no longer does — `clarify --finalize` now
+// resolves its own pre-existing backlog first (files answered-but-not-applied get
+// applied; files with unanswered findings get each one filled in with its own
+// recommendation, then applied) before its evaluate/apply loop starts, so it's safe
+// to start regardless of what state clarification is currently in. The checklist below
+// is purely informational now: it shows what the most recent evaluate pass found, not
+// a precondition.
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
   if (st.maxRound > 0) {
@@ -1003,8 +1010,15 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
           ? `Most recent evaluation still shows ${st.critical} critical finding(s) — allowed via ` +
             "the Settings override"
           : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
+    { ok: true,
+      label: (hasUnanswered || hasUnapplied)
+        ? "Any unanswered/unapplied backlog above will be resolved automatically " +
+          "(unanswered findings filled in with their own recommendation) before Finalize's loop starts"
+        : "No unanswered/unapplied backlog — Finalize's loop can start right away" },
   ]);
-  finalizeClarifyBtn.disabled = runDisabled || !st.ready;
+  // Only actually-in-progress runs disable this button now — the checklist above is
+  // informational, not a precondition (see the comment above this function).
+  finalizeClarifyBtn.disabled = runDisabled;
 
   // Once clarification has run at least once but isn't finalize-ready yet, relabel
   // Start Clarification -> Continue Clarification and explain why in plain language,
