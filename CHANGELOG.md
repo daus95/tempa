@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-08-05
+
 ### Fixed
 
 - **A clarification round that finds zero findings could leave "Finalized Clarification"
