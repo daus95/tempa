@@ -22,6 +22,12 @@ once the first tagged release is cut.
   (`_stamp_clean_evaluation_if_zero` in `tempa_clarify.py`); the readiness gate now treats
   a clean stamp newer than the latest finding-bearing file as the current, authoritative
   state.
+- **Claude Code's "weekly limit" message wasn't recognized as a usage-limit stop**, so
+  hitting it made `clarify`/`implement`/`verify` exit with a plain error instead of waiting
+  30 minutes and retrying (the behavior added in 0.4.6). The CLI's actual wording — "You've
+  hit your weekly limit · resets ..." — didn't match any of `CLAUDE.usage_limit_markers`,
+  which only covered the 5-hour/session limit phrasings. Added `"hit your weekly limit"`
+  and `"weekly limit reached"` markers.
 
 ## [0.4.7] - 2026-08-05
 
