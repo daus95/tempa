@@ -61,6 +61,30 @@ def _handle_usage_limit(text: str, process: subprocess.Popen, label: str, backen
     return True
 
 
+def _is_overloaded_text(text: str, backend: Backend) -> bool:
+    """True if the given CLI output text indicates `backend`'s API reported itself
+    overloaded (a transient, server-side condition — e.g. Anthropic's 529 status) rather
+    than a usage limit or a real failure."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in backend.overloaded_markers)
+
+
+def _handle_overloaded(text: str, process: subprocess.Popen, label: str, backend: Backend) -> bool:
+    """If text indicates the backend's API is overloaded, flag a global stop, terminate the
+    running process, and return True. Otherwise return False."""
+    if not _is_overloaded_text(text, backend):
+        return False
+    _state.server_overloaded_hit = True
+    log(f"[{label}] {backend.label} reported its API is overloaded — pausing the agent "
+        "runner (this is a transient, server-side issue, not a real failure).")
+    _state.stop_event.set()
+    with contextlib.suppress(Exception):
+        process.terminate()
+    return True
+
+
 def _is_auth_error_text(text: str, backend: Backend) -> bool:
     """True if the given CLI output text indicates an authentication/credential failure
     (expired login, bad API key) rather than a usage limit or a generic bug."""
@@ -86,26 +110,33 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
 
 
 # ---------------------------------------------------------------------------
-# Usage-limit pause & retry
+# Usage-limit / server-overload pause & retry
 # ---------------------------------------------------------------------------
-# A usage-limit stop (see _handle_usage_limit above) is not a real failure — nothing is
-# broken, the backend CLI's subscription/session token allowance simply ran out for now.
-# Every clarify/implement/verify entry point that can hit one waits this long for it to
-# reset and then retries the exact step that was interrupted, instead of failing the whole
-# command over it — see run_with_usage_limit_retry below, used throughout tempa_clarify.py
-# and tempa_implement.py. Whatever state that step depends on (clarification files and
-# their recorded answers, config.json's epic/feature/QA progress) already lives on disk, so
-# the retried step picks up where it left off rather than starting over. This is also what
-# the dashboard's background clarify/implement runs (dashboard_runs.py) inherit for free —
-# they just spawn `tempa.py clarify`/`tempa.py implement` as a subprocess and stream its
-# console output, so this same wait-then-continue happens inside that subprocess with no
-# dashboard-side logic of its own needed. Authentication errors (see _handle_auth_error)
-# are deliberately NOT retried this way — waiting can't fix an expired/invalid credential,
-# only re-authenticating can.
+# A usage-limit stop (see _handle_usage_limit above) or a server-overload stop (see
+# _handle_overloaded above) is not a real failure — nothing is broken. For a usage limit,
+# the backend CLI's subscription/session token allowance simply ran out for now; for an
+# overload, the backend's own API (a system outside Tempa/the target app entirely) is
+# temporarily rejecting requests. Every clarify/implement/verify entry point that can hit
+# either one waits it out and then retries the exact step that was interrupted, instead of
+# failing the whole command over it — see run_with_usage_limit_retry below, used throughout
+# tempa_clarify.py and tempa_implement.py. Whatever state that step depends on
+# (clarification files and their recorded answers, config.json's epic/feature/QA progress)
+# already lives on disk, so the retried step picks up where it left off rather than
+# starting over. This is also what the dashboard's background clarify/implement runs
+# (dashboard_runs.py) inherit for free — they just spawn `tempa.py clarify`/`tempa.py
+# implement` as a subprocess and stream its console output, so this same wait-then-continue
+# happens inside that subprocess with no dashboard-side logic of its own needed.
+# Authentication errors (see _handle_auth_error) are deliberately NOT retried this way —
+# waiting can't fix an expired/invalid credential, only re-authenticating can.
 USAGE_LIMIT_RETRY_WAIT_SEC = 30 * 60
 # How often to log a "still waiting" heartbeat during that wait, so a long-running
 # terminal/log doesn't look hung for the full 30 minutes with no output at all.
 USAGE_LIMIT_HEARTBEAT_SEC = 5 * 60
+
+# A server-overload response (e.g. Anthropic's 529 "Overloaded") is a much shorter-lived
+# condition than a usage limit typically resolving within minutes, so the wait is short and
+# unconditional — no heartbeat needed at this length, unlike the 30-minute usage-limit wait.
+SERVER_OVERLOADED_RETRY_WAIT_SEC = 5 * 60
 
 
 def wait_out_usage_limit(label: str, attempt: int) -> None:
@@ -131,21 +162,46 @@ def wait_out_usage_limit(label: str, attempt: int) -> None:
     _state.stop_event.clear()
 
 
+def wait_out_server_overload(label: str, attempt: int) -> None:
+    """Block for SERVER_OVERLOADED_RETRY_WAIT_SEC, then clear `_state.server_overloaded_hit`
+    and `_state.stop_event` so the caller can retry `label`'s just-interrupted step.
+    `attempt` (1, 2, 3, ...) only affects the log wording — callers increment it themselves
+    across repeated calls."""
+    resume_at = datetime.now().timestamp() + SERVER_OVERLOADED_RETRY_WAIT_SEC
+    resume_str = datetime.fromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S")
+    log(f"{label} paused — the backend's API reported it is overloaded. This is not an "
+        f"error on Tempa's or the target app's side: waiting {SERVER_OVERLOADED_RETRY_WAIT_SEC // 60} "
+        f"minutes, then retrying automatically (retry #{attempt}, around {resume_str}).")
+    time.sleep(SERVER_OVERLOADED_RETRY_WAIT_SEC)
+    log(f"Overload wait over — retrying {label} now (retry #{attempt})...")
+    _state.server_overloaded_hit = False
+    _state.stop_event.clear()
+
+
 def run_with_usage_limit_retry(run_fn: Callable[[], bool], label: str) -> bool:
     """Call the zero-arg `run_fn` — one clarify/implement/verify session already bound to
     its arguments, returning True on success like every `run_*_session` in this module —
-    and, for as long as it fails specifically because the backend's usage limit was hit,
-    wait it out (wait_out_usage_limit) and call it again. Returns `run_fn()`'s own result
-    once it either succeeds or fails for any other reason (a real failure, or an auth
-    error) — the caller still checks `_state.auth_error_hit` itself afterward, exactly as
-    if this retry loop weren't here."""
-    attempt = 0
+    and, for as long as it fails specifically because the backend's usage limit was hit or
+    its API reported itself overloaded, wait it out (wait_out_usage_limit /
+    wait_out_server_overload) and call it again. Returns `run_fn()`'s own result once it
+    either succeeds or fails for any other reason (a real failure, or an auth error) — the
+    caller still checks `_state.auth_error_hit` itself afterward, exactly as if this retry
+    loop weren't here."""
+    usage_limit_attempt = 0
+    overload_attempt = 0
     while True:
         ok = run_fn()
-        if ok or not _state.usage_limit_hit:
+        if ok:
             return ok
-        attempt += 1
-        wait_out_usage_limit(label, attempt)
+        if _state.usage_limit_hit:
+            usage_limit_attempt += 1
+            wait_out_usage_limit(label, usage_limit_attempt)
+            continue
+        if _state.server_overloaded_hit:
+            overload_attempt += 1
+            wait_out_server_overload(label, overload_attempt)
+            continue
+        return ok
 
 
 def _session_feature_lines(config: dict, epic_label: str, features_override: int | None) -> list[str]:
@@ -260,6 +316,10 @@ def _stream_backend_process(
                 log_file.write(raw_line)
                 log_file.flush()
                 break
+            if _handle_overloaded(raw_line, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
             if line.startswith("{"):
                 try:
                     data = json.loads(line)
@@ -362,13 +422,17 @@ def _run_backend_session(
 
 
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
-    """Log SUCCEEDED / usage-limit-stopped / FAILED (with a one-time log tail) for a
-    finished session. Returns True iff exit_code == 0 and no usage limit was hit."""
+    """Log SUCCEEDED / usage-limit-stopped / overload-paused / FAILED (with a one-time log
+    tail) for a finished session. Returns True iff exit_code == 0 and neither a usage limit
+    nor a server overload was hit."""
     if _state.auth_error_hit:
         log(f"{label} stopped — authentication failed (see message above).")
         return False
     if _state.usage_limit_hit:
         log(f"{label} stopped — usage limit reached.{usage_limit_note}")
+        return False
+    if _state.server_overloaded_hit:
+        log(f"{label} paused — backend API overloaded (will retry automatically).")
         return False
     if exit_code == 0:
         log(f"{label} SUCCEEDED (exit code {exit_code})")
@@ -461,9 +525,15 @@ def run_session(
     )
 
     with _state.lock:
-        # A usage-limit or auth-error stop is not a real epic failure: leave status
-        # untouched so the epic can be resumed once the limit resets / auth is fixed.
-        if exit_code != 0 and not _state.usage_limit_hit and not _state.auth_error_hit:
+        # A usage-limit, auth-error, or server-overload stop is not a real epic failure:
+        # leave status untouched so the epic can be resumed once the limit resets / auth is
+        # fixed / the backend's API recovers.
+        if (
+            exit_code != 0
+            and not _state.usage_limit_hit
+            and not _state.auth_error_hit
+            and not _state.server_overloaded_hit
+        ):
             # Only mark failed — "done"/"pending" is set by the AI session itself
             config = load_config()
             config["epic"][index]["status"] = "failed"

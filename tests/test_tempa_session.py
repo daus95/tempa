@@ -25,11 +25,13 @@ def reset_runner_state():
     ts._state.usage_limit_hit = False
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
+    ts._state.server_overloaded_hit = False
     ts._state.stop_event.clear()
     yield
     ts._state.usage_limit_hit = False
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
+    ts._state.server_overloaded_hit = False
     ts._state.stop_event.clear()
 
 
@@ -83,6 +85,33 @@ def test_is_auth_error_text_matches_every_marker_for_its_own_backend(backend):
 
 def test_is_auth_error_text_unrelated_text_false():
     assert ts._is_auth_error_text("some generic error occurred", tb.CLAUDE) is False
+
+
+def test_is_overloaded_text_empty_string_false():
+    assert ts._is_overloaded_text("", tb.CLAUDE) is False
+
+
+def test_is_overloaded_text_matches_real_cli_message():
+    # Real CLI text seen in the wild: "API Error: 529 Overloaded. This is a server-side
+    # issue, usually temporary — try again in a moment. If it persists, check
+    # https://status.claude.com."
+    text = ("API Error: 529 Overloaded. This is a server-side issue, usually temporary — "
+            "try again in a moment. If it persists, check https://status.claude.com.")
+    assert ts._is_overloaded_text(text, tb.CLAUDE) is True
+
+
+def test_is_overloaded_text_matches_every_marker_for_claude():
+    for marker in tb.CLAUDE.overloaded_markers:
+        assert ts._is_overloaded_text(marker, tb.CLAUDE) is True
+        assert ts._is_overloaded_text(marker.upper(), tb.CLAUDE) is True
+
+
+def test_is_overloaded_text_unrelated_text_false():
+    assert ts._is_overloaded_text("everything is fine", tb.CLAUDE) is False
+
+
+def test_is_overloaded_text_no_markers_for_backend_without_them():
+    assert ts._is_overloaded_text("anything at all", tb.COPILOT) is False
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +256,23 @@ def test_handle_auth_error_sets_friendly_message():
     process.terminate.assert_called_once()
 
 
+def test_handle_overloaded_sets_state_and_terminates_process():
+    process = Mock()
+    handled = ts._handle_overloaded("API Error: 529 Overloaded.", process, "label", tb.CLAUDE)
+    assert handled is True
+    assert ts._state.server_overloaded_hit is True
+    assert ts._state.stop_event.is_set()
+    process.terminate.assert_called_once()
+
+
+def test_handle_overloaded_no_match_returns_false_without_side_effects():
+    process = Mock()
+    handled = ts._handle_overloaded("all good", process, "label", tb.CLAUDE)
+    assert handled is False
+    assert ts._state.server_overloaded_hit is False
+    process.terminate.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # _log_session_result
 # ---------------------------------------------------------------------------
@@ -251,6 +297,11 @@ def test_log_session_result_nonzero_exit_fails(tmp_path):
     assert ts._log_session_result("Session [X]", 1, log_path) is False
 
 
+def test_log_session_result_overloaded_stops_before_checking_exit_code(tmp_path):
+    ts._state.server_overloaded_hit = True
+    assert ts._log_session_result("Session [X]", 0, tmp_path / "log.txt") is False
+
+
 # ---------------------------------------------------------------------------
 # wait_out_usage_limit / run_with_usage_limit_retry
 # ---------------------------------------------------------------------------
@@ -263,6 +314,7 @@ def test_log_session_result_nonzero_exit_fails(tmp_path):
 def _no_real_wait(monkeypatch):
     monkeypatch.setattr(ts, "USAGE_LIMIT_RETRY_WAIT_SEC", 0.01)
     monkeypatch.setattr(ts, "USAGE_LIMIT_HEARTBEAT_SEC", 0.01)
+    monkeypatch.setattr(ts, "SERVER_OVERLOADED_RETRY_WAIT_SEC", 0.01)
 
 
 def _fake_run_fn(results):
@@ -320,4 +372,56 @@ def test_wait_out_usage_limit_clears_state():
     ts._state.stop_event.set()
     ts.wait_out_usage_limit("Thing", 1)
     assert ts._state.usage_limit_hit is False
+    assert not ts._state.stop_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# wait_out_server_overload / run_with_usage_limit_retry (overload path)
+# ---------------------------------------------------------------------------
+# Mirrors the usage-limit tests above: a server-overload stop (e.g. Anthropic's 529) is
+# also a pause, not a failure, and goes through the very same run_with_usage_limit_retry
+# loop — just waiting out SERVER_OVERLOADED_RETRY_WAIT_SEC (monkeypatched to ~0 above)
+# instead of USAGE_LIMIT_RETRY_WAIT_SEC between attempts.
+
+def _fake_run_fn_overload(results):
+    """Like _fake_run_fn, but the second element of each pair sets
+    _state.server_overloaded_hit instead of _state.usage_limit_hit."""
+    calls = []
+
+    def run_fn() -> bool:
+        ok, hits_overload = results[len(calls)]
+        calls.append(ok)
+        ts._state.server_overloaded_hit = hits_overload
+        return ok
+
+    run_fn.calls = calls
+    return run_fn
+
+
+def test_run_with_usage_limit_retry_retries_on_overload_until_success():
+    run_fn = _fake_run_fn_overload([(False, True), (False, True), (True, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is True
+    assert len(run_fn.calls) == 3
+    assert ts._state.server_overloaded_hit is False
+
+
+def test_run_with_usage_limit_retry_stops_retrying_overload_once_a_real_failure_occurs():
+    run_fn = _fake_run_fn_overload([(False, True), (False, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is False
+    assert len(run_fn.calls) == 2
+
+
+def test_run_with_usage_limit_retry_does_not_retry_overload_for_an_auth_error():
+    # An auth error never sets server_overloaded_hit — run_fn should only be called once.
+    ts._state.auth_error_hit = True
+    run_fn = _fake_run_fn_overload([(False, False)])
+    assert ts.run_with_usage_limit_retry(run_fn, "Thing") is False
+    assert len(run_fn.calls) == 1
+
+
+def test_wait_out_server_overload_clears_state():
+    ts._state.server_overloaded_hit = True
+    ts._state.stop_event.set()
+    ts.wait_out_server_overload("Thing", 1)
+    assert ts._state.server_overloaded_hit is False
     assert not ts._state.stop_event.is_set()

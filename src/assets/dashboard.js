@@ -1114,7 +1114,7 @@ function formatClarifyLogLine(text) {
   if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "✅", time, msg };
   if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "❌", time, msg };
   if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "⚠️", time, msg: msg.replace(/^\[!\]\s*/, "") };
-  if (/usage limit reached|reached the .* limit/i.test(msg)) return { cls: "warn", icon: "⚠️", time, msg };
+  if (/usage limit reached|reached the .* limit|overloaded/i.test(msg)) return { cls: "warn", icon: "⚠️", time, msg };
   return { cls: "plain", icon: "•", time, msg };
 }
 

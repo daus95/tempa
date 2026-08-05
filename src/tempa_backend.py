@@ -82,6 +82,7 @@ class Backend:
     extract_session_id: Callable[[dict], str | None]
     usage_limit_markers: tuple[str, ...]
     auth_error_markers: tuple[str, ...]
+    overloaded_markers: tuple[str, ...]
     friendly_auth_error_message: Callable[[str], str]
     reasoning_effort_choices: Callable[[str], tuple[str, ...]]
 
@@ -225,6 +226,15 @@ CLAUDE = Backend(
         "invalid x-api-key",
         "invalid bearer token",
     ),
+    # Markers for a transient, server-side "the API is overloaded" response (Anthropic's
+    # documented 529 status) — as opposed to a usage limit or a real failure. Observed live,
+    # verbatim: "API Error: 529 Overloaded. This is a server-side issue, usually temporary —
+    # try again in a moment. If it persists, check https://status.claude.com." Also covers
+    # the raw JSON error type Anthropic uses for the same condition ("overloaded_error").
+    overloaded_markers=(
+        "529 overloaded",
+        "overloaded_error",
+    ),
     friendly_auth_error_message=_claude_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CLAUDE_EFFORT_LEVELS,
 )
@@ -308,6 +318,9 @@ COPILOT = Backend(
         "copilot login",
         "unauthorized",
     ),
+    # No transient-overload wording confirmed live for this backend yet — left empty
+    # rather than guessing (see the false-positive caution above for auth_error_markers).
+    overloaded_markers=(),
     friendly_auth_error_message=_copilot_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: COPILOT_EFFORT_LEVELS,
 )
@@ -382,6 +395,9 @@ CODEX = Backend(
         "invalid api key",
         "unauthorized",
     ),
+    # No transient-overload wording confirmed live for this backend yet — left empty
+    # rather than guessing (see the false-positive caution above for auth_error_markers).
+    overloaded_markers=(),
     friendly_auth_error_message=_codex_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CODEX_MODEL_REASONING_LEVELS.get(model.strip().lower(), CODEX_DEFAULT_EFFORT_LEVELS),
 )
