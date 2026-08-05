@@ -8,6 +8,20 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A transient "529 Overloaded" (or similar server-side-overload) response from the
+  configured backend's API made `clarify`/`implement`/`verify` mark the in-progress
+  epic/session as failed and stop the agent runner entirely**, even though nothing was
+  actually broken — the CLI's raw text (e.g. Claude Code's `API Error: 529 Overloaded.
+  This is a server-side issue, usually temporary — try again in a moment.`) didn't match
+  any known usage-limit or auth-error marker, so it fell through to a plain failure. Added
+  a third failure category alongside usage-limit and auth-error detection
+  (`overloaded_markers` on `Backend`, `_state.server_overloaded_hit`): an overload stop now
+  pauses for 5 minutes (`SERVER_OVERLOADED_RETRY_WAIT_SEC`) and retries automatically,
+  leaving the epic/session resumable exactly like a usage-limit stop does, instead of
+  marking it failed.
+
 ## [0.4.8] - 2026-08-05
 
 ### Fixed

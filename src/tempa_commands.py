@@ -107,6 +107,8 @@ def run_test() -> None:
         log(f"TEST stopped — authentication failed (see message above; log: {log_path.name})")
     elif _state.usage_limit_hit:
         log(f"TEST stopped — usage limit reached (see log: {log_path.name})")
+    elif _state.server_overloaded_hit:
+        log(f"TEST stopped — backend API overloaded, a transient issue (see log: {log_path.name})")
     elif exit_code != 0:
         log(f"TEST FAILED — {backend.label} exited with code {exit_code} (see log: {log_path.name})")
     elif not done_file.exists():

@@ -39,6 +39,7 @@ from tempa_session import (
     run_qa_session,
     run_session,
     run_with_usage_limit_retry,
+    wait_out_server_overload,
     wait_out_usage_limit,
 )
 
@@ -355,6 +356,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
         log(f"features_per_session override: {features_override}", to_console=False)
 
     usage_limit_retries = 0
+    overload_retries = 0
     while True:
         while not _state.stop_event.is_set():
             try:
@@ -376,6 +378,13 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             # and re-entering the poll loop continues it rather than starting over.
             usage_limit_retries += 1
             wait_out_usage_limit("Implementation", usage_limit_retries)
+            continue
+        if _state.server_overloaded_hit:
+            # Not a real stop either — same reasoning as the usage-limit branch above: the
+            # epic/QA in progress was left resumable, so waiting out the overload and
+            # re-entering the poll loop continues it rather than starting over.
+            overload_retries += 1
+            wait_out_server_overload("Implementation", overload_retries)
             continue
         if _state.all_done:
             log("All epics done. Agent runner stopped successfully.")
