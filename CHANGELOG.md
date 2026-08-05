@@ -8,6 +8,21 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A clarification round that finds zero findings could leave "Finalized Clarification"
+  and "Start Implementation" stuck blocked forever**, even though the PRD was genuinely
+  clean. The finalize/implement readiness gates read the most recently *started*
+  clarification file's own finding tags (deliberately, so a resolved critical finding can't
+  keep counting forever — see `_latest_evaluation_findings`) — but a fresh evaluate pass
+  that finds nothing leaves no new file behind to read (there's nothing to write per
+  `prompt/clarification.md`), so the gate kept reading whichever older file still had
+  findings in it. Added `config.json`'s `last_clean_evaluation_at`, stamped whenever a
+  fresh evaluate pass reports zero critical/major/minor findings
+  (`_stamp_clean_evaluation_if_zero` in `tempa_clarify.py`); the readiness gate now treats
+  a clean stamp newer than the latest finding-bearing file as the current, authoritative
+  state.
+
 ## [0.4.7] - 2026-08-05
 
 ### Added

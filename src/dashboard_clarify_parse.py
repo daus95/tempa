@@ -213,7 +213,7 @@ def _file_severity_stats(path: Path, timings: dict | None = None) -> dict | None
     }
 
 
-def _latest_evaluation_findings(files: list[dict]) -> dict:
+def _latest_evaluation_findings(files: list[dict], clean_since: float = 0) -> dict:
     """True critical/major/minor counts from ONLY the most recently started
     evaluation round's file (by "started_at", see _file_started_at) — NOT summed
     across every clarification file ever produced. Every past round's file is
@@ -233,7 +233,21 @@ def _latest_evaluation_findings(files: list[dict]) -> dict:
     clarification file itself — see _record_clarify_applied_state's docstring
     below). A finding counts here whether or not it's been answered: being
     answered means a resolution was proposed, not that the file stopped listing it
-    as a finding."""
+    as a finding.
+
+    `clean_since` (config.json's "last_clean_evaluation_at", stamped by
+    _stamp_clean_evaluation_if_zero in tempa_clarify.py) is the one signal this
+    file-based approach can't produce on its own: a fresh evaluate pass that finds
+    zero findings across every severity leaves no new file behind (per
+    prompt/clarification.md, the agent only writes a file when there's a finding to
+    record), so without this, the gate would keep reading whatever the last
+    finding-bearing file said even though a more recent, genuinely clean round has
+    already superseded it. If `clean_since` is newer than the latest file's
+    started_at (or there's no file at all), the round it represents wins and this
+    returns all-zero."""
+    latest_started_at = max((f.get("started_at", 0) for f in files), default=0)
+    if clean_since and clean_since > latest_started_at:
+        return {"critical": 0, "major": 0, "minor": 0}
     if not files:
         return {"critical": 0, "major": 0, "minor": 0}
     latest = max(files, key=lambda f: f.get("started_at", 0))

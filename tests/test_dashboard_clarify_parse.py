@@ -229,6 +229,25 @@ def test_latest_evaluation_findings_empty_list():
     assert dcp._latest_evaluation_findings([]) == {"critical": 0, "major": 0, "minor": 0}
 
 
+def test_latest_evaluation_findings_clean_since_newer_than_latest_file_wins():
+    # Regression: a stale finding-bearing file from an old round must not keep
+    # blocking finalize/implement once a more recent evaluate pass came back
+    # completely clean (and therefore left no new file behind to read instead).
+    files = [{"started_at": 100, "critical": {"total": 2}, "major": {"total": 1}, "minor": {"total": 0}}]
+    assert dcp._latest_evaluation_findings(files, clean_since=200) == {"critical": 0, "major": 0, "minor": 0}
+
+
+def test_latest_evaluation_findings_clean_since_older_than_latest_file_is_ignored():
+    # A clean stamp from BEFORE the latest finding-bearing file must not mask
+    # findings a later round genuinely reported.
+    files = [{"started_at": 200, "critical": {"total": 2}, "major": {"total": 1}, "minor": {"total": 0}}]
+    assert dcp._latest_evaluation_findings(files, clean_since=100) == {"critical": 2, "major": 1, "minor": 0}
+
+
+def test_latest_evaluation_findings_clean_since_with_no_files_at_all():
+    assert dcp._latest_evaluation_findings([], clean_since=100) == {"critical": 0, "major": 0, "minor": 0}
+
+
 # ---------------------------------------------------------------------------
 # _clarify_finalize_status
 # ---------------------------------------------------------------------------

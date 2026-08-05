@@ -64,6 +64,21 @@ def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> No
     save_config(config)
 
 
+def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, minor: int) -> None:
+    """If a fresh evaluate pass found truly zero findings (every severity), stamp
+    config["last_clean_evaluation_at"] with the current time (caller still has to
+    save_config). This covers the one case the file-based readiness gate
+    (_latest_evaluation_findings in dashboard_clarify_parse.py) can't see on its own:
+    per prompt/clarification.md the agent only writes a new clarification file when
+    there's a finding to record, so a truly-clean round leaves no new file behind —
+    the gate would otherwise keep reading whatever the last finding-bearing file
+    said, even if that file is from an old round whose criticals/majors have since
+    been resolved. Any round with even one remaining finding (of any severity) still
+    gets its own file, so this only fires for the all-zero case."""
+    if critical == 0 and major == 0 and minor == 0:
+        config["last_clean_evaluation_at"] = time.time()
+
+
 def _clarification_report_files(folder: Path, since: float) -> list[Path]:
     """Return .md files in `folder` last modified at/after `since` (epoch seconds) —
     i.e. the report files produced/updated by the evaluation that just ran."""
@@ -121,6 +136,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor)
     # Stamps *how* the current last_clarification_findings was produced — an
     # evaluate pass here, vs an apply pass in _run_apply_step() — so the dashboard's
     # finalize gate can tell "criticals were answered and applied" apart from "a
@@ -372,6 +388,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         critical = findings.get("critical", 0)
         major = findings.get("major", 0)
         minor = findings.get("minor", 0)
+        _stamp_clean_evaluation_if_zero(config, critical, major, minor)
         config["last_clarification_action"] = "evaluate"
         config["last_clarification_round"] = run_number
         save_config(config)

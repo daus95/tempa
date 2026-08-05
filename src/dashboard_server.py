@@ -138,8 +138,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             unanswered, answered = _clarify_files_overview(
                 self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
             )
-            findings = _latest_evaluation_findings(unanswered + answered)
             dashboard_config = _load_dashboard_config()
+            findings = _latest_evaluation_findings(
+                unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
+            )
             last_action = dashboard_config.get("last_clarification_action")
             round_ = dashboard_config.get("last_clarification_round") or 0
             max_round = dashboard_config.get("max_clarification_run") or 0
@@ -545,7 +547,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         unanswered, answered = _clarify_files_overview(
             self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
         )
-        findings = _latest_evaluation_findings(unanswered + answered)
+        findings = _latest_evaluation_findings(
+            unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
+        )
         requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
         if not _implement_readiness_status(findings, True, requirement)["ready"]:
             # Wording matches the requirement actually configured (dashboard Settings'
