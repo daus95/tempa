@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-08-05
+
 ### Fixed
 
 - **A transient "529 Overloaded" (or similar server-side-overload) response from the
