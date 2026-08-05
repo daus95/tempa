@@ -56,6 +56,14 @@ def test_is_usage_limit_text_unrelated_text_false():
     assert ts._is_usage_limit_text("everything is fine", tb.CLAUDE) is False
 
 
+def test_is_usage_limit_text_weekly_limit_message():
+    # Real CLI text seen in the wild: "Agent terminated early due to an API error:
+    # You've hit your weekly limit · resets 11am (Asia/Jakarta)". Regression guard —
+    # this used to fall through as a plain error instead of triggering wait/retry.
+    text = "Agent terminated early due to an API error: You've hit your weekly limit · resets 11am (Asia/Jakarta)"
+    assert ts._is_usage_limit_text(text, tb.CLAUDE) is True
+
+
 def test_is_usage_limit_text_one_backends_marker_does_not_match_another():
     # codex's marker text shouldn't accidentally trip claude's detector.
     codex_marker = tb.CODEX.usage_limit_markers[0]
