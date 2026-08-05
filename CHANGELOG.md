@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude Code's "weekly limit" message wasn't recognized as a usage-limit stop**, so
+  hitting it made `clarify`/`implement`/`verify` exit with a plain error instead of waiting
+  30 minutes and retrying (the behavior added in 0.4.6). The CLI's actual wording — "You've
+  hit your weekly limit · resets ..." — didn't match any of `CLAUDE.usage_limit_markers`,
+  which only covered the 5-hour/session limit phrasings. Added `"hit your weekly limit"`
+  and `"weekly limit reached"` markers.
+
 ## [0.4.7] - 2026-08-05
 
 ### Added

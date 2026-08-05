@@ -210,6 +210,8 @@ CLAUDE = Backend(
         "claude usage limit reached",
         "usage limit exceeded",
         "5-hour limit reached",
+        "hit your weekly limit",
+        "weekly limit reached",
     ),
     # Markers emitted by the claude CLI (merged stdout/stderr) when the API rejects a
     # request due to bad/expired credentials — expired OAuth login, revoked/invalid API
