@@ -69,9 +69,11 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     workspace_root_json = json.dumps(_workspace_root())
     workspace_can_close_json = json.dumps(_workspace_can_close())
     principles_set_json = json.dumps(bool(tempa_config.read_principles()))
-    latest_findings = _latest_evaluation_findings(clarify_unanswered + clarify_answered)
-    clarify_findings_json = json.dumps(latest_findings, ensure_ascii=False)
     dashboard_config = _load_dashboard_config()
+    latest_findings = _latest_evaluation_findings(
+        clarify_unanswered + clarify_answered, dashboard_config.get("last_clean_evaluation_at", 0)
+    )
+    clarify_findings_json = json.dumps(latest_findings, ensure_ascii=False)
     last_action = dashboard_config.get("last_clarification_action")
     round_ = dashboard_config.get("last_clarification_round") or 0
     max_round = dashboard_config.get("max_clarification_run") or 0

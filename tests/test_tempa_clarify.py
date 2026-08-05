@@ -191,3 +191,21 @@ def test_fill_then_backlog_reclassifies_as_unapplied(tmp_path):
     unanswered, unapplied = tc._clarification_backlog(tmp_path, {})
     assert unanswered == []
     assert unapplied == [f]
+
+
+# ---------------------------------------------------------------------------
+# _stamp_clean_evaluation_if_zero
+# ---------------------------------------------------------------------------
+
+def test_stamp_clean_evaluation_all_zero_sets_timestamp():
+    config = {}
+    tc._stamp_clean_evaluation_if_zero(config, critical=0, major=0, minor=0)
+    assert isinstance(config.get("last_clean_evaluation_at"), float)
+    assert config["last_clean_evaluation_at"] > 0
+
+
+def test_stamp_clean_evaluation_any_nonzero_severity_leaves_config_untouched():
+    for critical, major, minor in [(1, 0, 0), (0, 1, 0), (0, 0, 1), (2, 3, 4)]:
+        config = {}
+        tc._stamp_clean_evaluation_if_zero(config, critical, major, minor)
+        assert "last_clean_evaluation_at" not in config

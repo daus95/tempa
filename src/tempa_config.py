@@ -209,6 +209,7 @@ DEFAULT_CONFIG = {
     "max_clarification_run": 20,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
+    "last_clean_evaluation_at": 0,
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
