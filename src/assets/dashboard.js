@@ -246,6 +246,9 @@ const state = {
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
   epics: [],
+  // Server-computed (see _implementation_has_started): has any epic actually run yet?
+  // Drives the Start -> Continue Implementation relabeling of all three buttons.
+  implementStarted: false,
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
@@ -512,6 +515,7 @@ function renderHomeWorkflow() {
   const step3Locked = step2Locked || !ir.ready;
   homeStep3.classList.toggle("locked", step3Locked);
   homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
+  updateImplementButtonLabels();
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
     : !ir.hasRun
@@ -605,6 +609,7 @@ homeClearAllBtn.addEventListener("click", async () => {
     toast("All data cleared successfully.");
     await refreshClarifyList();
     state.epics = [];
+    state.implementStarted = false;
     renderHomeWorkflow();
   } catch (e) {
     toast("Network error while clearing.", true);
@@ -1337,10 +1342,31 @@ function renderImplementGate() {
   ]);
 }
 
+// Start -> Continue Implementation, the same relabeling the clarification buttons
+// already get (see renderFinalizeGate). Once any epic has run, "Start" is misleading:
+// the run resumes the existing plan where it left off rather than beginning anything.
+// Applied to all three buttons that trigger the same run (Home step 3, the
+// Clarification ready banner, the Implementation header) so they never disagree.
+// Continuing also resets any `failed` epic back to pending first — server-side, in
+// _start_implement_run — which is what the tooltip promises here.
+function updateImplementButtonLabels() {
+  const started = state.implementStarted;
+  const label = started ? "Continue Implementation" : "Start Implementation";
+  const tip = started
+    ? "Resumes the existing plan. Any epic left in the failed state is reset back to " +
+      "pending first (same as `tempa implement --reset-failed`)."
+    : "";
+  for (const btn of [homeStartImplementBtn, clarifyStartImplementBtn, startImplementBtn]) {
+    btn.querySelector("span:last-child").textContent = label;
+    btn.title = tip;
+  }
+}
+
 function updateImplementControls() {
   startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
+  updateImplementButtonLabels();
   renderImplementGate();
 }
 
@@ -1366,6 +1392,7 @@ async function refreshImplementRun() {
     }
     state.implementRun.progress = data.progress;
     state.epics = data.epics || [];
+    state.implementStarted = !!data.started;
     renderImplementLog();
     renderImplementStatus();
     const wasRunning = state.implementRun.running;

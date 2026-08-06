@@ -406,6 +406,13 @@ button, so it holds for the dashboard regardless of what the page shows. The
 **Status** tab shows live epic/feature progress and QA results; **Log** shows the raw
 console output; **Stop Implementation** is available while it's running.
 
+Once any epic has actually run, the button relabels itself to **Continue Implementation** —
+the run resumes the existing plan rather than starting anything — and clicking it resets any
+epic left in the `failed` state back to `pending` first (the same thing
+`tempa implement --reset-failed` does), then continues. Without that, a single failed epic
+would make every click halt on the spot, since `implement` refuses to work past one. See
+[docs/start-implementation.md](docs/start-implementation.md).
+
 **Clear All**, at the bottom of Home, deletes all plan/QA/log/clarification results
 (your specification files are never touched) — useful for restarting the clarification or
 implementation loop from scratch. This cannot be undone.

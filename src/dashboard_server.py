@@ -39,6 +39,7 @@ from dashboard_config import (
 )
 from dashboard_runs import (
     _epic_sessions,
+    _implementation_has_started,
     _start_clarify_run,
     _start_implement_run,
     _stop_implement_run,
@@ -265,6 +266,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except ValueError:
             since = 0
         run = self.server.implement_run
+        # Epics are read fresh from config.json on every poll (not cached) — the Status
+        # tab shows the same data the "Log" tab's run is actively writing into
+        # config.json, so it needs to reflect live progress too.
+        epics = _epic_sessions()
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -272,10 +277,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
-                # Epics are read fresh from config.json on every poll (not cached) —
-                # the Status tab shows the same data the "Log" tab's run is actively
-                # writing into config.json, so it needs to reflect live progress too.
-                "epics": _epic_sessions(),
+                "epics": epics,
+                # Relabels the three Start Implementation buttons to "Continue
+                # Implementation" once any epic has actually run — computed here so
+                # every surface agrees (see _implementation_has_started).
+                "started": _implementation_has_started(epics),
             })
 
     def _handle_config_get(self) -> None:
