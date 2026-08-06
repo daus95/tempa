@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-08-06
+
 ### Added
 
 - **A "Stop Finalize" button.** "Finalized Clarification" now swaps to "Stop Finalize" for as
