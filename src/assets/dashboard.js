@@ -1780,6 +1780,13 @@ settingsSaveBtn.addEventListener("click", async () => {
     fillSettingsForm(data.config);
     settingsSaveStatus.textContent = "Saved.";
     toast("Settings saved.");
+    // Saved fine, but a run already in flight can't pick the new value up — surfaced as a
+    // modal rather than a toast because it contradicts what the user is about to watch
+    // happen in the log (see _max_clarification_run_change_warning in dashboard_runs.py).
+    if (data.warning) {
+      settingsSaveStatus.textContent = "Saved — applies from the next Finalized Clarification run.";
+      await alertModal(data.warning, { title: "Finalized Clarification Is Already Running" });
+    }
   } catch (e) {
     settingsSaveStatus.textContent = "Network error while saving.";
     settingsSaveStatus.classList.add("err");

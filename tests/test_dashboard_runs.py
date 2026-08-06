@@ -117,6 +117,60 @@ def test_implementation_started_when_only_a_last_run_stamp_remains():
     assert dr._implementation_has_started(epics) is True
 
 
+# ---------------------------------------------------------------------------
+# _max_clarification_run_change_warning — saving a new Max Clarification Runs
+# while `clarify --finalize` is already running (it snapshots that setting at
+# process start, so the running loop can't pick the new value up).
+# ---------------------------------------------------------------------------
+def _server_with_run(running: bool, mode: str | None):
+    run = dr._new_clarify_run_state()
+    run["running"] = running
+    run["mode"] = mode
+    return SimpleNamespace(clarify_run=run)
+
+
+def test_no_warning_when_the_value_did_not_change():
+    server = _server_with_run(True, "finalize")
+    assert dr._max_clarification_run_change_warning(server, 25, 25) is None
+
+
+def test_no_warning_when_nothing_is_running():
+    server = _server_with_run(False, None)
+    assert dr._max_clarification_run_change_warning(server, 25, 10) is None
+
+
+def test_no_warning_for_runs_that_do_not_read_the_setting():
+    # Only `clarify --finalize` loops on max_clarification_run; a plain evaluate or an
+    # apply pass is a single session that never looks at it.
+    for mode in ("run", "apply"):
+        server = _server_with_run(True, mode)
+        assert dr._max_clarification_run_change_warning(server, 25, 10) is None, mode
+
+
+def test_warning_names_both_limits_while_finalize_is_running():
+    server = _server_with_run(True, "finalize")
+    warning = dr._max_clarification_run_change_warning(server, 25, 10)
+    assert warning is not None
+    assert "10" in warning and "25" in warning
+    assert "next Finalized Clarification run" in warning
+
+
+def test_warning_survives_a_missing_previous_value():
+    # config.json hand-edited to drop the key entirely — still worth warning, just
+    # without a concrete old number to quote.
+    server = _server_with_run(True, "finalize")
+    warning = dr._max_clarification_run_change_warning(server, None, 10)
+    assert warning is not None
+    assert "its original limit" in warning
+
+
+def test_warning_also_fires_when_the_limit_is_raised():
+    # Raising it mid-run is the same trap in the other direction: the running loop still
+    # stops at the old, lower limit.
+    server = _server_with_run(True, "finalize")
+    assert dr._max_clarification_run_change_warning(server, 10, 25) is not None
+
+
 def test_implementation_has_started_ignores_malformed_entries():
     assert dr._implementation_has_started(["EPIC-01", None]) is False
 
