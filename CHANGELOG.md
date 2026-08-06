@@ -8,6 +8,35 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation that no longer matched the code.** README's Clarification step still
+  described **Finalized Clarification** as staying disabled "until a Finalize readiness
+  panel shows all 3 conditions met" — that gate was removed on both sides (the button is
+  only disabled while a clarify run is in progress, and `_handle_clarify_run_start` has no
+  server-side precondition for mode `finalize`), and the panel is informational with 4
+  items. Rewritten as a readiness panel that tells you how much Finalize will do
+  unsupervised, including the `allow_finalize_with_critical` override and the automatic
+  backlog resolution. README's Start Implementation step likewise still asserted a fixed
+  "no critical or major findings" requirement, predating
+  `implementation_start_requirement`; it now describes the default plus the `no_critical` /
+  `none` levels, the always-applies "clarification has run at least once" condition, and
+  that the requirement is enforced server-side.
+- **`docs/config-json.md` claimed to document every `config.json` key but was missing two**
+  that the readiness gates and the Clarification overview depend on:
+  `last_clarification_action` and `clarify_applied_hashes`. Both are now documented, along
+  with the default values of `features_per_session` / `max_session_run` /
+  `max_clarification_run` and the dashboard Settings field each maps to.
+- **Stale internal docstrings** in `dashboard_clarify_parse._clarify_finalize_status` (still
+  described itself as a gate, and claimed Start Implementation "always requires zero
+  critical and zero major findings regardless of this setting") and in
+  `dashboard_runs._start_clarify_run` (same removed-gate framing).
+
+### Changed
+
+- `CLAUDE.md`: documented the branch-naming convention (`feat/*`, `fix/*`, `docs/*`,
+  `refactor/*`).
+
 ## [0.4.9] - 2026-08-05
 
 ### Fixed

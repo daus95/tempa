@@ -258,9 +258,15 @@ def _clarify_finalize_status(
     findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
     allow_finalize_with_critical: bool = False,
 ) -> dict:
-    """Whether "Finalized Clarification" is currently allowed to run.
+    """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
+    state, NOT a gate: the button itself is only disabled while a clarify run is already
+    in progress (see renderFinalizeGate in dashboard.js, and _handle_clarify_run_start in
+    dashboard_server.py, which deliberately has no server-side precondition for mode
+    "finalize"). "ready" is what the dashboard uses to decide whether to relabel Start
+    Clarification -> Continue Clarification and explain what Finalize would still have to
+    do unsupervised.
 
-    Requires all of:
+    "ready" is True when all of:
       - at least one clarification action has ever completed ("hasRun")
       - that most recent action was a fresh evaluate pass, not a bare apply
         ("lastAction" == "evaluate") — answering criticals and applying them isn't
@@ -275,9 +281,10 @@ def _clarify_finalize_status(
         toggle; off by default). With it on, Finalize is allowed to start with
         critical findings still open, so its automated evaluate/apply loop attempts
         to resolve them unsupervised instead of requiring a human to answer them
-        first. This never relaxes the separate Start Implementation gate
-        (_handle_implement_run_start), which always requires zero critical and zero
-        major findings regardless of this setting.
+        first. This setting never affects the separate Start Implementation gate
+        (_handle_implement_run_start), which is a real gate and follows its own
+        config.json setting, "implementation_start_requirement" — see
+        _implement_readiness_status below.
 
     `last_action` is config.json's "last_clarification_action" (caller's
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —

@@ -339,12 +339,24 @@ process, tech stack, etc.) need your direct input first, so the PRD starts off p
 the right direction.
 
 **Finalized Clarification** automates the rest of that loop (evaluate + apply, repeating
-until clean) — it stays disabled until a **Finalize readiness** panel shows all 3
-conditions met: clarification has run at least once, the latest result came from **Start
-Clarification** itself (not just **Apply Answers** — applying edits the PRD, not the
-finding record, so a fresh evaluation is what actually confirms nothing critical is left),
-and that evaluation shows 0 critical findings. Once it's enabled, click it to let Tempa
-finish off any remaining major/minor findings on its own.
+until clean) — click it to let Tempa finish off any remaining major/minor findings on its
+own. It's clickable whenever no clarify run is already in progress; the **Finalize
+readiness** panel above it is *informational*, telling you how much Finalize will have to
+do unsupervised rather than blocking it:
+
+- Clarification has been run at least once.
+- The latest result came from **Start Clarification** itself, not just **Apply Answers** —
+  applying edits the PRD, not the finding record, so a fresh evaluation is what actually
+  confirms nothing critical is left.
+- That evaluation shows 0 critical findings. Starting Finalize with criticals still open
+  means its automation resolves them for you, unattended — which is why the readiness panel
+  calls it out. Settings' **Allow finalizing with critical findings** switch changes how
+  this line reads (`allow_finalize_with_critical` in
+  [docs/config-json.md](docs/config-json.md)); it doesn't change whether the button works.
+- Whether any unanswered/unapplied backlog is left. Finalize clears it first — unanswered
+  findings get filled in with their own recommendation, then everything ready is applied —
+  before its evaluate → apply loop starts, so a backlog isn't something you have to clean up
+  by hand beforehand.
 
 **When to switch to Finalize:** after a few manual rounds, once you notice the system's
 recommended answers over the last 2 iterations are already consistent/accurate with what you
@@ -379,9 +391,18 @@ re-authenticating can fix it.
 
 ### Step 3 — Start Implementation
 
-Once no critical or major findings remain, **Start Implementation** unlocks (on the Home
-page and in the **Implementation** section) — click it to run the same automated
-plan → implement → QA loop as `tempa implement`. The **Implementation** section's
+Once the most recent clarification evaluation satisfies the configured requirement,
+**Start Implementation** unlocks (on the Home page, the **Clarification** overview, and the
+**Implementation** section) — click it to run the same automated plan → implement → QA loop
+as `tempa implement`. By default that requirement is **no critical and no major findings**,
+but Settings' **Start Implementation requires** control can relax it to *no critical
+findings* (majors carried into implementation) or to *no condition* at all — see
+`implementation_start_requirement` in [docs/config-json.md](docs/config-json.md). Either
+way, clarification must have been run at least once: a workspace with no clarification file
+yet has zero findings simply from having nothing to count, which would otherwise satisfy
+every level trivially. The requirement is enforced server-side too, not just by a greyed-out
+button, so it holds for the dashboard regardless of what the page shows. The
+**Implementation** section's
 **Status** tab shows live epic/feature progress and QA results; **Log** shows the raw
 console output; **Stop Implementation** is available while it's running.
 
