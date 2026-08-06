@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Saving a new "Max Clarification Runs" while a Finalized Clarification run is in progress
+  now warns that the running loop won't pick it up.** `clarify --finalize` reads that setting
+  once, when its process starts, and keeps counting toward it for the whole evaluate/apply
+  loop — so lowering the limit mid-run leaves the log counting `ROUND 17/25` while Settings
+  reads `10`, which looks like the limit isn't enforced at all. The limit is enforced; it
+  just applies from the next finalize run onward (no restart needed — each run is a fresh
+  process). Settings now says so in a modal right after saving, driven by a new `warning`
+  field on `/api/config/save` computed server-side from the actually-running run.
+
 ### Changed
 
 - **The dashboard's "Start Implementation" button becomes "Continue Implementation" once

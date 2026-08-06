@@ -40,6 +40,7 @@ from dashboard_config import (
 from dashboard_runs import (
     _epic_sessions,
     _implementation_has_started,
+    _max_clarification_run_change_warning,
     _start_clarify_run,
     _start_implement_run,
     _stop_implement_run,
@@ -769,6 +770,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
 
         config = tempa_config.load_config()
+        previous_max_clarification_run = config.get("max_clarification_run")
         config["models"] = models
         config["backends"] = backends
         config["reasoning_efforts"] = reasoning_efforts
@@ -779,8 +781,15 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["implementation_start_requirement"] = implementation_start_requirement
         tempa_config.save_config(config)
         print("[settings] configuration saved")
+        # The save itself always succeeds; `warning` is an advisory note about a setting
+        # a run already in flight can no longer pick up (see
+        # _max_clarification_run_change_warning). Computed server-side rather than in the
+        # client, since only the server knows for certain what's running right now.
+        warning = _max_clarification_run_change_warning(
+            self.server, previous_max_clarification_run, max_clarification_run)
         self._send_json(200, {
             "ok": True,
+            "warning": warning,
             "config": {
                 "models": models,
                 "backends": backends,
