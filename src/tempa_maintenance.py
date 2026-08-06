@@ -104,6 +104,7 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("clarify_applied_hashes", None)
     config.pop("last_clean_evaluation_at", None)
     config["last_clarification_round"] = 0
+    config["last_finalize_round"] = 0
     config["last_auto_answer"] = 0
 
 
@@ -229,6 +230,7 @@ def run_clear_all() -> None:
         any(k in config for k in ("last_clarification_action", "last_clarification_findings", "clarify_applied_hashes"))
         or config.get("last_auto_answer", 0) != 0
         or config.get("last_clarification_round", 0) != 0
+        or config.get("last_finalize_round", 0) != 0
         or config.get("last_clean_evaluation_at", 0) != 0
     )
 

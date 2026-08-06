@@ -1,7 +1,7 @@
 """The dashboard HTTP handler.
 
 _DashboardHandler serves the single-page app and the /api/* GET/POST routes (spec browse/
-edit/upload/delete/rename, clarify view/save/run, implement run/stop, clear, workspace
+edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop, clear, workspace
 init/open/close, config get/save). All file access is confined to prd_dir / clar_dir via
 _resolve_within."""
 
@@ -43,6 +43,7 @@ from dashboard_runs import (
     _max_clarification_run_change_warning,
     _start_clarify_run,
     _start_implement_run,
+    _stop_clarify_run,
     _stop_implement_run,
 )
 from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within, build_tree
@@ -147,6 +148,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             last_action = dashboard_config.get("last_clarification_action")
             round_ = dashboard_config.get("last_clarification_round") or 0
             max_round = dashboard_config.get("max_clarification_run") or 0
+            finalize_round = dashboard_config.get("last_finalize_round") or 0
             allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
             implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
             self._send_json(200, {
@@ -157,7 +159,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
                             "finalize": _clarify_finalize_status(
-                                findings, last_action, round_, max_round, allow_finalize_with_critical),
+                                findings, last_action, round_, max_round, allow_finalize_with_critical,
+                                finalize_round),
                             "implementReadiness": _implement_readiness_status(
                                 findings, last_action is not None, implementation_requirement),
                             "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config)},
@@ -252,6 +255,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except ValueError:
             since = 0
         run = self.server.clarify_run
+        # Read fresh from config.json on every poll (not cached) so the finalize
+        # progress badge next to the "Finalized Clarification" button ticks up live,
+        # round by round, the same way implement's epic snapshot does.
+        dashboard_config = _load_dashboard_config()
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -259,6 +266,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"], "mode": run["mode"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
+                "finalizeRound": dashboard_config.get("last_finalize_round") or 0,
+                "maxRound": dashboard_config.get("max_clarification_run") or 0,
             })
 
     def _handle_implement_run_status(self, query: dict) -> None:
@@ -334,6 +343,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_save()
         elif parsed.path == "/api/clarify/run":
             self._handle_clarify_run_start()
+        elif parsed.path == "/api/clarify/stop":
+            self._handle_clarify_run_stop()
         elif parsed.path == "/api/clarify/skip-minor":
             self._handle_clarify_skip_minor_save()
         elif parsed.path == "/api/implement/run":
@@ -514,6 +525,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # tempa_clarify.py). So it's always safe to start, the same as "run"/"apply".
         if not _start_clarify_run(self.server, mode):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_clarify_run_stop(self) -> None:
+        if not _stop_clarify_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Finalized Clarification is not running."})
             return
         self._send_json(200, {"ok": True})
 
@@ -757,7 +774,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         ok, max_clarification_run = _parse_limit("max_clarification_run", required=True)
         if not ok:
-            self._send_json(400, {"ok": False, "error": "Max Clarification Runs must be a positive whole number."})
+            self._send_json(400, {"ok": False, "error": "Max Finalize Clarification Round must be a positive whole number."})
             return
         allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
         implementation_start_requirement = payload.get("implementation_start_requirement")

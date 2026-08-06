@@ -10,7 +10,14 @@ once the first tagged release is cut.
 
 ### Added
 
-- **Saving a new "Max Clarification Runs" while a Finalized Clarification run is in progress
+- **A "Stop Finalize" button.** "Finalized Clarification" now swaps to "Stop Finalize" for as
+  long as that run is in progress (the same Start/Stop toggle "Start Implementation" already
+  has), and clicking it — after a confirm — kills the running `clarify --finalize` subprocess
+  (`taskkill /T /F` on Windows, so its backend CLI child dies with it, same as Stop
+  Implementation). New `_stop_clarify_run` in `dashboard_runs.py` and `POST /api/clarify/stop`
+  in `dashboard_server.py`; only mode `"finalize"` can be stopped this way.
+
+- **Saving a new "Max Finalize Clarification Round" while a Finalized Clarification run is in progress
   now warns that the running loop won't pick it up.** `clarify --finalize` reads that setting
   once, when its process starts, and keeps counting toward it for the whole evaluate/apply
   loop — so lowering the limit mid-run leaves the log counting `ROUND 17/25` while Settings
@@ -20,6 +27,26 @@ once the first tagged release is cut.
   field on `/api/config/save` computed server-side from the actually-running run.
 
 ### Changed
+
+- **Settings' "Max Clarification Runs" is now "Max Finalize Clarification Round"** — the old
+  name read as a cap on clarification in general, but it only ever bounds the automated
+  `clarify --finalize` loop; manual `clarify` runs are unlimited. For the same reason, the
+  Clarification page's "Finalize readiness" panel (and the Home page's Clarification step)
+  now show just **Round N** (rounds run so far, uncapped) instead of **Round N of M**, which
+  wrongly implied manual rounds counted toward that max too.
+
+- **Finalize's round progress is now tracked separately from the all-time round count.**
+  `last_clarification_round` (the "Round N" above) used to be overwritten by `--finalize`
+  with its own in-run counter, so it could visibly go *backwards* the moment a finalize run
+  finished its first round (e.g. drop from `5`, after 5 manual rounds, to `1`) — and then kept
+  climbing with every later manual round, misrepresenting itself as finalize progress. It's
+  now a true running total (`+= 1` on every evaluate pass, manual or finalize alike), while a
+  new `last_clarification_round`-independent counter, `last_finalize_round`, resets to `0` at
+  the start of every `--finalize` run and counts up to `max_clarification_run` within that one
+  run only. That counter is what's now shown as **N / M** next to the "Finalized
+  Clarification" button, live-updated every second while a run is in progress. `tempa clear`
+  now resets the new `last_finalize_round` too, alongside every other tracked clarify field
+  (`_reset_clarify_config_state` in `tempa_maintenance.py`).
 
 - **The dashboard's "Start Implementation" button becomes "Continue Implementation" once
   implementation has actually started**, on all three surfaces that carry it (Home step 3,
