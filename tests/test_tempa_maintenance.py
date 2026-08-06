@@ -150,18 +150,24 @@ def test_reset_clarify_config_state_clears_tracked_keys():
         "last_clarification_findings": {"critical": 1},
         "clarify_applied_hashes": {"f.md": "hash"},
         "last_auto_answer": 5,
+        "last_clarification_round": 7,
+        "last_finalize_round": 3,
     }
     tm._reset_clarify_config_state(config)
     assert "last_clarification_action" not in config
     assert "last_clarification_findings" not in config
     assert "clarify_applied_hashes" not in config
     assert config["last_auto_answer"] == 0
+    assert config["last_clarification_round"] == 0
+    assert config["last_finalize_round"] == 0
 
 
 def test_reset_clarify_config_state_missing_keys_no_error():
     config = {}
     tm._reset_clarify_config_state(config)
     assert config["last_auto_answer"] == 0
+    assert config["last_clarification_round"] == 0
+    assert config["last_finalize_round"] == 0
 
 
 # ---------------------------------------------------------------------------

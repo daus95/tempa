@@ -357,6 +357,14 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     if not _resolve_clarification_backlog(config, clar_dir):
         sys.exit(1)
 
+    # Reset the finalize-only round counter to 0 for every fresh `clarify --finalize`
+    # invocation — unlike last_clarification_round below (a running total across every
+    # evaluate pass ever, manual or finalize), this one exists purely to show progress
+    # against max_run for THIS run, so it always restarts from 0 rather than picking up
+    # wherever a previous finalize run (or manual clarify) left off.
+    config["last_finalize_round"] = 0
+    save_config(config)
+
     while run_number < max_run:
         run_number += 1
 
@@ -390,7 +398,11 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         minor = findings.get("minor", 0)
         _stamp_clean_evaluation_if_zero(config, critical, major, minor)
         config["last_clarification_action"] = "evaluate"
-        config["last_clarification_round"] = run_number
+        # Running total across every evaluate pass ever (manual `clarify` or one iteration
+        # of `clarify --finalize`) — NOT reset here, unlike last_finalize_round above, so
+        # it keeps counting across finalize runs and manual runs alike.
+        config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
+        config["last_finalize_round"] = run_number
         save_config(config)
         report_files = _clarification_report_files(clar_dir, start_ts)
         _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)

@@ -159,9 +159,11 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  stopFinalizeClarifyBtn = $("stopFinalizeClarifyBtn"),
   openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
+  finalizeRoundProgress = $("finalizeRoundProgress"),
   skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
@@ -239,7 +241,7 @@ const state = {
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
-      allowFinalizeWithCritical: false },
+      finalizeRound: 0, allowFinalizeWithCritical: false },
   implementReadiness: INITIAL_IMPLEMENT_READINESS ||
     { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
@@ -453,9 +455,13 @@ function renderHomeWorkflow() {
 
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
+  // Just the round count so far, same as the Clarification page's clarifyRoundBadge —
+  // manual clarification isn't bounded by Max Finalize Clarification Round, so pairing it
+  // with that max here would misleadingly suggest a cap on rounds run outside of Finalize's
+  // own loop.
   const homeFinalize = state.clarifyFinalize;
-  if (homeFinalize.maxRound > 0) {
-    homeClarifyRoundBadge.textContent = `Round ${homeFinalize.round} of ${homeFinalize.maxRound}`;
+  if (homeFinalize.round > 0) {
+    homeClarifyRoundBadge.textContent = `Round ${homeFinalize.round}`;
     homeClarifyRoundBadge.classList.remove("hidden");
   } else {
     homeClarifyRoundBadge.classList.add("hidden");
@@ -1023,11 +1029,26 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
 // a precondition.
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
-  if (st.maxRound > 0) {
-    clarifyRoundBadge.textContent = `Round ${st.round} of ${st.maxRound}`;
+  // Just the round count so far — manual clarification isn't bounded by Max Finalize
+  // Clarification Round, so pairing it with that max here would misleadingly suggest a
+  // cap on rounds run outside of Finalize's own loop. The count against that max is
+  // shown separately, next to the Finalized Clarification button (finalizeRoundProgress).
+  if (st.round > 0) {
+    clarifyRoundBadge.textContent = `Round ${st.round}`;
     clarifyRoundBadge.classList.remove("hidden");
   } else {
     clarifyRoundBadge.classList.add("hidden");
+  }
+  // finalizeRound is the separate counter that restarts from 0 every time a
+  // Finalized Clarification run starts (see run_clarify_finalize in
+  // tempa_clarify.py) — while a run is actually in progress this gets overridden
+  // with fresher, per-second numbers by pollClarifyRun below; this render is only
+  // what's left showing once a run finishes (or on initial page load).
+  if (st.maxRound > 0) {
+    finalizeRoundProgress.textContent = `${st.finalizeRound} / ${st.maxRound}`;
+    finalizeRoundProgress.classList.remove("hidden");
+  } else {
+    finalizeRoundProgress.classList.add("hidden");
   }
   const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
   renderGateChecklist(finalizeGateList, [
@@ -1048,8 +1069,13 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
         : "No unanswered/unapplied backlog — Finalize's loop can start right away" },
   ]);
   // Only actually-in-progress runs disable this button now — the checklist above is
-  // informational, not a precondition (see the comment above this function).
+  // informational, not a precondition (see the comment above this function). While a
+  // finalize run specifically is in progress, swap it for Stop Finalize entirely
+  // (same Start/Stop toggle Implementation already has) rather than just disabling it.
+  const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
   finalizeClarifyBtn.disabled = runDisabled;
+  finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
+  stopFinalizeClarifyBtn.classList.toggle("hidden", !finalizeRunning);
 
   // Once clarification has run at least once but isn't finalize-ready yet, relabel
   // Start Clarification -> Continue Clarification and explain why in plain language,
@@ -1180,6 +1206,13 @@ async function pollClarifyRun() {
     state.clarifyRun.running = data.running;
     clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
+    // Finalize's round counter, read fresh from config.json every poll (see
+    // _handle_clarify_run_status) — ticks up live, round by round, instead of
+    // waiting for the run to finish and /api/tree to pick it up.
+    if (data.mode === "finalize" && data.maxRound > 0) {
+      finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
+      finalizeRoundProgress.classList.remove("hidden");
+    }
     if (!data.running) {
       stopClarifyPolling();
       if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
@@ -1196,13 +1229,15 @@ function startClarifyPolling() {
 
 async function startClarifyRun(mode) {
   if (state.clarifyRun.running) return;
+  // Set before the disabled-state render below so it can already tell this is a
+  // finalize run and show Stop Finalize instead of waiting for the next poll.
+  state.clarifyRun.mode = mode;
   setClarifyRunButtonsDisabled(true);
   clarifyLogPanel.classList.remove("hidden");
   clarifyLogPanel.open = true;
   state.clarifyRun.lines = [];
   state.clarifyRun.progress = null;
   state.clarifyRun.nextIndex = 0;
-  state.clarifyRun.mode = mode;
   clarifyLogStatus.textContent = clarifyRunStatusLabel(mode);
   renderClarifyLog();
   try {
@@ -1239,12 +1274,34 @@ async function checkClarifyRunOnLoad() {
     renderClarifyLog();
     clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
+    if (data.mode === "finalize" && data.maxRound > 0) {
+      finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
+      finalizeRoundProgress.classList.remove("hidden");
+    }
     if (data.running) { clarifyLogPanel.open = true; startClarifyPolling(); }
   } catch (e) { /* ignore — buttons stay enabled */ }
 }
 
+async function stopFinalizeClarifyRun() {
+  if (!(state.clarifyRun.running && state.clarifyRun.mode === "finalize")) return;
+  const ok = await confirmModal("Stop the Finalized Clarification run that is currently in progress?",
+    { title: "Stop Finalize", okLabel: "Stop", danger: true });
+  if (!ok) return;
+  stopFinalizeClarifyBtn.disabled = true;
+  try {
+    const res = await fetch("/api/clarify/stop", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) toast(data.error || "Could not stop Finalized Clarification.", true);
+  } catch (e) {
+    toast("Network error stopping Finalized Clarification.", true);
+  } finally {
+    stopFinalizeClarifyBtn.disabled = false;
+  }
+}
+
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
+stopFinalizeClarifyBtn.addEventListener("click", stopFinalizeClarifyRun);
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
 // With multiple unanswered files, just jump into the first one — same as clicking a
 // row in the "Unanswered" table below, this is only meant to get the user started.

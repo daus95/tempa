@@ -170,6 +170,16 @@ Clarification Overview ("Unanswered" / "Fully answered" sections), even after la
 or answers are applied. Applying answers (`clarify --apply`, or saving in the web UI) never
 touches the clarification files themselves — only the PRD/spec documents and `config.json`.
 
-The dashboard's "Finalize readiness" panel shows **Round N of M**, where N is
-`last_clarification_round` (the most recent evaluate pass) and M is `max_clarification_run` —
-the same limit that bounds the `--finalize` loop above.
+The dashboard's "Finalize readiness" panel shows **Round N**, where N is
+`last_clarification_round` — a running total across *every* evaluate pass ever, manual
+`clarify` and `clarify --finalize` alike — shown alone, with no total, since manual `clarify`
+isn't bounded by `max_clarification_run`.
+
+Progress against that limit is a separate counter, `last_finalize_round`: it resets to `0` at
+the start of every `--finalize` run and counts up to `max_clarification_run` (M) within that
+one run only, independent of the all-time total above. It's shown as **N / M** next to the
+"Finalized Clarification" button, ticking up live once a second while the run is in progress.
+
+While a finalize run is in progress, "Finalized Clarification" is itself replaced by a **Stop
+Finalize** button — clicking it (after a confirmation prompt) kills the running process, the
+same way "Stop Implementation" does for `tempa implement`.

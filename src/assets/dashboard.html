@@ -194,6 +194,10 @@
           <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
             <span>🏁</span><span>Finalized Clarification</span>
           </button>
+          <button type="button" class="clarify-run-btn secondary hidden" id="stopFinalizeClarifyBtn">
+            <span>⏹️</span><span>Stop Finalize</span>
+          </button>
+          <span class="clarify-round-badge hidden" id="finalizeRoundProgress"></span>
         </div>
         <div class="ready-banner hidden" id="implementReadyBanner">
           <div class="ready-banner-text" id="implementReadyBannerText"></div>
@@ -306,7 +310,7 @@
             <input type="number" id="settingsMaxSessionRun" min="1" step="1">
           </div>
           <div class="settings-field">
-            <label for="settingsMaxClarificationRun">Max Clarification Runs</label>
+            <label for="settingsMaxClarificationRun">Max Finalize Clarification Round</label>
             <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
             <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
           </div>

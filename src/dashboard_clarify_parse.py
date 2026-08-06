@@ -256,7 +256,7 @@ def _latest_evaluation_findings(files: list[dict], clean_since: float = 0) -> di
 
 def _clarify_finalize_status(
     findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
-    allow_finalize_with_critical: bool = False,
+    allow_finalize_with_critical: bool = False, finalize_round: int = 0,
 ) -> dict:
     """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
     state, NOT a gate: the button itself is only disabled while a clarify run is already
@@ -292,9 +292,16 @@ def _clarify_finalize_status(
     (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
     _run_apply_step(), and run_clarify_finalize() there.
 
-    `round_`/`max_round` are config.json's "last_clarification_round" /
-    "max_clarification_run" — passed straight through so the dashboard can show
-    "Round N of M" without a separate request."""
+    `round_`/`max_round`/`finalize_round` are config.json's "last_clarification_round" /
+    "max_clarification_run" / "last_finalize_round" — passed straight through so the
+    dashboard can show both numbers without a separate request. `round_` is a running
+    total across every evaluate pass ever (manual `clarify` or one iteration of
+    `clarify --finalize`) and is NOT bounded by `max_round` — only `finalize_round` is:
+    it resets to 0 at the start of every `clarify --finalize` run and counts up to
+    `max_round` within that one run (see run_clarify_finalize in tempa_clarify.py).
+    Shown next to "Finalize readiness" is just `round_` on its own (no total, since it
+    isn't bounded); `finalize_round`/`max_round` together are shown as progress next to
+    the "Finalized Clarification" button instead."""
     fresh_evaluate = last_action == "evaluate"
     critical_ok = findings["critical"] == 0 or allow_finalize_with_critical
     ready = fresh_evaluate and critical_ok
@@ -305,6 +312,7 @@ def _clarify_finalize_status(
         "ready": ready,
         "round": round_,
         "maxRound": max_round,
+        "finalizeRound": finalize_round,
         "allowFinalizeWithCritical": allow_finalize_with_critical,
     }
 

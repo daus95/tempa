@@ -75,6 +75,11 @@ def _new_clarify_run_state() -> dict:
         "lines": [],
         "progress": None,
         "returncode": None,
+        "process": None,
+        # Only meaningful for mode "finalize" — see _stop_clarify_run. "run"/"apply"
+        # are short, self-resolving passes with no Stop button, so nothing ever sets
+        # this for them.
+        "stop_requested": False,
     }
 
 
@@ -82,7 +87,7 @@ _CLARIFY_RUN_ARGS = {"run": ["--noui"], "finalize": ["--finalize"], "apply": ["-
 
 
 def _max_clarification_run_change_warning(server, previous, current) -> str | None:
-    """Warning text for saving a changed "Max Clarification Runs" while a Finalized
+    """Warning text for saving a changed "Max Finalize Clarification Round" while a Finalized
     Clarification run is already in progress — or None when there's nothing to warn about.
 
     `clarify --finalize` reads max_clarification_run ONCE, when its process starts (see
@@ -104,7 +109,7 @@ def _max_clarification_run_change_warning(server, previous, current) -> str | No
             return None
     previous_label = f"its previous limit ({previous})" if isinstance(previous, int) else "its original limit"
     return (
-        f"Max Clarification Runs was saved as {current}, but a Finalized Clarification run is "
+        f"Max Finalize Clarification Round was saved as {current}, but a Finalized Clarification run is "
         f"already in progress and will keep using {previous_label} until it stops — it reads "
         "this setting once, when it starts, so the round counter in its log keeps counting "
         "toward the old limit. Your new value applies from the next Finalized Clarification "
@@ -139,6 +144,8 @@ def _start_clarify_run(server, mode: str) -> bool:
         run["lines"] = []
         run["progress"] = None
         run["returncode"] = None
+        run["process"] = None
+        run["stop_requested"] = False
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
@@ -162,6 +169,12 @@ def _start_clarify_run(server, mode: str) -> bool:
                 with run["lock"]:
                     run["lines"].append(f"[error] Could not start clarify process: {e}")
                 return -1
+            # Tracked so Stop Finalize can kill it (see _stop_clarify_run) — mode
+            # "finalize" is a single subprocess for its whole evaluate/apply loop
+            # (the rounds happen inside tempa_clarify.py, not as separate Popen calls
+            # here), so one PID is all Stop ever needs to kill.
+            with run["lock"]:
+                run["process"] = process
             for raw_line in process.stdout:
                 line = raw_line.strip()
                 if not line:
@@ -172,6 +185,8 @@ def _start_clarify_run(server, mode: str) -> bool:
                     else:
                         run["lines"].append(line)
             process.wait()
+            with run["lock"]:
+                run["process"] = None
             return process.returncode
 
         returncode = run_once(_CLARIFY_RUN_ARGS[mode])
@@ -216,6 +231,37 @@ def _start_clarify_run(server, mode: str) -> bool:
             run["returncode"] = returncode
 
     threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _stop_clarify_run(server) -> bool:
+    """Kill the running `tempa clarify --finalize` subprocess. Mirrors
+    _stop_implement_run below (same `taskkill /T /F` on Windows, to also take out
+    the backend CLI child it spawns, not just the immediate process).
+
+    Only mode "finalize" can be stopped this way — "run"/"apply" are short,
+    self-resolving passes with no Stop button on the dashboard, so they're left
+    alone even if somehow already running. Returns False if finalize isn't what's
+    currently running."""
+    run = server.clarify_run
+    with run["lock"]:
+        if not (run["running"] and run["mode"] == "finalize"):
+            return False
+        run["stop_requested"] = True
+        process = run["process"]
+    if process is None:
+        # Nothing to kill right now (e.g. the brief gap before the first Popen call
+        # completes) — `stop_requested` is already set above, defense in depth in
+        # case that ever matters.
+        return True
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            process.terminate()
+    except OSError:
+        return False
     return True
 
 

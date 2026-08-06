@@ -256,14 +256,16 @@ def test_clarify_finalize_status_no_action_yet():
     result = dcp._clarify_finalize_status({"critical": 0}, None)
     assert result == {
         "hasRun": False, "lastAction": None, "critical": 0, "ready": False,
-        "round": 0, "maxRound": 0, "allowFinalizeWithCritical": False,
+        "round": 0, "maxRound": 0, "finalizeRound": 0, "allowFinalizeWithCritical": False,
     }
 
 
 def test_clarify_finalize_status_round_passthrough():
-    result = dcp._clarify_finalize_status({"critical": 0}, "evaluate", round_=3, max_round=20)
+    result = dcp._clarify_finalize_status(
+        {"critical": 0}, "evaluate", round_=3, max_round=20, finalize_round=1)
     assert result["round"] == 3
     assert result["maxRound"] == 20
+    assert result["finalizeRound"] == 1
 
 
 def test_clarify_finalize_status_apply_alone_not_enough():

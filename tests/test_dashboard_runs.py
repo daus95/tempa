@@ -118,7 +118,7 @@ def test_implementation_started_when_only_a_last_run_stamp_remains():
 
 
 # ---------------------------------------------------------------------------
-# _max_clarification_run_change_warning — saving a new Max Clarification Runs
+# _max_clarification_run_change_warning — saving a new Max Finalize Clarification Round
 # while `clarify --finalize` is already running (it snapshots that setting at
 # process start, so the running loop can't pick the new value up).
 # ---------------------------------------------------------------------------
