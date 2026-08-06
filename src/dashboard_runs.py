@@ -72,11 +72,12 @@ def _start_clarify_run(server, mode: str) -> bool:
     of backlog at a time — until every ready file is applied, INSTEAD of chaining to a
     fresh evaluate after only the first one. Only once nothing is left to apply does it
     chain into a fresh "run" (evaluate) pass — see run_once()/worker() below — since
-    applying never re-verifies against the live PRD itself, and the dashboard's finalize
-    gate requires a fresh evaluate before it'll allow "Finalized Clarification" to
-    proceed (see _clarify_finalize_status in dashboard_clarify_parse.py). Without this,
-    users who only ever click Apply get stuck unable to finalize with no clear next
-    step."""
+    applying never re-verifies against the live PRD itself, so only a fresh evaluate can
+    report what's actually left. Both readiness surfaces are computed from that (the
+    finalize-readiness panel via _clarify_finalize_status, and the real Start
+    Implementation gate via _implement_readiness_status, both in
+    dashboard_clarify_parse.py). Without this, users who only ever click Apply see stale
+    critical/major counts with no clear next step."""
     run = server.clarify_run
     with run["lock"]:
         if run["running"]:
