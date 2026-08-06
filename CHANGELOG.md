@@ -8,7 +8,29 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **The dashboard's "Start Implementation" button becomes "Continue Implementation" once
+  implementation has actually started**, on all three surfaces that carry it (Home step 3,
+  the Clarification ready banner, the Implementation header) — the same Start/Continue
+  relabeling the clarification buttons already had. "Started" means at least one epic has
+  moved off `pending` or carries a `last_run` stamp (a drafted-but-never-run plan is still a
+  Start), and it's computed server-side and reported as the new `started` field of
+  `/api/implement/run`, so the three buttons can't disagree.
+
 ### Fixed
+
+- **A `failed` epic made the dashboard's Start/Continue Implementation button do nothing.**
+  `implement` halts on any failed epic that precedes the next one to work on, so after a
+  session failure every click just re-ran the halt: the log said to run
+  `tempa implement --reset-failed`, but the dashboard had no way to do that — the only way
+  forward was the CLI. The dashboard's implement run now performs that reset itself
+  (`tempa implement --reset-failed`, streamed into the Log tab) before starting
+  `tempa implement`. It's a no-op when nothing is failed, and the CLI's own behavior is
+  unchanged — plain `tempa implement` still halts and still tells you to reset. **Stop
+  Implementation** now also covers this first step: pressing it during the reset pass stops
+  the run instead of letting implement start anyway, and it no longer reports "not running"
+  in the brief gap between the run's two child processes.
 
 - **A provider overload (529) could leave `implement` permanently halted on a `failed`
   epic.** When the AI provider's API reports itself overloaded, `implement` waits and retries

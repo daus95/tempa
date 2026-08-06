@@ -76,6 +76,16 @@ a genuine session failure still stops the runner (exit 1) and still keeps its `f
 status, so it stays visible — fix the cause, then run `tempa implement --reset-failed`
 yourself (see [Recovery](#recovery-if-something-goes-wrong) below).
 
+**On the dashboard, that reset is part of the button.** Once any epic has run, the
+dashboard's **Start Implementation** button relabels itself to **Continue Implementation**,
+and clicking it runs `tempa implement --reset-failed` first (streamed into the Log tab), then
+`tempa implement`. Without it the button would be dead on arrival after any failed session —
+every click would halt immediately on the same failed epic, with the CLI as the only way
+forward. It's a no-op when nothing is failed, so it costs nothing on a clean continue. This
+applies to all three copies of the button (Home step 3, the Clarification ready banner, the
+Implementation header) — they all trigger the same run. The CLI is unchanged: plain
+`tempa implement` still halts on a `failed` epic and tells you to reset it.
+
 ## Epic Status Lifecycle
 
 ```
@@ -106,7 +116,9 @@ tempa show-folders            # active working folder
 ```bash
 tempa implement --reset          # epic on_progress → pending (clears session_id)
 tempa implement --reset-failed   # all failed epics → pending (run this after fixing a real failure;
-                                 #   an overload-induced failure is reset automatically, see above)
+                                 #   an overload-induced failure is reset automatically, and so is
+                                 #   any failure when you click Continue Implementation on the
+                                 #   dashboard — see above)
 tempa implement --reset-qa       # force re-QA for every done epic
 tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)
 tempa implement --clear-plan # clear plan: wipes .tempa/specs/pbi contents + empties the "epic" array
