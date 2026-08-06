@@ -28,6 +28,7 @@ from tempa_config import (
     save_config,
 )
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
+from tempa_maintenance import reset_failed_epics
 from tempa_prompts import (
     build_plan_epics_prompt,
     build_qa_prompt,
@@ -66,6 +67,31 @@ def _validate_and_increment_qa_run(config: dict, index: int, label: str) -> bool
         return False
     config["epic"][index]["qa_total_run"] = qa_total_run + 1
     return True
+
+
+def _reset_failed_before_retry(label: str) -> None:
+    """Clear a leftover `failed` epic status before an automatic retry resumes work —
+    the in-process equivalent of `tempa implement --reset-failed`.
+
+    A session cut short by the backend's API reporting itself overloaded (Anthropic's
+    transient 529) can still end up marked `failed` in config.json: run_session only skips
+    that marking while `_state.server_overloaded_hit` is set, i.e. only when the overload
+    was actually recognized in the streamed output, so an overload that surfaces in some
+    other wording — or that kills the CLI again on the very next attempt — looks like a
+    plain non-zero exit. Once `failed` is on disk it is sticky and fatal: check_and_run
+    halts on any failed epic preceding the next one to work on ("Halted — session [x] at
+    index i has failed"), so every later poll and every later `tempa implement` run would
+    fail the same way until someone reset it by hand. An overload is not a real failure, so
+    reset it here instead and let the retry pick the epic back up."""
+    with _state.lock:
+        config = load_config()
+        reset = reset_failed_epics(config)
+        if not reset:
+            return
+        save_config(config)
+    log(f"{label} — reset {len(reset)} epic(s) left as failed by the interrupted session "
+        f"back to pending before retrying ({', '.join(reset)}); same as "
+        "`tempa implement --reset-failed`.")
 
 
 def check_and_run(features_override: int | None = None) -> None:
@@ -212,7 +238,8 @@ def check_and_run(features_override: int | None = None) -> None:
         for i in range(next_index):
             if config["epic"][i]["status"] == "failed":
                 label = config["epic"][i].get("epic_name", f"epic_{i}")
-                log(f"Halted — session [{label}] at index {i} has failed. Fix it before proceeding.")
+                log(f"Halted — session [{label}] at index {i} has failed. Fix it, then run "
+                    "`tempa implement --reset-failed` (failed → pending) before proceeding.")
                 raise SystemExit(1)
 
         session = config["epic"][next_index]
@@ -382,9 +409,12 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
         if _state.server_overloaded_hit:
             # Not a real stop either — same reasoning as the usage-limit branch above: the
             # epic/QA in progress was left resumable, so waiting out the overload and
-            # re-entering the poll loop continues it rather than starting over.
+            # re-entering the poll loop continues it rather than starting over. The reset
+            # after the wait is what makes "resumable" actually hold when the overload did
+            # leave a `failed` status behind — see _reset_failed_before_retry.
             overload_retries += 1
             wait_out_server_overload("Implementation", overload_retries)
+            _reset_failed_before_retry("Implementation")
             continue
         if _state.all_done:
             log("All epics done. Agent runner stopped successfully.")

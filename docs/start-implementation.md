@@ -51,6 +51,31 @@ over. This is core `implement` behavior — it applies the same way whether you 
 to re-trigger by hand. `clarify`/`clarify --finalize`/`clarify --apply` behave the same way
 for their own usage-limit stops.
 
+**Neither does a provider-side overload (529).** When the AI provider fails to process a
+request because its API is momentarily overloaded — Anthropic's transient `529 Overloaded`
+— nothing on Tempa's or your app's side is broken, so `implement` doesn't exit either: it
+logs the pause, waits **5 minutes** (much shorter than the usage-limit wait, since an
+overload usually clears in minutes), then retries the interrupted epic/QA automatically,
+repeating for as long as the overload lasts.
+
+Before each of those retries resumes, `implement` clears any epic that the interrupted
+session left behind as `failed` in config.json, flipping it back to `pending` — the
+in-process equivalent of `tempa implement --reset-failed`. That step is what makes the retry
+actually able to continue:
+
+- `failed` is only skipped while the overload was *recognized in the streamed output*. An
+  overload that surfaces in different wording, or one that kills the backend CLI again on
+  the very next attempt, reaches Tempa as a plain non-zero exit and gets marked `failed`.
+- `failed` is sticky and blocking: the runner halts on any failed epic that precedes the
+  next one to work on (`Halted — session [x] at index i has failed`) — not just for the rest
+  of that run, but for every `tempa implement` afterwards too.
+
+So without the reset, one 529 could leave the project permanently stuck on a status that
+never represented a real problem. Note the reset is deliberately scoped to this retry path:
+a genuine session failure still stops the runner (exit 1) and still keeps its `failed`
+status, so it stays visible — fix the cause, then run `tempa implement --reset-failed`
+yourself (see [Recovery](#recovery-if-something-goes-wrong) below).
+
 ## Epic Status Lifecycle
 
 ```
@@ -65,7 +90,9 @@ pending ──► on_progress ──► done ──►[QA]──► qa_passed=tr
 
 Epic status is changed to `done` / `require_fixing` by **the agent itself** by editing
 config.json during the session; the harness only marks it `failed` when a session errors out
-(not on a usage-limit stop).
+(not on a usage-limit stop, and not on a recognized provider overload — and a `failed` left
+behind by an overload that *wasn't* recognized is reset back to `pending` before the
+automatic retry, see the 529 note above).
 
 ## Monitor
 
@@ -78,7 +105,8 @@ tempa show-folders            # active working folder
 
 ```bash
 tempa implement --reset          # epic on_progress → pending (clears session_id)
-tempa implement --reset-failed   # all failed epics → pending
+tempa implement --reset-failed   # all failed epics → pending (run this after fixing a real failure;
+                                 #   an overload-induced failure is reset automatically, see above)
 tempa implement --reset-qa       # force re-QA for every done epic
 tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)
 tempa implement --clear-plan # clear plan: wipes .tempa/specs/pbi contents + empties the "epic" array

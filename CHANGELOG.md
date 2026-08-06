@@ -10,6 +10,18 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **A provider overload (529) could leave `implement` permanently halted on a `failed`
+  epic.** When the AI provider's API reports itself overloaded, `implement` waits and retries
+  — but the interrupted session can still have been marked `failed` in config.json (the
+  overload is only skipped when its marker is actually recognized in the streamed output, so
+  an overload in different wording, or one that kills the CLI again on the next attempt,
+  looks like a plain non-zero exit). That status is sticky and blocking: `check_and_run`
+  halts on any failed epic preceding the next one to work on, so both the retry and every
+  later `tempa implement` run kept failing on it until it was reset by hand. The retry now
+  performs that reset itself (`failed` → `pending`, the in-process equivalent of
+  `tempa implement --reset-failed`) before resuming. A real session failure is unaffected —
+  it still stops the runner and keeps its `failed` status. The halt message now also names
+  the command to run (`tempa implement --reset-failed`).
 - **Documentation that no longer matched the code.** README's Clarification step still
   described **Finalized Clarification** as staying disabled "until a Finalize readiness
   panel shows all 3 conditions met" — that gate was removed on both sides (the button is
@@ -31,6 +43,12 @@ once the first tagged release is cut.
   described itself as a gate, and claimed Start Implementation "always requires zero
   critical and zero major findings regardless of this setting") and in
   `dashboard_runs._start_clarify_run` (same removed-gate framing).
+
+### Added
+
+- README (CLI → Step 4) and `docs/start-implementation.md` now document the 529-overload
+  pause/retry behavior, including the automatic `failed` → `pending` reset that happens
+  before the retry resumes.
 
 ### Changed
 

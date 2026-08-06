@@ -550,6 +550,22 @@ Just run this. The system will (automatically, unattended): draft a plan if ther
 yet → implement features one by one → run QA once an epic is done → fix any findings →
 move on to the next epic, until everything is done.
 
+**A backend hiccup does not stop the run.** If the AI provider's own API fails to process a
+request because it is temporarily overloaded (Anthropic's transient **529 Overloaded**),
+Tempa treats it as a pause rather than a failure: it logs that it's waiting, sits out a
+short delay (5 minutes), then retries the interrupted epic/QA automatically — the same way
+it waits out a usage limit (30 minutes). Since the epic being worked on is left resumable,
+the retry continues where it left off instead of starting the epic over.
+
+Before that retry resumes, Tempa also resets any epic the interrupted session left marked
+`failed` in `config.json` back to `pending` — exactly what `tempa implement --reset-failed`
+does by hand. This matters because `failed` is sticky and blocking: the runner deliberately
+halts on a failed epic (`Halted — session [x] at index i has failed`), so without the reset
+a single 529 could leave every later poll — and every later `tempa implement` run — failing
+on that stale status even though nothing was actually broken. A **real** failure still stops
+the runner and still keeps its `failed` status, so it stays visible for you to look at; in
+that case fix the cause and run `tempa implement --reset-failed` yourself before continuing.
+
 Full details (the `--replan`/`--features` flags, work priority, monitoring progress,
 recovering from problems, manual verification): see
 [docs/start-implementation.md](docs/start-implementation.md).
