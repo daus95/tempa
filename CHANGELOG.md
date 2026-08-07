@@ -8,6 +8,13 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex CLI sessions no longer report a false authentication failure when successful
+  command output contains authentication-related application text such as an OpenAPI
+  `#/components/responses/Unauthorized` reference. Failure markers are now evaluated only
+  for plain diagnostic output and structured backend failure events.
+
 ## [0.4.7] - 2026-08-05
 
 ### Added

@@ -85,6 +85,30 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
     return True
 
 
+def _failure_marker_text(raw_line: str, data: dict | None) -> str:
+    """Return text eligible for backend-failure marker matching.
+
+    Backend JSON events can embed arbitrary command output.  Matching markers against the
+    whole serialized event therefore turns application text such as an OpenAPI
+    ``#/components/responses/Unauthorized`` reference into a false CLI authentication
+    failure.  Plain stderr and structured failure events remain eligible; successful and
+    informational JSON events do not.
+    """
+    if data is None:
+        return raw_line
+
+    event_type = str(data.get("type", "")).lower()
+    if event_type == "error" or "failed" in event_type or data.get("is_error") is True:
+        return raw_line
+
+    if event_type == "result":
+        exit_code = data.get("exitCode", data.get("exit_code"))
+        if exit_code not in (None, 0, "0"):
+            return raw_line
+
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Usage-limit pause & retry
 # ---------------------------------------------------------------------------
@@ -252,26 +276,27 @@ def _stream_backend_process(
         for raw_line in process.stdout:
             row_count[0] += 1
             line = raw_line.strip()
-            if _handle_usage_limit(raw_line, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            if _handle_auth_error(raw_line, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
+            data = None
             if line.startswith("{"):
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     data = json.loads(line)
-                    readable = backend.parse_line(data)
-                    if readable:
-                        log_file.write(readable + "\n")
-                        log_file.flush()
-                    if on_json_event:
-                        on_json_event(data)
-                except json.JSONDecodeError:
-                    log_file.write(raw_line)
+
+            marker_text = _failure_marker_text(raw_line, data)
+            if _handle_usage_limit(marker_text, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
+            if _handle_auth_error(marker_text, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
+            if data is not None:
+                readable = backend.parse_line(data)
+                if readable:
+                    log_file.write(readable + "\n")
                     log_file.flush()
+                if on_json_event:
+                    on_json_event(data)
             else:
                 log_file.write(raw_line)
                 log_file.flush()
