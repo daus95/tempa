@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-07
+
 ### Added
 
 - **A separate `clarify_apply` stage for clarify's apply/auto-answer work**, configurable
