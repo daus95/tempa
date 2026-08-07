@@ -271,6 +271,29 @@ def test_run_apply_step_sends_only_backlog_files(tmp_path, isolate_tempa_paths, 
     assert seen["files"] == [backlog_file]  # NOT stale (already-applied.md)
 
 
+def test_run_apply_step_fills_unanswered_findings_with_recommendation_before_applying(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    # Regression: a finding evaluate just wrote (still unanswered) must be filled in with
+    # its own Recommendation BEFORE apply runs — otherwise the finding gets resolved in the
+    # PRD (apply falls back to Recommendation when "Your answer" is blank) but the
+    # clarification file itself is left permanently showing as "Unanswered" in the
+    # dashboard, even though finalize already succeeded.
+    config, clar_dir = _config_with_clar_dir(tmp_path)
+    f = clar_dir / "fresh.md"
+    f.write_text(_item("1", "major", "T", "w", "q", "do the thing", ""), encoding="utf-8")
+
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+    monkeypatch.setattr(tc, "run_apply_clarification_session", lambda *a, **k: True)
+
+    assert tc._run_apply_step(config) is True
+
+    items, _ = tc.parse_file(f, f.read_text(encoding="utf-8"), 0)
+    assert items[0].existing_answer == "do the thing"
+
+
 def test_run_apply_step_resumes_given_session_id(tmp_path, isolate_tempa_paths, monkeypatch):
     config, clar_dir = _config_with_clar_dir(tmp_path)
     (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
