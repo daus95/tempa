@@ -8,6 +8,18 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard icons are now inline Lucide SVGs instead of emoji.** Every button, sidebar entry,
+  status marker, severity dot, and log-line icon in the dashboard (`dashboard.html`/`.js`/`.css`)
+  previously used raw emoji characters, which render inconsistently across platforms/fonts. They're
+  now a small inline `<symbol>` sprite (added once in `dashboard.html`) referenced via
+  `<svg><use></svg>`, with color applied through CSS (`--critical`/`--major`/`--minor`/`--ok`/`--danger`)
+  instead of baked into the glyph. A new `iconSvg()` helper in `dashboard.js` renders icons built
+  dynamically (severity dots, epic/feature status, clarification log lines, checklists). Out of
+  scope: CLI terminal output (`tempa_*.py`) and one `<option>` element's text, since neither can
+  render SVG.
+
 ## [0.4.10] - 2026-08-06
 
 ### Added
