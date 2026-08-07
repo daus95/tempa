@@ -23,6 +23,27 @@ def _epic_sessions() -> list:
     return epics if isinstance(epics, list) else []
 
 
+def _implementation_has_started(epics: list | None = None) -> bool:
+    """Whether implementation has already been run at least once in this workspace —
+    i.e. at least one planned epic has moved off `pending` (on_progress/done/
+    require_fixing/failed) or carries a `last_run` stamp.
+
+    Drives the dashboard's Start/Continue Implementation relabeling (the same
+    Start/Continue treatment the clarification buttons already get) and is reported
+    to the client as the `started` field of /api/implement/run, so all three
+    Start Implementation buttons agree on one server-computed answer. A freshly
+    planned-but-never-run epic array is NOT "started" — a plan alone doesn't mean
+    any work happened."""
+    for epic in (_epic_sessions() if epics is None else epics):
+        if not isinstance(epic, dict):
+            continue
+        if epic.get("last_run"):
+            return True
+        if (epic.get("status") or "pending") != "pending":
+            return True
+    return False
+
+
 def _unapplied_answered_count(server) -> int:
     """How many fully-answered clarification files still don't match config.json's
     "clarify_applied_hashes" — i.e. still need an Apply pass. Used by the apply
@@ -54,10 +75,46 @@ def _new_clarify_run_state() -> dict:
         "lines": [],
         "progress": None,
         "returncode": None,
+        "process": None,
+        # Only meaningful for mode "finalize" — see _stop_clarify_run. "run"/"apply"
+        # are short, self-resolving passes with no Stop button, so nothing ever sets
+        # this for them.
+        "stop_requested": False,
     }
 
 
 _CLARIFY_RUN_ARGS = {"run": ["--noui"], "finalize": ["--finalize"], "apply": ["--apply"]}
+
+
+def _max_clarification_run_change_warning(server, previous, current) -> str | None:
+    """Warning text for saving a changed "Max Finalize Clarification Round" while a Finalized
+    Clarification run is already in progress — or None when there's nothing to warn about.
+
+    `clarify --finalize` reads max_clarification_run ONCE, when its process starts (see
+    run_clarify_finalize in tempa_clarify.py), and keeps using that snapshot for its whole
+    evaluate/apply loop even though it re-reads the rest of config.json every round. So
+    lowering the limit mid-run doesn't shorten the run the user is watching: its rounds keep
+    counting toward the limit that was in effect when it started ("ROUND 17/25" while the
+    Settings field reads 10), which is easily mistaken for the limit not being enforced at
+    all. It is enforced — just from the next finalize run onward. This is the one moment
+    that misunderstanding forms, so it's the moment to say so.
+
+    Only mode "finalize" is warned about: it's the only run that reads this setting. Fresh
+    per-run subprocesses mean nothing needs restarting for the new value to take effect."""
+    if previous == current:
+        return None
+    run = server.clarify_run
+    with run["lock"]:
+        if not (run["running"] and run["mode"] == "finalize"):
+            return None
+    previous_label = f"its previous limit ({previous})" if isinstance(previous, int) else "its original limit"
+    return (
+        f"Max Finalize Clarification Round was saved as {current}, but a Finalized Clarification run is "
+        f"already in progress and will keep using {previous_label} until it stops — it reads "
+        "this setting once, when it starts, so the round counter in its log keeps counting "
+        "toward the old limit. Your new value applies from the next Finalized Clarification "
+        "run onward; nothing needs to be restarted for it to take effect."
+    )
 
 
 def _start_clarify_run(server, mode: str) -> bool:
@@ -72,11 +129,12 @@ def _start_clarify_run(server, mode: str) -> bool:
     of backlog at a time — until every ready file is applied, INSTEAD of chaining to a
     fresh evaluate after only the first one. Only once nothing is left to apply does it
     chain into a fresh "run" (evaluate) pass — see run_once()/worker() below — since
-    applying never re-verifies against the live PRD itself, and the dashboard's finalize
-    gate requires a fresh evaluate before it'll allow "Finalized Clarification" to
-    proceed (see _clarify_finalize_status in dashboard_clarify_parse.py). Without this,
-    users who only ever click Apply get stuck unable to finalize with no clear next
-    step."""
+    applying never re-verifies against the live PRD itself, so only a fresh evaluate can
+    report what's actually left. Both readiness surfaces are computed from that (the
+    finalize-readiness panel via _clarify_finalize_status, and the real Start
+    Implementation gate via _implement_readiness_status, both in
+    dashboard_clarify_parse.py). Without this, users who only ever click Apply see stale
+    critical/major counts with no clear next step."""
     run = server.clarify_run
     with run["lock"]:
         if run["running"]:
@@ -86,6 +144,8 @@ def _start_clarify_run(server, mode: str) -> bool:
         run["lines"] = []
         run["progress"] = None
         run["returncode"] = None
+        run["process"] = None
+        run["stop_requested"] = False
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
@@ -109,6 +169,12 @@ def _start_clarify_run(server, mode: str) -> bool:
                 with run["lock"]:
                     run["lines"].append(f"[error] Could not start clarify process: {e}")
                 return -1
+            # Tracked so Stop Finalize can kill it (see _stop_clarify_run) — mode
+            # "finalize" is a single subprocess for its whole evaluate/apply loop
+            # (the rounds happen inside tempa_clarify.py, not as separate Popen calls
+            # here), so one PID is all Stop ever needs to kill.
+            with run["lock"]:
+                run["process"] = process
             for raw_line in process.stdout:
                 line = raw_line.strip()
                 if not line:
@@ -119,6 +185,8 @@ def _start_clarify_run(server, mode: str) -> bool:
                     else:
                         run["lines"].append(line)
             process.wait()
+            with run["lock"]:
+                run["process"] = None
             return process.returncode
 
         returncode = run_once(_CLARIFY_RUN_ARGS[mode])
@@ -166,6 +234,37 @@ def _start_clarify_run(server, mode: str) -> bool:
     return True
 
 
+def _stop_clarify_run(server) -> bool:
+    """Kill the running `tempa clarify --finalize` subprocess. Mirrors
+    _stop_implement_run below (same `taskkill /T /F` on Windows, to also take out
+    the backend CLI child it spawns, not just the immediate process).
+
+    Only mode "finalize" can be stopped this way — "run"/"apply" are short,
+    self-resolving passes with no Stop button on the dashboard, so they're left
+    alone even if somehow already running. Returns False if finalize isn't what's
+    currently running."""
+    run = server.clarify_run
+    with run["lock"]:
+        if not (run["running"] and run["mode"] == "finalize"):
+            return False
+        run["stop_requested"] = True
+        process = run["process"]
+    if process is None:
+        # Nothing to kill right now (e.g. the brief gap before the first Popen call
+        # completes) — `stop_requested` is already set above, defense in depth in
+        # case that ever matters.
+        return True
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            process.terminate()
+    except OSError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Implementation run (Start / Stop Implementation) — same subprocess/log-polling
 # shape as the clarify run above, but `tempa implement` is a long-running poll loop
@@ -180,13 +279,26 @@ def _new_implement_run_state() -> dict:
         "progress": None,
         "returncode": None,
         "process": None,
+        # Set by _stop_implement_run so the worker knows not to spawn the next child
+        # process — a dashboard implement run is two of them back to back (the
+        # --reset-failed pass, then implement itself), and Stop pressed during the
+        # first one must not be followed by the second one starting anyway.
+        "stop_requested": False,
     }
 
 
 def _start_implement_run(server) -> bool:
     """Start `tempa implement` as a background subprocess, same log-streaming shape
     as _start_clarify_run. Returns False without starting anything if a run is
-    already in progress."""
+    already in progress.
+
+    A `tempa implement --reset-failed` pass always runs first (failed → pending). A
+    single failed epic makes check_and_run halt immediately without touching anything
+    else (see tempa_implement.check_and_run), so without this the dashboard's
+    Continue Implementation button would be dead on arrival after any failed session —
+    the user's only way forward would be the CLI. The reset is a no-op that logs
+    nothing but "No failed sessions found" when nothing is failed, so it's safe to run
+    unconditionally: a never-started workspace can't have a failed epic anyway."""
     run = server.implement_run
     with run["lock"]:
         if run["running"]:
@@ -196,22 +308,30 @@ def _start_implement_run(server) -> bool:
         run["progress"] = None
         run["returncode"] = None
         run["process"] = None
+        run["stop_requested"] = False
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
-        cmd = [sys.executable, str(tempa_py), "implement"]
-        returncode = -1
-        try:
-            process = subprocess.Popen(
-                cmd,
-                # implement's plain run path never calls input() (confirmed: only the
-                # destructive --clear/--clear-plan/--reset* flags do, none of which
-                # this spawns) — DEVNULL is defense in depth, matching the clarify
-                # runner, in case that ever changes.
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
-            )
+
+        def run_once(args: list[str]) -> int:
+            cmd = [sys.executable, str(tempa_py), "implement", *args]
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    # implement's plain run path never calls input() (confirmed: only the
+                    # destructive --clear/--clear-plan flags do — --reset-failed only
+                    # rewrites statuses in config.json and never prompts) — DEVNULL is
+                    # defense in depth, matching the clarify runner, in case that changes.
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                )
+            except OSError as e:
+                with run["lock"]:
+                    run["lines"].append(f"[error] Could not start implement process: {e}")
+                return -1
+            # Tracked so Stop Implementation can kill whichever of the two child
+            # processes is live at the time (see _stop_implement_run).
             with run["lock"]:
                 run["process"] = process
             for raw_line in process.stdout:
@@ -224,10 +344,25 @@ def _start_implement_run(server) -> bool:
                     else:
                         run["lines"].append(line)
             process.wait()
-            returncode = process.returncode
-        except OSError as e:
             with run["lock"]:
-                run["lines"].append(f"[error] Could not start implement process: {e}")
+                run["process"] = None
+            return process.returncode
+
+        returncode = run_once(["--reset-failed"])
+        with run["lock"]:
+            if returncode != 0:
+                # Never fatal on its own: implement itself still refuses to proceed
+                # past a `failed` epic and says so in the log, which is a clearer
+                # message than anything this could add.
+                run["lines"].append(
+                    "Could not reset failed epic(s) back to pending — starting "
+                    "implementation anyway."
+                )
+            stopped = run["stop_requested"]
+            if stopped:
+                run["lines"].append("Stopped before implementation started.")
+        if not stopped:
+            returncode = run_once([])
         with run["lock"]:
             run["running"] = False
             run["progress"] = None
@@ -247,9 +382,15 @@ def _stop_implement_run(server) -> bool:
     running."""
     run = server.implement_run
     with run["lock"]:
+        if not run["running"]:
+            return False
+        run["stop_requested"] = True
         process = run["process"]
     if process is None:
-        return False
+        # In between the run's two child processes (--reset-failed → implement):
+        # there's nothing to kill right now, and the flag set above is what keeps the
+        # worker from spawning the second one.
+        return True
     try:
         if sys.platform == "win32":
             subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],

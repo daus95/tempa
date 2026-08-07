@@ -1,7 +1,7 @@
 """The implement pipeline: the poll loop, the top-level `main` entry, and plan-epics.
 
 `main` decides whether to run plan first (no pending work, or --replan) then loops calling
-`check_and_run` every POLL_INTERVAL_SEC seconds. `check_and_run` is the scheduler: it picks
+`check_and_run` every config.json poll_interval_sec seconds. `check_and_run` is the scheduler: it picks
 the single next thing to do (resume QA, resume an on_progress epic, gate QA, implement the
 next require_fixing/pending epic) and starts it on a daemon thread, guarded by _state.lock.
 """
@@ -15,19 +15,21 @@ from pathlib import Path
 
 from tempa_backend import get_backend_def
 from tempa_config import (
-    POLL_INTERVAL_SEC,
     WORKING_DIR,
     get_backend,
     get_config_path,
     get_epic_session_id,
     get_model,
+    get_poll_interval_sec,
     get_qa_dir,
     get_reasoning_effort,
+    get_resume_implementation_sessions,
     get_sources,
     load_config,
     save_config,
 )
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
+from tempa_maintenance import reset_failed_epics
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
     build_plan_epics_prompt,
@@ -40,6 +42,7 @@ from tempa_session import (
     run_qa_session,
     run_session,
     run_with_usage_limit_retry,
+    wait_out_server_overload,
     wait_out_usage_limit,
 )
 
@@ -78,6 +81,31 @@ def _validate_and_increment_qa_run(config: dict, index: int, label: str) -> bool
         return False
     config["epic"][index]["qa_total_run"] = qa_total_run + 1
     return True
+
+
+def _reset_failed_before_retry(label: str) -> None:
+    """Clear a leftover `failed` epic status before an automatic retry resumes work —
+    the in-process equivalent of `tempa implement --reset-failed`.
+
+    A session cut short by the backend's API reporting itself overloaded (Anthropic's
+    transient 529) can still end up marked `failed` in config.json: run_session only skips
+    that marking while `_state.server_overloaded_hit` is set, i.e. only when the overload
+    was actually recognized in the streamed output, so an overload that surfaces in some
+    other wording — or that kills the CLI again on the very next attempt — looks like a
+    plain non-zero exit. Once `failed` is on disk it is sticky and fatal: check_and_run
+    halts on any failed epic preceding the next one to work on ("Halted — session [x] at
+    index i has failed"), so every later poll and every later `tempa implement` run would
+    fail the same way until someone reset it by hand. An overload is not a real failure, so
+    reset it here instead and let the retry pick the epic back up."""
+    with _state.lock:
+        config = load_config()
+        reset = reset_failed_epics(config)
+        if not reset:
+            return
+        save_config(config)
+    log(f"{label} — reset {len(reset)} epic(s) left as failed by the interrupted session "
+        f"back to pending before retrying ({', '.join(reset)}); same as "
+        "`tempa implement --reset-failed`.")
 
 
 def check_and_run(features_override: int | None = None) -> None:
@@ -130,11 +158,23 @@ def check_and_run(features_override: int | None = None) -> None:
                 total = session.get("total_features", 0)
                 completed = session.get("completed_features", 0)
                 progress_str = f"{completed}/{total}" if total else "?"
-                log(f"Session [{label}] progress: {progress_str} features — starting a new session")
+                # A stale on_progress session (the previous session was interrupted —
+                # process killed, machine restarted, etc.) still gets a resumable
+                # session_id captured on the epic if one was ever produced (see
+                # _capture_session_id / run_session) — resume it instead of starting
+                # cold and re-reading the epic spec + code again, same reasoning as the
+                # continuation case below.
+                resume_sid = (
+                    get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+                    if get_resume_implementation_sessions(config) else None
+                )
+                log(f"Session [{label}] progress: {progress_str} features — "
+                    f"{'resuming' if resume_sid else 'starting'} a session")
 
                 prompt = build_session_prompt(
                     config, session.get("epic_name", ""),
                     is_continuation=completed > 0, features_override=features_override,
+                    is_resumed=bool(resume_sid),
                 )
 
                 if not _validate_and_increment_run(config, i, label):
@@ -148,7 +188,7 @@ def check_and_run(features_override: int | None = None) -> None:
                 _state.running_index = i
                 _state.running_thread = threading.Thread(
                     target=run_session,
-                    args=(i, prompt, label),
+                    args=(i, prompt, label, resume_sid),
                     kwargs={"features_override": features_override},
                     daemon=True,
                 )
@@ -224,17 +264,28 @@ def check_and_run(features_override: int | None = None) -> None:
         for i in range(next_index):
             if config["epic"][i]["status"] == "failed":
                 label = config["epic"][i].get("epic_name", f"epic_{i}")
-                log(f"Halted — session [{label}] at index {i} has failed. Fix it before proceeding.")
+                log(f"Halted — session [{label}] at index {i} has failed. Fix it, then run "
+                    "`tempa implement --reset-failed` (failed → pending) before proceeding.")
                 raise SystemExit(1)
 
         session = config["epic"][next_index]
         label = session.get("epic_name", f"epic_{next_index}")
         is_require_fixing = session["status"] == "require_fixing"
         is_continuation = is_require_fixing or session.get("completed_features", 0) > 0
+        # Resume the epic's previous implementation session when continuing it (never for
+        # a brand-new epic's first session — there's no session_id to resume yet anyway)
+        # so it doesn't re-pay to read the epic spec + code it already read. A
+        # require_fixing epic's QA report is still read fresh every time regardless (see
+        # _build_qa_report_section) — only the "re-read the spec" instruction is skipped.
+        resume_sid = (
+            get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+            if is_continuation and get_resume_implementation_sessions(config) else None
+        )
         prompt = build_session_prompt(
             config, session.get("epic_name", ""),
             is_continuation=is_continuation,
             features_override=features_override,
+            is_resumed=bool(resume_sid),
         )
 
         if not _validate_and_increment_run(config, next_index, label):
@@ -249,7 +300,7 @@ def check_and_run(features_override: int | None = None) -> None:
         _state.running_index = next_index
         _state.running_thread = threading.Thread(
             target=run_session,
-            args=(next_index, prompt, label),
+            args=(next_index, prompt, label, resume_sid),
             kwargs={"features_override": features_override},
             daemon=True,
         )
@@ -353,10 +404,11 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             sys.exit(1)
 
     start_time = datetime.now()
+    poll_interval_sec = get_poll_interval_sec(config)
     banner_parts = [
         f"Agent Runner started {start_time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"dir={WORKING_DIR}",
-        f"poll={POLL_INTERVAL_SEC}s",
+        f"poll={poll_interval_sec}s",
     ]
     _plog = process_log_path()
     if _plog:
@@ -368,11 +420,12 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
     _print_session_plan(load_config(), features_override)
 
     log(f"Agent runner started — working dir: {WORKING_DIR}", to_console=False)
-    log(f"Poll interval: {POLL_INTERVAL_SEC}s | Config: {get_config_path()}", to_console=False)
+    log(f"Poll interval: {poll_interval_sec}s | Config: {get_config_path()}", to_console=False)
     if features_override is not None:
         log(f"features_per_session override: {features_override}", to_console=False)
 
     usage_limit_retries = 0
+    overload_retries = 0
     while True:
         while not _state.stop_event.is_set():
             try:
@@ -382,7 +435,9 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             except Exception as e:
                 log(f"Unexpected error in check_and_run: {e}")
 
-            _state.stop_event.wait(timeout=POLL_INTERVAL_SEC)
+            # Re-read every cycle (load_config() never caches) so a Settings change to
+            # poll_interval_sec reaches this already-running loop without a restart.
+            _state.stop_event.wait(timeout=get_poll_interval_sec(load_config()))
 
         if _state.auth_error_hit:
             log("Agent runner stopped — authentication failed (see message above). "
@@ -394,6 +449,16 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             # and re-entering the poll loop continues it rather than starting over.
             usage_limit_retries += 1
             wait_out_usage_limit("Implementation", usage_limit_retries)
+            continue
+        if _state.server_overloaded_hit:
+            # Not a real stop either — same reasoning as the usage-limit branch above: the
+            # epic/QA in progress was left resumable, so waiting out the overload and
+            # re-entering the poll loop continues it rather than starting over. The reset
+            # after the wait is what makes "resumable" actually hold when the overload did
+            # leave a `failed` status behind — see _reset_failed_before_retry.
+            overload_retries += 1
+            wait_out_server_overload("Implementation", overload_retries)
+            _reset_failed_before_retry("Implementation")
             continue
         if _state.all_done:
             log("All epics done. Agent runner stopped successfully.")

@@ -21,6 +21,12 @@ const INITIAL_SKIP_MINOR_FINDINGS = /*__SKIP_MINOR_FINDINGS__*/null;
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+// Renders one of the <symbol id="i-*"> icons defined in the sprite at the top of
+// dashboard.html as an inline <svg><use> — the Lucide-icon equivalent of the emoji
+// strings this app used to interpolate directly into innerHTML/textContent.
+function iconSvg(name, extraClass) {
+  return `<svg class="icon-svg${extraClass ? " " + extraClass : ""}"><use href="#i-${name}"></use></svg>`;
+}
 function inlineMd(src) {
   const codes = [];
   src = src.replace(/`([^`]+?)`/g, (m, c) => {
@@ -159,9 +165,11 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  stopFinalizeClarifyBtn = $("stopFinalizeClarifyBtn"),
   openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
+  finalizeRoundProgress = $("finalizeRoundProgress"),
   skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
@@ -189,15 +197,20 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
   modalExtraBtn = $("modalExtraBtn"),
-  settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
+  settingsModelClarify = $("settingsModelClarify"), settingsModelClarifyApply = $("settingsModelClarifyApply"),
+  settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"),
-  settingsBackendClarify = $("settingsBackendClarify"), settingsBackendPlan = $("settingsBackendPlan"),
+  settingsBackendClarify = $("settingsBackendClarify"), settingsBackendClarifyApply = $("settingsBackendClarifyApply"),
+  settingsBackendPlan = $("settingsBackendPlan"),
   settingsBackendImplement = $("settingsBackendImplement"),
-  modelSuggestionsClarify = $("modelSuggestionsClarify"), modelSuggestionsPlan = $("modelSuggestionsPlan"),
+  modelSuggestionsClarify = $("modelSuggestionsClarify"), modelSuggestionsClarifyApply = $("modelSuggestionsClarifyApply"),
+  modelSuggestionsPlan = $("modelSuggestionsPlan"),
   modelSuggestionsImplement = $("modelSuggestionsImplement"),
-  settingsEffortClarify = $("settingsEffortClarify"), settingsEffortPlan = $("settingsEffortPlan"),
+  settingsEffortClarify = $("settingsEffortClarify"), settingsEffortClarifyApply = $("settingsEffortClarifyApply"),
+  settingsEffortPlan = $("settingsEffortPlan"),
   settingsEffortImplement = $("settingsEffortImplement"),
-  settingsModelNoteClarify = $("settingsModelNoteClarify"), settingsModelNotePlan = $("settingsModelNotePlan"),
+  settingsModelNoteClarify = $("settingsModelNoteClarify"), settingsModelNoteClarifyApply = $("settingsModelNoteClarifyApply"),
+  settingsModelNotePlan = $("settingsModelNotePlan"),
   settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
@@ -212,6 +225,10 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsEmailEventList = $("settingsEmailEventList"), settingsEmailSelectAllBtn = $("settingsEmailSelectAllBtn"),
   settingsEmailClearAllBtn = $("settingsEmailClearAllBtn"), settingsTestEmailBtn = $("settingsTestEmailBtn"),
   settingsTestEmailStatus = $("settingsTestEmailStatus"),
+  settingsUsageLimitRetryWaitMin = $("settingsUsageLimitRetryWaitMin"),
+  settingsUsageLimitHeartbeatMin = $("settingsUsageLimitHeartbeatMin"),
+  settingsServerOverloadRetryWaitMin = $("settingsServerOverloadRetryWaitMin"),
+  settingsPollIntervalSec = $("settingsPollIntervalSec"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
   settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
@@ -247,13 +264,16 @@ const state = {
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
-      allowFinalizeWithCritical: false },
+      finalizeRound: 0, allowFinalizeWithCritical: false },
   implementReadiness: INITIAL_IMPLEMENT_READINESS ||
     { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
   epics: [],
+  // Server-computed (see _implementation_has_started): has any epic actually run yet?
+  // Drives the Start -> Continue Implementation relabeling of all three buttons.
+  implementStarted: false,
   implTab: "status",
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
@@ -359,7 +379,7 @@ function updateToolbar() {
     filepathEl.appendChild(document.createTextNode(PRD_NAME + "/" + state.selectedSpecPath));
     if (state.specDirty) {
       const dot = document.createElement("span");
-      dot.className = "dirty"; dot.textContent = "● unsaved";
+      dot.className = "dirty"; dot.innerHTML = iconSvg("circle", "filled") + " unsaved";
       filepathEl.appendChild(dot);
     }
   } else if (kind === "clarify") {
@@ -368,7 +388,7 @@ function updateToolbar() {
     filepathEl.appendChild(document.createTextNode("Clarification/" + state.selectedClarifyPath));
     if (state.clarifyDirty) {
       const dot = document.createElement("span");
-      dot.className = "dirty"; dot.textContent = "● unsaved";
+      dot.className = "dirty"; dot.innerHTML = iconSvg("circle", "filled") + " unsaved";
       filepathEl.appendChild(dot);
     }
   }
@@ -387,21 +407,21 @@ function confirmDiscardIfDirty() {
 // Sidebar (top-level sections + nested trees)
 // ---------------------------------------------------------------------------
 function specIconFor(node) {
-  if (node.type === "dir") return "📁";
-  if (node.markdown) return "📝";
-  if (node.text) return "📄";
-  return "🔒";
+  if (node.type === "dir") return iconSvg("folder");
+  if (node.markdown) return iconSvg("file-pen-line");
+  if (node.text) return iconSvg("file-text");
+  return iconSvg("lock");
 }
 
 function renderSidebar() {
   treeEl.innerHTML = "";
-  treeEl.appendChild(renderLeafSection("home", "🏠", "Home"));
+  treeEl.appendChild(renderLeafSection("home", iconSvg("house"), "Home"));
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
-  treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
+  treeEl.appendChild(renderLeafSection("implementation", iconSvg("wrench"), "Implementation", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
-  treeBottomEl.appendChild(renderLeafSection("principles", "📐", "Architecture Principles", !state.workspaceInitialized));
-  treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings", !state.workspaceInitialized));
+  treeBottomEl.appendChild(renderLeafSection("principles", iconSvg("ruler"), "Architecture Principles", !state.workspaceInitialized));
+  treeBottomEl.appendChild(renderLeafSection("settings", iconSvg("settings"), "Settings", !state.workspaceInitialized));
 }
 
 async function selectTop(key) {
@@ -458,9 +478,13 @@ function renderHomeWorkflow() {
 
   const step2Locked = !step1Done;
   homeStep2.classList.toggle("locked", step2Locked);
+  // Just the round count so far, same as the Clarification page's clarifyRoundBadge —
+  // manual clarification isn't bounded by Max Finalize Clarification Round, so pairing it
+  // with that max here would misleadingly suggest a cap on rounds run outside of Finalize's
+  // own loop.
   const homeFinalize = state.clarifyFinalize;
-  if (homeFinalize.maxRound > 0) {
-    homeClarifyRoundBadge.textContent = `Round ${homeFinalize.round} of ${homeFinalize.maxRound}`;
+  if (homeFinalize.round > 0) {
+    homeClarifyRoundBadge.textContent = `Round ${homeFinalize.round}`;
     homeClarifyRoundBadge.classList.remove("hidden");
   } else {
     homeClarifyRoundBadge.classList.add("hidden");
@@ -520,6 +544,7 @@ function renderHomeWorkflow() {
   const step3Locked = step2Locked || !ir.ready;
   homeStep3.classList.toggle("locked", step3Locked);
   homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
+  updateImplementButtonLabels();
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
     : !ir.hasRun
@@ -613,6 +638,7 @@ homeClearAllBtn.addEventListener("click", async () => {
     toast("All data cleared successfully.");
     await refreshClarifyList();
     state.epics = [];
+    state.implementStarted = false;
     renderHomeWorkflow();
   } catch (e) {
     toast("Network error while clearing.", true);
@@ -642,7 +668,7 @@ function renderSpecSection() {
   const row = document.createElement("div");
   row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "") +
     (disabled ? " disabled" : "");
-  row.innerHTML = `<span class="twist">▶</span><span class="icon">📁</span><span class="label">Specification</span>`;
+  row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("folder")}</span><span class="label">Specification</span>`;
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop("specification");
@@ -677,12 +703,12 @@ function renderSpecNode(node, depth) {
 
   const twist = document.createElement("span");
   twist.className = "twist" + (isDir ? "" : " hidden");
-  twist.textContent = "▶";
+  twist.innerHTML = iconSvg("chevron-right");
   row.appendChild(twist);
 
   const icon = document.createElement("span");
   icon.className = "icon";
-  icon.textContent = specIconFor(node);
+  icon.innerHTML = specIconFor(node);
   row.appendChild(icon);
 
   const label = document.createElement("span");
@@ -726,7 +752,7 @@ function renderClarifySection() {
   row.className = "row top" + (state.activeTop === "clarification" && state.clarifyShowingOverview ? " selected" : "") +
     (disabled ? " disabled" : "");
   const count = state.clarifyUnanswered.length;
-  row.innerHTML = `<span class="twist">▶</span><span class="icon">❓</span><span class="label">Clarification</span>` +
+  row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("circle-help")}</span><span class="label">Clarification</span>` +
     (count ? `<span class="badge-count">${count}</span>` : "");
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
@@ -754,7 +780,7 @@ function renderClarifyFileRow(file) {
   const row = document.createElement("div");
   row.className = "row" + (!state.clarifyShowingOverview && file.path === state.selectedClarifyPath ? " selected" : "");
   row.style.paddingLeft = "21px";
-  row.innerHTML = `<span class="twist hidden"></span><span class="icon">📝</span>` +
+  row.innerHTML = `<span class="twist hidden"></span><span class="icon">${iconSvg("file-pen-line")}</span>` +
     `<span class="label">${escapeHtml(file.name)}</span>` +
     `<span class="file-status">${file.answered}/${file.total}</span>`;
   row.addEventListener("click", () => openClarifyFile(file));
@@ -765,7 +791,7 @@ function renderClarifyFileRow(file) {
 // ---------------------------------------------------------------------------
 // Clarification overview (right panel shown when "Clarification" itself is selected)
 // ---------------------------------------------------------------------------
-const SEVERITY_ICON = { critical: "🔴", major: "🟠", minor: "🟡" };
+const SEVERITY_ICON = { critical: "icon-severity-critical", major: "icon-severity-major", minor: "icon-severity-minor" };
 const SEVERITY_LABEL = { critical: "Critical", major: "Major", minor: "Minor" };
 
 // One icon per severity that actually has findings, each carrying a native-tooltip
@@ -779,7 +805,7 @@ function findingsCell(file) {
     const cls = counts.answered === counts.total ? "count-ok" : "count-pending";
     parts.push(
       `<span class="findings-icon" title="${SEVERITY_LABEL[sev]}: ${counts.answered}/${counts.total}">` +
-        `<span class="findings-icon-glyph">${SEVERITY_ICON[sev]}</span>` +
+        `<span class="findings-icon-glyph">${iconSvg("circle", "filled " + SEVERITY_ICON[sev])}</span>` +
         `<span class="${cls}">${counts.answered}/${counts.total}</span>` +
       `</span>`
     );
@@ -806,13 +832,13 @@ function formatClarifyDuration(seconds) {
 
 function statusCell(file) {
   return file.answered === file.total
-    ? '<span class="status-complete">✅ Complete</span>'
-    : `<span class="status-pending">🔶 ${file.answered}/${file.total}</span>`;
+    ? `<span class="status-complete">${iconSvg("circle-check")} Complete</span>`
+    : `<span class="status-pending">${iconSvg("circle-dashed")} ${file.answered}/${file.total}</span>`;
 }
 
 function appliedCell(file) {
   return file.applied
-    ? '<span class="clarify-applied-badge">✅ Applied</span>'
+    ? `<span class="clarify-applied-badge">${iconSvg("circle-check")} Applied</span>`
     : '<button type="button" class="clarify-apply-btn">Apply Answer</button>';
 }
 
@@ -927,7 +953,7 @@ function implementBlockedToast(ir) {
 function renderImplementReadyBanner() {
   const ir = state.implementReadiness;
   implementReadyBanner.classList.toggle("hidden", !ir.ready);
-  if (ir.ready) implementReadyBannerText.innerHTML = `<strong>✅ Ready for implementation.</strong> ${implementReadyMessage(ir)}`;
+  if (ir.ready) implementReadyBannerText.innerHTML = `<strong>${iconSvg("circle-check")} Ready for implementation.</strong> ${implementReadyMessage(ir)}`;
 }
 
 clarifyStartImplementBtn.addEventListener("click", async () => {
@@ -962,11 +988,11 @@ skipMinorFindingsToggle.addEventListener("change", async () => {
 // + log panel)
 // ---------------------------------------------------------------------------
 // Shared renderer for the readiness checklists (Finalize Clarification / Start
-// Implementation): items is [{ok, label}], rendered as a ✅/⬜ list into listEl.
+// Implementation): items is [{ok, label}], rendered as a checked/unchecked icon list into listEl.
 function renderGateChecklist(listEl, items) {
   listEl.innerHTML = items.map((it) =>
     `<li class="gate-item ${it.ok ? "ok" : "pending"}">` +
-      `<span class="icon">${it.ok ? "✅" : "⬜"}</span><span>${escapeHtml(it.label)}</span></li>`
+      `<span class="icon">${it.ok ? iconSvg("circle-check") : iconSvg("square")}</span><span>${escapeHtml(it.label)}</span></li>`
   ).join("");
 }
 
@@ -1026,11 +1052,26 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
 // a precondition.
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
-  if (st.maxRound > 0) {
-    clarifyRoundBadge.textContent = `Round ${st.round} of ${st.maxRound}`;
+  // Just the round count so far — manual clarification isn't bounded by Max Finalize
+  // Clarification Round, so pairing it with that max here would misleadingly suggest a
+  // cap on rounds run outside of Finalize's own loop. The count against that max is
+  // shown separately, next to the Finalized Clarification button (finalizeRoundProgress).
+  if (st.round > 0) {
+    clarifyRoundBadge.textContent = `Round ${st.round}`;
     clarifyRoundBadge.classList.remove("hidden");
   } else {
     clarifyRoundBadge.classList.add("hidden");
+  }
+  // finalizeRound is the separate counter that restarts from 0 every time a
+  // Finalized Clarification run starts (see run_clarify_finalize in
+  // tempa_clarify.py) — while a run is actually in progress this gets overridden
+  // with fresher, per-second numbers by pollClarifyRun below; this render is only
+  // what's left showing once a run finishes (or on initial page load).
+  if (st.maxRound > 0) {
+    finalizeRoundProgress.textContent = `${st.finalizeRound} / ${st.maxRound}`;
+    finalizeRoundProgress.classList.remove("hidden");
+  } else {
+    finalizeRoundProgress.classList.add("hidden");
   }
   const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
   renderGateChecklist(finalizeGateList, [
@@ -1051,8 +1092,13 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
         : "No unanswered/unapplied backlog — Finalize's loop can start right away" },
   ]);
   // Only actually-in-progress runs disable this button now — the checklist above is
-  // informational, not a precondition (see the comment above this function).
+  // informational, not a precondition (see the comment above this function). While a
+  // finalize run specifically is in progress, swap it for Stop Finalize entirely
+  // (same Start/Stop toggle Implementation already has) rather than just disabling it.
+  const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
   finalizeClarifyBtn.disabled = runDisabled;
+  finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
+  stopFinalizeClarifyBtn.classList.toggle("hidden", !finalizeRunning);
 
   // Once clarification has run at least once but isn't finalize-ready yet, relabel
   // Start Clarification -> Continue Clarification and explain why in plain language,
@@ -1109,21 +1155,21 @@ function clarifyRunStatusLabel(mode) {
 function formatClarifyLogLine(text) {
   if (/^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\](\s*\[[^\]]*\])*\s*$/.test(text)) {
     const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$/);
-    return { cls: "progress", icon: "⏳", time: m ? m[1] : "", msg: m ? m[2] : text };
+    return { cls: "progress", icon: "loader-circle", time: m ? m[1] : "", msg: m ? m[2] : text };
   }
   const trimmed = text.trim();
   if (/^==.+==$/.test(trimmed)) {
-    return { cls: "banner", icon: "📣", time: "", msg: trimmed.replace(/^=+\s*|\s*=+$/g, "") };
+    return { cls: "banner", icon: "megaphone", time: "", msg: trimmed.replace(/^=+\s*|\s*=+$/g, "") };
   }
   let time = "", msg = text;
   const tsMatch = text.match(/^\[\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\]\s?(.*)$/);
   if (tsMatch) { time = tsMatch[1]; msg = tsMatch[2]; }
-  if (/^\[OK\]/i.test(msg)) return { cls: "ok", icon: "✅", time, msg: msg.replace(/^\[OK\]\s*/i, "") };
-  if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "✅", time, msg };
-  if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "❌", time, msg };
-  if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "⚠️", time, msg: msg.replace(/^\[!\]\s*/, "") };
-  if (/usage limit reached|reached the .* limit/i.test(msg)) return { cls: "warn", icon: "⚠️", time, msg };
-  return { cls: "plain", icon: "•", time, msg };
+  if (/^\[OK\]/i.test(msg)) return { cls: "ok", icon: "circle-check", time, msg: msg.replace(/^\[OK\]\s*/i, "") };
+  if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "circle-check", time, msg };
+  if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "circle-x", time, msg };
+  if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "triangle-alert", time, msg: msg.replace(/^\[!\]\s*/, "") };
+  if (/usage limit reached|reached the .* limit|overloaded/i.test(msg)) return { cls: "warn", icon: "triangle-alert", time, msg };
+  return { cls: "plain", icon: "circle-dashed", time, msg };
 }
 
 function appendClarifyLogRow(text) {
@@ -1132,7 +1178,7 @@ function appendClarifyLogRow(text) {
   row.className = "clarify-log-line " + f.cls;
   row.innerHTML =
     (f.time ? `<span class="clarify-log-time">${escapeHtml(f.time)}</span>` : "") +
-    `<span class="clarify-log-icon">${f.icon}</span>` +
+    `<span class="clarify-log-icon">${iconSvg(f.icon, f.cls === "progress" ? "icon-spin" : "")}</span>` +
     `<span class="clarify-log-msg">${escapeHtml(f.msg)}</span>`;
   return row;
 }
@@ -1183,6 +1229,13 @@ async function pollClarifyRun() {
     state.clarifyRun.running = data.running;
     clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
+    // Finalize's round counter, read fresh from config.json every poll (see
+    // _handle_clarify_run_status) — ticks up live, round by round, instead of
+    // waiting for the run to finish and /api/tree to pick it up.
+    if (data.mode === "finalize" && data.maxRound > 0) {
+      finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
+      finalizeRoundProgress.classList.remove("hidden");
+    }
     if (!data.running) {
       stopClarifyPolling();
       if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
@@ -1199,13 +1252,15 @@ function startClarifyPolling() {
 
 async function startClarifyRun(mode) {
   if (state.clarifyRun.running) return;
+  // Set before the disabled-state render below so it can already tell this is a
+  // finalize run and show Stop Finalize instead of waiting for the next poll.
+  state.clarifyRun.mode = mode;
   setClarifyRunButtonsDisabled(true);
   clarifyLogPanel.classList.remove("hidden");
   clarifyLogPanel.open = true;
   state.clarifyRun.lines = [];
   state.clarifyRun.progress = null;
   state.clarifyRun.nextIndex = 0;
-  state.clarifyRun.mode = mode;
   clarifyLogStatus.textContent = clarifyRunStatusLabel(mode);
   renderClarifyLog();
   try {
@@ -1242,12 +1297,34 @@ async function checkClarifyRunOnLoad() {
     renderClarifyLog();
     clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
+    if (data.mode === "finalize" && data.maxRound > 0) {
+      finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
+      finalizeRoundProgress.classList.remove("hidden");
+    }
     if (data.running) { clarifyLogPanel.open = true; startClarifyPolling(); }
   } catch (e) { /* ignore — buttons stay enabled */ }
 }
 
+async function stopFinalizeClarifyRun() {
+  if (!(state.clarifyRun.running && state.clarifyRun.mode === "finalize")) return;
+  const ok = await confirmModal("Stop the Finalized Clarification run that is currently in progress?",
+    { title: "Stop Finalize", okLabel: "Stop", danger: true });
+  if (!ok) return;
+  stopFinalizeClarifyBtn.disabled = true;
+  try {
+    const res = await fetch("/api/clarify/stop", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) toast(data.error || "Could not stop Finalized Clarification.", true);
+  } catch (e) {
+    toast("Network error stopping Finalized Clarification.", true);
+  } finally {
+    stopFinalizeClarifyBtn.disabled = false;
+  }
+}
+
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
+stopFinalizeClarifyBtn.addEventListener("click", stopFinalizeClarifyRun);
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
 // With multiple unanswered files, just jump into the first one — same as clicking a
 // row in the "Unanswered" table below, this is only meant to get the user started.
@@ -1269,10 +1346,12 @@ implTabStatusBtn.addEventListener("click", () => setImplTab("status"));
 implTabLogBtn.addEventListener("click", () => setImplTab("log"));
 
 function epicStatusIcon(status) {
-  return { done: "✅", on_progress: "🔄", pending: "⬜", failed: "❌", require_fixing: "🔧" }[status] || "❔";
+  const name = { done: "circle-check", on_progress: "refresh-cw", pending: "square", failed: "circle-x", require_fixing: "wrench" }[status] || "circle-help";
+  return iconSvg(name, status === "on_progress" ? "icon-spin" : "");
 }
 function featureStatusIcon(status) {
-  return { done: "✅", failed: "❌", require_fixing: "🔧" }[status] || "⬜";
+  const name = { done: "circle-check", failed: "circle-x", require_fixing: "wrench" }[status] || "square";
+  return iconSvg(name);
 }
 
 function renderImplementStatus() {
@@ -1345,10 +1424,31 @@ function renderImplementGate() {
   ]);
 }
 
+// Start -> Continue Implementation, the same relabeling the clarification buttons
+// already get (see renderFinalizeGate). Once any epic has run, "Start" is misleading:
+// the run resumes the existing plan where it left off rather than beginning anything.
+// Applied to all three buttons that trigger the same run (Home step 3, the
+// Clarification ready banner, the Implementation header) so they never disagree.
+// Continuing also resets any `failed` epic back to pending first — server-side, in
+// _start_implement_run — which is what the tooltip promises here.
+function updateImplementButtonLabels() {
+  const started = state.implementStarted;
+  const label = started ? "Continue Implementation" : "Start Implementation";
+  const tip = started
+    ? "Resumes the existing plan. Any epic left in the failed state is reset back to " +
+      "pending first (same as `tempa implement --reset-failed`)."
+    : "";
+  for (const btn of [homeStartImplementBtn, clarifyStartImplementBtn, startImplementBtn]) {
+    btn.querySelector("span:last-child").textContent = label;
+    btn.title = tip;
+  }
+}
+
 function updateImplementControls() {
   startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
+  updateImplementButtonLabels();
   renderImplementGate();
 }
 
@@ -1374,6 +1474,7 @@ async function refreshImplementRun() {
     }
     state.implementRun.progress = data.progress;
     state.epics = data.epics || [];
+    state.implementStarted = !!data.started;
     renderImplementLog();
     renderImplementStatus();
     const wasRunning = state.implementRun.running;
@@ -1655,6 +1756,7 @@ function wireBackendModelStage(backendSelect, modelInput, modelDatalist, modelNo
   });
 }
 wireBackendModelStage(settingsBackendClarify, settingsModelClarify, modelSuggestionsClarify, settingsModelNoteClarify, settingsEffortClarify);
+wireBackendModelStage(settingsBackendClarifyApply, settingsModelClarifyApply, modelSuggestionsClarifyApply, settingsModelNoteClarifyApply, settingsEffortClarifyApply);
 wireBackendModelStage(settingsBackendPlan, settingsModelPlan, modelSuggestionsPlan, settingsModelNotePlan, settingsEffortPlan);
 wireBackendModelStage(settingsBackendImplement, settingsModelImplement, modelSuggestionsImplement, settingsModelNoteImplement, settingsEffortImplement);
 
@@ -1662,18 +1764,23 @@ function fillSettingsForm(config) {
   state.backendsStatus = config.backends_status || state.backendsStatus;
   renderBackendStatus();
   populateBackendSelect(settingsBackendClarify, config.backends.clarify);
+  populateBackendSelect(settingsBackendClarifyApply, config.backends.clarify_apply);
   populateBackendSelect(settingsBackendPlan, config.backends.plan);
   populateBackendSelect(settingsBackendImplement, config.backends.implement);
   populateModelDatalist(modelSuggestionsClarify, config.backends.clarify);
+  populateModelDatalist(modelSuggestionsClarifyApply, config.backends.clarify_apply);
   populateModelDatalist(modelSuggestionsPlan, config.backends.plan);
   populateModelDatalist(modelSuggestionsImplement, config.backends.implement);
   updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify);
+  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply);
   updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan);
   updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement);
   settingsModelClarify.value = config.models.clarify;
+  settingsModelClarifyApply.value = config.models.clarify_apply;
   settingsModelPlan.value = config.models.plan;
   settingsModelImplement.value = config.models.implement;
   populateEffortSelect(settingsEffortClarify, config.backends.clarify, config.models.clarify, config.reasoning_efforts.clarify);
+  populateEffortSelect(settingsEffortClarifyApply, config.backends.clarify_apply, config.models.clarify_apply, config.reasoning_efforts.clarify_apply);
   populateEffortSelect(settingsEffortPlan, config.backends.plan, config.models.plan, config.reasoning_efforts.plan);
   populateEffortSelect(settingsEffortImplement, config.backends.implement, config.models.implement, config.reasoning_efforts.implement);
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
@@ -1697,6 +1804,10 @@ function fillSettingsForm(config) {
   settingsEmailRecipients.value = (email.recipients || []).join(", ");
   renderEmailEventChoices(email.events || []);
   updateSmtpProvider(false);
+  settingsUsageLimitRetryWaitMin.value = Math.round((config.usage_limit_retry_wait_sec ?? 1800) / 60);
+  settingsUsageLimitHeartbeatMin.value = Math.round((config.usage_limit_heartbeat_sec ?? 300) / 60);
+  settingsServerOverloadRetryWaitMin.value = Math.round((config.server_overloaded_retry_wait_sec ?? 300) / 60);
+  settingsPollIntervalSec.value = config.poll_interval_sec ?? 60;
 }
 
 async function renderSettings() {
@@ -1807,16 +1918,19 @@ settingsSaveBtn.addEventListener("click", async () => {
       body: JSON.stringify({
         models: {
           clarify: settingsModelClarify.value,
+          clarify_apply: settingsModelClarifyApply.value,
           plan: settingsModelPlan.value,
           implement: settingsModelImplement.value,
         },
         backends: {
           clarify: settingsBackendClarify.value,
+          clarify_apply: settingsBackendClarifyApply.value,
           plan: settingsBackendPlan.value,
           implement: settingsBackendImplement.value,
         },
         reasoning_efforts: {
           clarify: settingsEffortClarify.value,
+          clarify_apply: settingsEffortClarifyApply.value,
           plan: settingsEffortPlan.value,
           implement: settingsEffortImplement.value,
         },
@@ -1834,6 +1948,10 @@ settingsSaveBtn.addEventListener("click", async () => {
           recipients: settingsEmailRecipients.value.split(",").map(v => v.trim()).filter(Boolean),
           events: selectedEmailEvents(),
         } },
+        usage_limit_retry_wait_sec: Number(settingsUsageLimitRetryWaitMin.value) * 60,
+        usage_limit_heartbeat_sec: Number(settingsUsageLimitHeartbeatMin.value) * 60,
+        server_overloaded_retry_wait_sec: Number(settingsServerOverloadRetryWaitMin.value) * 60,
+        poll_interval_sec: Number(settingsPollIntervalSec.value),
       }),
     });
     const data = await res.json();
@@ -1845,6 +1963,13 @@ settingsSaveBtn.addEventListener("click", async () => {
     fillSettingsForm(data.config);
     settingsSaveStatus.textContent = "Saved.";
     toast("Settings saved.");
+    // Saved fine, but a run already in flight can't pick the new value up — surfaced as a
+    // modal rather than a toast because it contradicts what the user is about to watch
+    // happen in the log (see _max_clarification_run_change_warning in dashboard_runs.py).
+    if (data.warning) {
+      settingsSaveStatus.textContent = "Saved — applies from the next Finalized Clarification run.";
+      await alertModal(data.warning, { title: "Finalized Clarification Is Already Running" });
+    }
   } catch (e) {
     settingsSaveStatus.textContent = "Network error while saving.";
     settingsSaveStatus.classList.add("err");
@@ -1926,7 +2051,7 @@ const IMPLEMENT_REQUIREMENT_RISK = {
 function updateImplementRequirementWarning(requirement) {
   const risk = IMPLEMENT_REQUIREMENT_RISK[requirement];
   settingsImplementRequirementWarning.classList.toggle("hidden", !risk);
-  if (risk) settingsImplementRequirementWarning.textContent = "⚠️ " + risk;
+  if (risk) settingsImplementRequirementWarning.innerHTML = iconSvg("triangle-alert") + " " + escapeHtml(risk);
 }
 
 // Explain the risk before letting the user actually select a relaxed option — reverts

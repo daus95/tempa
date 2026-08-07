@@ -47,11 +47,11 @@ from tempa_commands import (
     set_working_folders,
 )
 from tempa_config import (
-    POLL_INTERVAL_SEC,
     WORKING_DIR,
     get_backend,
     get_config_path,
     get_epic_session_id,
+    get_poll_interval_sec,
     get_qa_dir,
     get_skip_minor_findings,
     load_config,
@@ -88,7 +88,7 @@ Agent Runner — Qlar Medical Clinic Back-Office
 
 Config  : {get_config_path()}
 Work dir: {WORKING_DIR}
-Poll    : {POLL_INTERVAL_SEC}s
+Poll    : {get_poll_interval_sec(config)}s
 
 USAGE
 
@@ -100,13 +100,13 @@ USAGE
   tempa show-folders         Show the active working folders (+ resolved absolute paths)
   tempa close-folder         Detach the active workspace (its config/logs/qa/specs stay put in
                                   <root>/.tempa/, untouched — reopen it later with `init` to resume)
-  tempa set-model [--clarify m] [--plan m] [--implement m]
+  tempa set-model [--clarify m] [--clarify-apply m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-5, sonnet-5, ... — claude only)
   tempa show-models          Show the AI model per stage
-  tempa set-backend [--clarify b] [--plan b] [--implement b]
+  tempa set-backend [--clarify b] [--clarify-apply b] [--plan b] [--implement b]
                                   Set the CLI backend per stage: claude | copilot | codex
   tempa show-backends        Show the CLI backend per stage
-  tempa set-effort [--clarify e] [--plan e] [--implement e]
+  tempa set-effort [--clarify e] [--clarify-apply e] [--plan e] [--implement e]
                                   Set the reasoning effort per stage (must be supported by that
                                   stage's backend+model; "" clears it back to the CLI/model default)
   tempa show-efforts         Show the reasoning effort per stage
@@ -129,7 +129,7 @@ USAGE
   tempa clarify --clear      Delete all files in .tempa/specs/clarifications except claude.md (asks for confirmation; --yes to skip)
 
   -- Plan & Start Implementation --
-  tempa implement            Start the agent runner (polls every {POLL_INTERVAL_SEC}s).
+  tempa implement            Start the agent runner (polls every {get_poll_interval_sec(config)}s).
                                   If there's no task (epic/feature/QA) in config.json yet, run
                                   plan (lay out Epic/Feature/Task from the PRD) automatically first.
   tempa implement --replan   Force re-running plan first, then continue/start implementation
@@ -260,6 +260,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-model", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 
@@ -267,6 +268,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-backend", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 
@@ -274,6 +276,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-effort", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 

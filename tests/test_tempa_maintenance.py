@@ -150,18 +150,32 @@ def test_reset_clarify_config_state_clears_tracked_keys():
         "last_clarification_findings": {"critical": 1},
         "clarify_applied_hashes": {"f.md": "hash"},
         "last_auto_answer": 5,
+        "last_clarification_round": 7,
+        "last_finalize_round": 3,
+        "clarify_session_id": "eval-sid",
+        "clarify_session_backend": "claude",
+        "clarify_apply_session_id": "apply-sid",
+        "clarify_apply_session_backend": "claude",
     }
     tm._reset_clarify_config_state(config)
     assert "last_clarification_action" not in config
     assert "last_clarification_findings" not in config
     assert "clarify_applied_hashes" not in config
+    assert "clarify_session_id" not in config
+    assert "clarify_session_backend" not in config
+    assert "clarify_apply_session_id" not in config
+    assert "clarify_apply_session_backend" not in config
     assert config["last_auto_answer"] == 0
+    assert config["last_clarification_round"] == 0
+    assert config["last_finalize_round"] == 0
 
 
 def test_reset_clarify_config_state_missing_keys_no_error():
     config = {}
     tm._reset_clarify_config_state(config)
     assert config["last_auto_answer"] == 0
+    assert config["last_clarification_round"] == 0
+    assert config["last_finalize_round"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +199,32 @@ def test_reset_failed_epics_no_failed_epics_noop(isolate_tempa_paths):
     tm._reset_failed_epics()
     saved = tempa_config.load_config()
     assert saved["epic"][0]["status"] == "done"
+
+
+def test_reset_failed_epics_returns_labels_and_mutates_in_place():
+    config = {"epic": [
+        {"epic_name": "e1", "status": "failed", "session_id": "abc", "session_backend": "claude"},
+        {"epic_name": "e2", "status": "on_progress"},
+        {"status": "failed"},  # unnamed → falls back to the index label
+    ]}
+    reset = tm.reset_failed_epics(config)
+    assert reset == ["e1", "epic_2"]
+    assert config["epic"][0]["status"] == "pending"
+    assert "session_id" not in config["epic"][0]
+    assert "session_backend" not in config["epic"][0]
+    assert config["epic"][1]["status"] == "on_progress"
+    assert config["epic"][2]["status"] == "pending"
+
+
+def test_reset_failed_epics_nothing_failed_returns_empty():
+    config = {"epic": [{"epic_name": "e1", "status": "done"}]}
+    assert tm.reset_failed_epics(config) == []
+    assert config["epic"][0]["status"] == "done"
+
+
+def test_reset_failed_epics_tolerates_missing_status_key():
+    config = {"epic": [{"epic_name": "e1"}]}
+    assert tm.reset_failed_epics(config) == []
 
 
 def test_reset_qa_state_resets_matching_epics(isolate_tempa_paths):

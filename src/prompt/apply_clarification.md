@@ -1,4 +1,5 @@
-Read every clarification result file in the folder: ${sources.clarifications} (there may be several, one per past clarification round — read them all, not just the most recent).
+Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has been fully applied to the PRD/spec in a previous apply pass, so it does NOT need to be read again:
+${clarification_files}
 
 For each finding, use the content written under its "Your answer:" label if present; otherwise fall back to the finding's own "Recommendation:" line.
 

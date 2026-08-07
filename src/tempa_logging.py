@@ -39,6 +39,7 @@ class _RunnerState:
         self.usage_limit_hit = False
         self.auth_error_hit = False
         self.auth_error_message = ""
+        self.server_overloaded_hit = False
 
 
 _state = _RunnerState()

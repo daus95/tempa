@@ -4,6 +4,9 @@ Deletes harness output (qa/, logs/, specs/pbi, specs/clarifications) and resets 
 state in config.json, each behind a confirmation (`_confirm_destructive`) and a safety check
 (`_safety_check_clear_target`) that refuses to delete a drive root or anything outside
 workspace.root. `run_clear_all` runs the three clears together behind one prompt.
+
+The status resets are non-destructive by comparison (config.json only) — `reset_failed_epics`
+is also reused outside the CLI, by implement's automatic retry after a provider overload.
 """
 
 from __future__ import annotations
@@ -99,7 +102,17 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("last_clarification_action", None)
     config.pop("last_clarification_findings", None)
     config.pop("clarify_applied_hashes", None)
+    config.pop("last_clean_evaluation_at", None)
+    # Resumable session ids (see tempa_config.get_clarify_session_id /
+    # get_clarify_apply_session_id) are meaningless once the clarification files they
+    # point at are gone — leaving them would risk a later apply/evaluate --resume-ing a
+    # session about a backlog that no longer exists.
+    config.pop("clarify_session_id", None)
+    config.pop("clarify_session_backend", None)
+    config.pop("clarify_apply_session_id", None)
+    config.pop("clarify_apply_session_backend", None)
     config["last_clarification_round"] = 0
+    config["last_finalize_round"] = 0
     config["last_auto_answer"] = 0
 
 
@@ -225,6 +238,8 @@ def run_clear_all() -> None:
         any(k in config for k in ("last_clarification_action", "last_clarification_findings", "clarify_applied_hashes"))
         or config.get("last_auto_answer", 0) != 0
         or config.get("last_clarification_round", 0) != 0
+        or config.get("last_finalize_round", 0) != 0
+        or config.get("last_clean_evaluation_at", 0) != 0
     )
 
     if not qa_files and not log_files and not plan_files and epic_count == 0 and not clar_to_delete and not stale_clarify_state:
@@ -250,23 +265,36 @@ def run_clear_all() -> None:
     sys.exit(0)
 
 
+def reset_failed_epics(config: dict) -> list[str]:
+    """Flip every `failed` epic in `config` back to `pending` (dropping its stored session
+    id, so the next attempt starts a fresh session) and return the labels that were reset —
+    the caller still has to save_config. Empty list = nothing was failed.
+
+    Shared by two callers: the `implement --reset-failed` command (_reset_failed_epics
+    below) and implement's automatic retry after a transient backend overload
+    (tempa_implement._reset_failed_before_retry), which has to clear a leftover `failed`
+    status itself or check_and_run would refuse to resume anything at all."""
+    reset: list[str] = []
+    for i, session in enumerate(config.get("epic") or []):
+        if session.get("status") == "failed":
+            reset.append(session.get("epic_name", f"epic_{i}"))
+            session["status"] = "pending"
+            session.pop("claude_session_id", None)
+            session.pop("session_id", None)
+            session.pop("session_backend", None)
+    return reset
+
+
 def _reset_failed_epics() -> None:
     config = load_config()
-    reset_count = 0
-    for i, session in enumerate(config.get("epic") or []):
-        if session["status"] == "failed":
-            label = session.get("epic_name", f"epic_{i}")
-            config["epic"][i]["status"] = "pending"
-            config["epic"][i].pop("claude_session_id", None)
-            config["epic"][i].pop("session_id", None)
-            config["epic"][i].pop("session_backend", None)
-            reset_count += 1
-            log(f"Reset [{label}] → pending")
-    if reset_count == 0:
+    reset = reset_failed_epics(config)
+    for label in reset:
+        log(f"Reset [{label}] → pending")
+    if not reset:
         log("No failed sessions found — nothing to reset")
     else:
         save_config(config)
-        log(f"Reset {reset_count} failed session(s). Ready to restart.")
+        log(f"Reset {len(reset)} failed session(s). Ready to restart.")
 
 
 def _reset_qa_state() -> None:

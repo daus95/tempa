@@ -1,7 +1,7 @@
 """The dashboard HTTP handler.
 
 _DashboardHandler serves the single-page app and the /api/* GET/POST routes (spec browse/
-edit/upload/delete/rename, clarify view/save/run, implement run/stop, clear, workspace
+edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop, clear, workspace
 init/open/close, config get/save). All file access is confined to prd_dir / clar_dir via
 _resolve_within."""
 
@@ -39,8 +39,11 @@ from dashboard_config import (
 )
 from dashboard_runs import (
     _epic_sessions,
+    _implementation_has_started,
+    _max_clarification_run_change_warning,
     _start_clarify_run,
     _start_implement_run,
+    _stop_clarify_run,
     _stop_implement_run,
 )
 from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within, build_tree
@@ -139,11 +142,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             unanswered, answered = _clarify_files_overview(
                 self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
             )
-            findings = _latest_evaluation_findings(unanswered + answered)
             dashboard_config = _load_dashboard_config()
+            findings = _latest_evaluation_findings(
+                unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
+            )
             last_action = dashboard_config.get("last_clarification_action")
             round_ = dashboard_config.get("last_clarification_round") or 0
             max_round = dashboard_config.get("max_clarification_run") or 0
+            finalize_round = dashboard_config.get("last_finalize_round") or 0
             allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
             implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
             self._send_json(200, {
@@ -154,7 +160,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "clarify": {"unanswered": unanswered, "answered": answered,
                             "findings": findings,
                             "finalize": _clarify_finalize_status(
-                                findings, last_action, round_, max_round, allow_finalize_with_critical),
+                                findings, last_action, round_, max_round, allow_finalize_with_critical,
+                                finalize_round),
                             "implementReadiness": _implement_readiness_status(
                                 findings, last_action is not None, implementation_requirement),
                             "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config)},
@@ -249,6 +256,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except ValueError:
             since = 0
         run = self.server.clarify_run
+        # Read fresh from config.json on every poll (not cached) so the finalize
+        # progress badge next to the "Finalized Clarification" button ticks up live,
+        # round by round, the same way implement's epic snapshot does.
+        dashboard_config = _load_dashboard_config()
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -256,6 +267,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"], "mode": run["mode"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
+                "finalizeRound": dashboard_config.get("last_finalize_round") or 0,
+                "maxRound": dashboard_config.get("max_clarification_run") or 0,
             })
 
     def _handle_implement_run_status(self, query: dict) -> None:
@@ -264,6 +277,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except ValueError:
             since = 0
         run = self.server.implement_run
+        # Epics are read fresh from config.json on every poll (not cached) — the Status
+        # tab shows the same data the "Log" tab's run is actively writing into
+        # config.json, so it needs to reflect live progress too.
+        epics = _epic_sessions()
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -271,10 +288,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
-                # Epics are read fresh from config.json on every poll (not cached) —
-                # the Status tab shows the same data the "Log" tab's run is actively
-                # writing into config.json, so it needs to reflect live progress too.
-                "epics": _epic_sessions(),
+                "epics": epics,
+                # Relabels the three Start Implementation buttons to "Continue
+                # Implementation" once any epic has actually run — computed here so
+                # every surface agrees (see _implementation_has_started).
+                "started": _implementation_has_started(epics),
             })
 
     def _handle_config_get(self) -> None:
@@ -291,6 +309,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
                 "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
                 "notifications": {"email": tempa_config.get_email_notifications(config)},
+                "usage_limit_retry_wait_sec": tempa_config.get_usage_limit_retry_wait_sec(config),
+                "usage_limit_heartbeat_sec": tempa_config.get_usage_limit_heartbeat_sec(config),
+                "server_overloaded_retry_wait_sec": tempa_config.get_server_overloaded_retry_wait_sec(config),
+                "poll_interval_sec": tempa_config.get_poll_interval_sec(config),
                 "backends_status": _backend_status(),
             },
         })
@@ -327,6 +349,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_save()
         elif parsed.path == "/api/clarify/run":
             self._handle_clarify_run_start()
+        elif parsed.path == "/api/clarify/stop":
+            self._handle_clarify_run_stop()
         elif parsed.path == "/api/clarify/skip-minor":
             self._handle_clarify_skip_minor_save()
         elif parsed.path == "/api/implement/run":
@@ -512,6 +536,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True})
 
+    def _handle_clarify_run_stop(self) -> None:
+        if not _stop_clarify_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Finalized Clarification is not running."})
+            return
+        self._send_json(200, {"ok": True})
+
     def _handle_clarify_skip_minor_save(self) -> None:
         """Persist the Clarification page's "Only evaluate critical & major findings"
         switch (config.json's "skip_minor_findings") — a narrow, single-purpose save
@@ -549,7 +579,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         unanswered, answered = _clarify_files_overview(
             self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
         )
-        findings = _latest_evaluation_findings(unanswered + answered)
+        findings = _latest_evaluation_findings(
+            unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
+        )
         requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
         if not _implement_readiness_status(findings, True, requirement)["ready"]:
             # Wording matches the requirement actually configured (dashboard Settings'
@@ -703,14 +735,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Malformed request."})
             return
         backends = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (backends_in.get(stage) or "").strip()
             if value not in tempa_backend.BACKENDS:
                 self._send_json(400, {"ok": False, "error": f"The {stage} backend must be one of: {', '.join(tempa_backend.BACKENDS)}."})
                 return
             backends[stage] = value
         models = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (models_in.get(stage) or "").strip()
             if not value:
                 self._send_json(400, {"ok": False, "error": f"The {stage} model cannot be empty."})
@@ -719,7 +751,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             # the model string is stored as-is (see tempa_config._resolve_model_alias).
             models[stage] = tempa_config._resolve_model_alias(value) if backends[stage] == "claude" else value
         reasoning_efforts = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (reasoning_efforts_in.get(stage) or "").strip()
             backend_def = tempa_backend.get_backend_def(backends[stage])
             if not tempa_backend.is_valid_reasoning_effort(backend_def, models[stage], value):
@@ -750,7 +782,23 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         ok, max_clarification_run = _parse_limit("max_clarification_run", required=True)
         if not ok:
-            self._send_json(400, {"ok": False, "error": "Max Clarification Runs must be a positive whole number."})
+            self._send_json(400, {"ok": False, "error": "Max Finalize Clarification Round must be a positive whole number."})
+            return
+        ok, usage_limit_retry_wait_sec = _parse_limit("usage_limit_retry_wait_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Usage Limit Retry Wait must be a positive whole number."})
+            return
+        ok, usage_limit_heartbeat_sec = _parse_limit("usage_limit_heartbeat_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Usage Limit Heartbeat Interval must be a positive whole number."})
+            return
+        ok, server_overloaded_retry_wait_sec = _parse_limit("server_overloaded_retry_wait_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Server Overload Retry Wait must be a positive whole number."})
+            return
+        ok, poll_interval_sec = _parse_limit("poll_interval_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Implementation Poll Interval must be a positive whole number."})
             return
         allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
         implementation_start_requirement = payload.get("implementation_start_requirement")
@@ -799,6 +847,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
 
         config = current_config
+        previous_max_clarification_run = config.get("max_clarification_run")
         config["models"] = models
         config["backends"] = backends
         config["reasoning_efforts"] = reasoning_efforts
@@ -808,10 +857,21 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
         config["implementation_start_requirement"] = implementation_start_requirement
         config["notifications"] = {"email": email}
+        config["usage_limit_retry_wait_sec"] = usage_limit_retry_wait_sec
+        config["usage_limit_heartbeat_sec"] = usage_limit_heartbeat_sec
+        config["server_overloaded_retry_wait_sec"] = server_overloaded_retry_wait_sec
+        config["poll_interval_sec"] = poll_interval_sec
         tempa_config.save_config(config)
         print("[settings] configuration saved")
+        # The save itself always succeeds; `warning` is an advisory note about a setting
+        # a run already in flight can no longer pick up (see
+        # _max_clarification_run_change_warning). Computed server-side rather than in the
+        # client, since only the server knows for certain what's running right now.
+        warning = _max_clarification_run_change_warning(
+            self.server, previous_max_clarification_run, max_clarification_run)
         self._send_json(200, {
             "ok": True,
+            "warning": warning,
             "config": {
                 "models": models,
                 "backends": backends,
@@ -822,6 +882,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "allow_finalize_with_critical": allow_finalize_with_critical,
                 "implementation_start_requirement": implementation_start_requirement,
                 "notifications": {"email": email},
+                "usage_limit_retry_wait_sec": usage_limit_retry_wait_sec,
+                "usage_limit_heartbeat_sec": usage_limit_heartbeat_sec,
+                "server_overloaded_retry_wait_sec": server_overloaded_retry_wait_sec,
+                "poll_interval_sec": poll_interval_sec,
                 "backends_status": _backend_status(),
             },
         })

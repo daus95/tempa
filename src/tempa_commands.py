@@ -112,6 +112,8 @@ def run_test() -> None:
         log(f"TEST stopped — authentication failed (see message above; log: {log_path.name})")
     elif _state.usage_limit_hit:
         log(f"TEST stopped — usage limit reached (see log: {log_path.name})")
+    elif _state.server_overloaded_hit:
+        log(f"TEST stopped — backend API overloaded, a transient issue (see log: {log_path.name})")
     elif exit_code != 0:
         log(f"TEST FAILED — {backend.label} exited with code {exit_code} (see log: {log_path.name})")
         notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
@@ -386,6 +388,7 @@ def run_init(args: argparse.Namespace) -> None:
 
 STAGE_LABELS = {
     "clarify": "Clarify   (clarify)",
+    "clarify_apply": "Clarify   (clarify --apply, --auto-answer)",
     "plan": "Plan      (plan)",
     "implement": "Implement (implement, QA, verify)",
 }
@@ -397,7 +400,7 @@ def print_models(config: dict | None = None) -> None:
         config = load_config()
     models = get_models(config)
     _banner("AI MODEL PER STAGE")
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         print(f"  {STAGE_LABELS[stage]:<34} {models.get(stage, '?')}", flush=True)
 
 
@@ -407,7 +410,7 @@ def print_backends(config: dict | None = None) -> None:
         config = load_config()
     backends = get_backends(config)
     _banner("CLI BACKEND PER STAGE")
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         name = backends.get(stage, "claude")
         print(f"  {STAGE_LABELS[stage]:<34} {name:<10} ({get_backend_def(name).label})", flush=True)
 
@@ -418,7 +421,7 @@ def print_efforts(config: dict | None = None) -> None:
         config = load_config()
     efforts = get_reasoning_efforts(config)
     _banner("AI REASONING EFFORT PER STAGE")
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = efforts.get(stage) or "(default)"
         print(f"  {STAGE_LABELS[stage]:<34} {value}", flush=True)
 
@@ -427,7 +430,7 @@ def set_efforts(args: argparse.Namespace) -> None:
     """Set the reasoning effort per stage in config.json (key "reasoning_efforts").
 
     Usage:
-      tempa set-effort [--clarify <level>] [--plan <level>] [--implement <level>]
+      tempa set-effort [--clarify <level>] [--clarify-apply <level>] [--plan <level>] [--implement <level>]
 
     <level> must be supported by that stage's currently configured backend+model (see
     `tempa show-models`/`show-backends`) — e.g. low/medium/high/xhigh/max for Claude Code,
@@ -441,7 +444,7 @@ def set_efforts(args: argparse.Namespace) -> None:
     backends = get_backends(config)
 
     changed = False
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = getattr(args, stage)
         if value is not None:
             value = value.strip()
@@ -460,7 +463,7 @@ def set_efforts(args: argparse.Namespace) -> None:
     if changed:
         log("Reasoning effort saved to config.json (key \"reasoning_efforts\").")
     else:
-        log("No effort flag given (--clarify/--plan/--implement) — showing the current configuration.")
+        log("No effort flag given (--clarify/--clarify-apply/--plan/--implement) — showing the current configuration.")
     print_efforts(config)
 
 
@@ -482,23 +485,29 @@ def set_models(args: argparse.Namespace) -> None:
     """Set the AI model per stage in config.json (key "models").
 
     Usage:
-      tempa set-model [--clarify <model>] [--plan <model>] [--implement <model>]
+      tempa set-model [--clarify <model>] [--clarify-apply <model>] [--plan <model>] [--implement <model>]
 
     <model> accepts a friendly alias (opus-5, sonnet-5, haiku-4.5, fable-5) or a full
     model id (e.g. claude-opus-5) when the stage's backend is "claude" — aliases are
     Claude-only, so for a "copilot"/"codex" stage the value is stored as-is (their model
     catalogs move independently of Tempa and aren't hardcoded here; see `tempa set-backend`).
     Stages omitted keep their current/default value.
+
+    "clarify_apply" (--clarify-apply) is the model used to apply resolutions to the
+    PRD/spec + auto-answer — mechanical work compared to evaluate, hence a separate,
+    cheaper-by-default model. It's a full stage in its own right (has its own
+    `set-backend`/`set-effort` too), same as clarify/plan/implement.
     """
     config = load_config()
     models = get_models(config)
     backends = get_backends(config)
 
     changed = False
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = getattr(args, stage)
         if value is not None:
-            models[stage] = _resolve_model_alias(value) if backends.get(stage, "claude") == "claude" else value
+            backend = backends.get(stage, "claude")
+            models[stage] = _resolve_model_alias(value) if backend == "claude" else value
             changed = True
 
     config["models"] = models
@@ -506,7 +515,7 @@ def set_models(args: argparse.Namespace) -> None:
     if changed:
         log("AI model saved to config.json (key \"models\").")
     else:
-        log("No model flag given (--clarify/--plan/--implement) — showing the current configuration.")
+        log("No model flag given (--clarify/--clarify-apply/--plan/--implement) — showing the current configuration.")
     print_models(config)
 
 
@@ -514,7 +523,7 @@ def set_backends(args: argparse.Namespace) -> None:
     """Set the CLI backend per stage in config.json (key "backends").
 
     Usage:
-      tempa set-backend [--clarify <claude|copilot|codex>] [--plan ...] [--implement ...]
+      tempa set-backend [--clarify <claude|copilot|codex>] [--clarify-apply ...] [--plan ...] [--implement ...]
 
     Stages omitted keep their current/default value ("claude").
     """
@@ -522,7 +531,7 @@ def set_backends(args: argparse.Namespace) -> None:
     backends = get_backends(config)
 
     changed = False
-    for stage in ("clarify", "plan", "implement"):
+    for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = getattr(args, stage)
         if value is not None:
             if value not in BACKENDS:
@@ -536,7 +545,7 @@ def set_backends(args: argparse.Namespace) -> None:
     if changed:
         log("CLI backend saved to config.json (key \"backends\").")
     else:
-        log("No backend flag given (--clarify/--plan/--implement) — showing the current configuration.")
+        log("No backend flag given (--clarify/--clarify-apply/--plan/--implement) — showing the current configuration.")
     print_backends(config)
 
 

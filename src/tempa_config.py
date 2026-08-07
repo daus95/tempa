@@ -26,7 +26,6 @@ WORKING_DIR = SCRIPT_DIR.parent
 # they live inside src/ — anchored to this module's own folder, not SCRIPT_DIR (the root).
 # One .md file per prompt (readable, editable); loaded via load_prompt() in tempa_prompts.
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
-POLL_INTERVAL_SEC = 60
 
 # Tiny bootstrap pointer, at Tempa's own install root: one line holding the absolute path
 # of the currently active workspace, so Tempa knows which workspace's own config.json to
@@ -142,11 +141,19 @@ WORKSPACE_LABELS = {
 }
 
 # AI model per harness stage. Stored under the "models" key in config.json.
-# - clarify  : PRD clarification session (clarify)
-# - plan     : epic/feature/task planning session (run automatically by implement / implement --replan)
-# - implement: implementation session (implement), including QA and verify
+# - clarify      : PRD clarification EVALUATE session (clarify) — the stage that decides
+#   what's ambiguous/conflicting, so it keeps the strongest default model.
+# - clarify_apply: apply resolutions to the PRD/spec + auto-answer (clarify --apply,
+#   --auto-answer, and the apply half of --finalize) — mechanical work (copy an already-
+#   decided answer/recommendation into the PRD, or pick one from context), so it defaults
+#   to a cheaper model. A full stage of its own (has its own backends/reasoning_efforts
+#   entries too, same as clarify/plan/implement) — the optimal backend/effort for
+#   mechanical apply work isn't necessarily the same as for evaluate.
+# - plan         : epic/feature/task planning session (run automatically by implement / implement --replan)
+# - implement    : implementation session (implement), including QA and verify
 DEFAULT_MODELS = {
     "clarify": "claude-opus-5",
+    "clarify_apply": "claude-sonnet-5",
     "plan": "claude-sonnet-5",
     "implement": "claude-sonnet-5",
 }
@@ -170,6 +177,7 @@ MODEL_ALIASES = {
 # (OpenAI Codex CLI) — see tempa_backend.BACKENDS for what each one actually runs.
 DEFAULT_BACKENDS = {
     "clarify": "claude",
+    "clarify_apply": "claude",
     "plan": "claude",
     "implement": "claude",
 }
@@ -181,6 +189,7 @@ DEFAULT_BACKENDS = {
 # tempa_commands.set_efforts, not here (this module has no tempa_backend dependency).
 DEFAULT_REASONING_EFFORTS = {
     "clarify": "",
+    "clarify_apply": "",
     "plan": "",
     "implement": "",
 }
@@ -210,10 +219,17 @@ DEFAULT_CONFIG = {
     "backends": dict(DEFAULT_BACKENDS),
     "reasoning_efforts": dict(DEFAULT_REASONING_EFFORTS),
     "features_per_session": 3,
+    "resume_implementation_sessions": True,
     "max_session_run": 30,
     "max_clarification_run": 20,
+    "finalize_no_progress_rounds": 2,
+    "usage_limit_retry_wait_sec": 1800,
+    "usage_limit_heartbeat_sec": 300,
+    "server_overloaded_retry_wait_sec": 300,
+    "poll_interval_sec": 60,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
+    "last_clean_evaluation_at": 0,
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
@@ -474,6 +490,54 @@ def get_skip_minor_findings(config: dict) -> bool:
     return bool(config.get("skip_minor_findings", True))
 
 
+def _get_positive_number(config: dict, key: str, default: int) -> int | float:
+    """Return config[key] if it's a positive int/float, else `default` (missing/invalid
+    value). Accepts float as well as int — not because config.json is expected to store
+    fractional seconds, but so tests can monkeypatch load_config with sub-second values
+    (e.g. 0.01) instead of actually sleeping whole seconds."""
+    value = config.get(key, default)
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return value if is_number and value > 0 else default
+
+
+def get_usage_limit_retry_wait_sec(config: dict) -> int | float:
+    """Return config.json's "usage_limit_retry_wait_sec" — how long to wait before
+    retrying a clarify/implement/QA/verify step after a usage-limit stop (see
+    tempa_session.wait_out_usage_limit) — defaulting to 1800 (30 minutes)."""
+    return _get_positive_number(config, "usage_limit_retry_wait_sec", DEFAULT_CONFIG["usage_limit_retry_wait_sec"])
+
+
+def get_usage_limit_heartbeat_sec(config: dict) -> int | float:
+    """Return config.json's "usage_limit_heartbeat_sec" — how often a "still waiting"
+    heartbeat is logged during the usage-limit wait above — defaulting to 300 (5 minutes)."""
+    return _get_positive_number(config, "usage_limit_heartbeat_sec", DEFAULT_CONFIG["usage_limit_heartbeat_sec"])
+
+
+def get_server_overloaded_retry_wait_sec(config: dict) -> int | float:
+    """Return config.json's "server_overloaded_retry_wait_sec" — how long to wait before
+    retrying after the backend's API reports itself overloaded (see
+    tempa_session.wait_out_server_overload) — defaulting to 300 (5 minutes)."""
+    return _get_positive_number(
+        config, "server_overloaded_retry_wait_sec", DEFAULT_CONFIG["server_overloaded_retry_wait_sec"]
+    )
+
+
+def get_resume_implementation_sessions(config: dict) -> bool:
+    """Return config.json's "resume_implementation_sessions" (default True) — whether a
+    continuation/require_fixing implementation session should --resume the epic's
+    previous session (reusing its already-paid-for context: the epic spec, the code it
+    already read) instead of always starting cold. An escape hatch for the rare case
+    where resuming misbehaves for a given backend/workspace."""
+    value = config.get("resume_implementation_sessions")
+    return bool(value) if isinstance(value, bool) else True
+
+
+def get_poll_interval_sec(config: dict) -> int | float:
+    """Return config.json's "poll_interval_sec" — how often `tempa implement`'s scheduler
+    loop polls for new work — defaulting to 60 (1 minute)."""
+    return _get_positive_number(config, "poll_interval_sec", DEFAULT_CONFIG["poll_interval_sec"])
+
+
 # Field names used to persist a resumable session id on an epic entry, per kind. Kept
 # separate from the per-stage "implement" model/backend because QA sessions are resumed
 # independently of the main implementation session (see tempa_session.run_qa_session).
@@ -508,3 +572,30 @@ def set_epic_session_id(epic: dict, backend: str, session_id: str, kind: str = "
     epic[backend_key] = backend
     if legacy_key:
         epic.pop(legacy_key, None)
+
+
+def get_clarify_session_id(config: dict, current_backend: str) -> str | None:
+    """Return the resumable session id of the most recent clarify EVALUATE session
+    (config["clarify_session_id"]), but only if it was captured under `current_backend`
+    — same reasoning as get_epic_session_id. Used by an apply pass to resume the
+    evaluate session that just wrote the findings it's about to apply, instead of
+    re-reading the whole PRD cold. Unlike epic session ids, this isn't namespaced by
+    "kind" — apply always resumes the evaluate session specifically, never itself."""
+    sid = config.get("clarify_session_id")
+    if not sid:
+        return None
+    return sid if config.get("clarify_session_backend", "claude") == current_backend else None
+
+
+def get_clarify_apply_session_id(config: dict, current_backend: str) -> str | None:
+    """Return the resumable session id of the apply session's OWN most recent attempt
+    (config["clarify_apply_session_id"]), captured under `current_backend`. Distinct
+    from get_clarify_session_id (the evaluate session apply normally resumes): this one
+    exists so that if an apply session itself gets interrupted by a usage-limit/overload
+    retry mid-run (see run_with_usage_limit_retry), the retried attempt resumes THAT
+    partial apply attempt instead of losing its progress and falling back to resuming
+    evaluate (or starting cold) again."""
+    sid = config.get("clarify_apply_session_id")
+    if not sid:
+        return None
+    return sid if config.get("clarify_apply_session_backend", "claude") == current_backend else None

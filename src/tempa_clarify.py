@@ -20,6 +20,8 @@ from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
 from tempa_config import (
     get_backend,
+    get_clarify_apply_session_id,
+    get_clarify_session_id,
     get_model,
     get_reasoning_effort,
     get_sources,
@@ -63,6 +65,21 @@ def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> No
         timings[f.name] = entry
     config["clarify_file_timings"] = timings
     save_config(config)
+
+
+def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, minor: int) -> None:
+    """If a fresh evaluate pass found truly zero findings (every severity), stamp
+    config["last_clean_evaluation_at"] with the current time (caller still has to
+    save_config). This covers the one case the file-based readiness gate
+    (_latest_evaluation_findings in dashboard_clarify_parse.py) can't see on its own:
+    per prompt/clarification.md the agent only writes a new clarification file when
+    there's a finding to record, so a truly-clean round leaves no new file behind —
+    the gate would otherwise keep reading whatever the last finding-bearing file
+    said, even if that file is from an old round whose criticals/majors have since
+    been resolved. Any round with even one remaining finding (of any severity) still
+    gets its own file, so this only fires for the all-zero case."""
+    if critical == 0 and major == 0 and minor == 0:
+        config["last_clean_evaluation_at"] = time.time()
 
 
 def _clarification_report_files(folder: Path, since: float) -> list[Path]:
@@ -123,6 +140,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor)
     # Stamps *how* the current last_clarification_findings was produced — an
     # evaluate pass here, vs an apply pass in _run_apply_step() — so the dashboard's
     # finalize gate can tell "criticals were answered and applied" apart from "a
@@ -192,6 +210,15 @@ def run_clarify_answer() -> None:
         log("No clarification results to answer yet. Run first: tempa clarify")
         sys.exit(0)
 
+    # Only files with at least one unanswered finding need to be read/written by the
+    # agent — files that are already fully answered add nothing (see
+    # _clarification_backlog's unanswered_files, same split the dashboard uses).
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, _ = _clarification_backlog(clar_dir, applied_hashes)
+    if not unanswered_files:
+        print("[OK] Every clarification finding already has an answer — nothing left to answer.", flush=True)
+        sys.exit(0)
+
     _banner(f"Clarify (auto-answer) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
@@ -200,9 +227,14 @@ def run_clarify_answer() -> None:
     save_config(config)
 
     start_ts = time.time() - 1
-    prompt = build_auto_answer_prompt(config)
+    prompt = build_auto_answer_prompt(config, unanswered_files)
     if not run_with_usage_limit_retry(
-        lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
+        # "clarify_apply", not "clarify" — auto-answer is mechanical (pick/copy an answer
+        # into the blank), same reasoning as apply's backend/model/effort (see DEFAULT_MODELS).
+        lambda: run_clarification_session(
+            prompt, 1, get_backend_def(get_backend(config, "clarify_apply")),
+            get_model(config, "clarify_apply"), get_reasoning_effort(config, "clarify_apply"),
+        ),
         "Auto-answer",
     ):
         if _state.auth_error_hit:
@@ -346,13 +378,29 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     clar_dir.mkdir(parents=True, exist_ok=True)
 
     max_run = config.get("max_clarification_run", 20)
+    no_progress_limit = config.get("finalize_no_progress_rounds", 2)
     run_number = 0
+    no_progress_rounds = 0
+    prev_total = None  # critical+major from the previous round, for the convergence guard
 
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | max_runs={max_run}")
 
     if not _resolve_clarification_backlog(config, clar_dir):
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            "Clarification backlog apply failed",
+            "Review the apply session log and resolve the failure before continuing.",
+        )
         sys.exit(1)
+
+    # Reset the finalize-only round counter to 0 for every fresh `clarify --finalize`
+    # invocation — unlike last_clarification_round below (a running total across every
+    # evaluate pass ever, manual or finalize), this one exists purely to show progress
+    # against max_run for THIS run, so it always restarts from 0 rather than picking up
+    # wherever a previous finalize run (or manual clarify) left off.
+    config["last_finalize_round"] = 0
+    save_config(config)
 
     while run_number < max_run:
         run_number += 1
@@ -390,8 +438,13 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         critical = findings.get("critical", 0)
         major = findings.get("major", 0)
         minor = findings.get("minor", 0)
+        _stamp_clean_evaluation_if_zero(config, critical, major, minor)
         config["last_clarification_action"] = "evaluate"
-        config["last_clarification_round"] = run_number
+        # Running total across every evaluate pass ever (manual `clarify` or one iteration
+        # of `clarify --finalize`) — NOT reset here, unlike last_finalize_round above, so
+        # it keeps counting across finalize runs and manual runs alike.
+        config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
+        config["last_finalize_round"] = run_number
         save_config(config)
         report_files = _clarification_report_files(clar_dir, start_ts)
         _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
@@ -406,31 +459,49 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
 
         log(f"Still {critical} critical and {major} major findings remain — applying resolutions to the PRD/spec documents...")
 
+        # Convergence guard: if `no_progress_limit` rounds in a row fail to reduce the
+        # critical+major count, apply has run out of resolutions it can make on its own
+        # (e.g. every remaining finding genuinely needs a human decision) — stop instead
+        # of burning up to max_clarification_run rounds of full-PRD re-evaluation for no
+        # benefit.
+        total = critical + major
+        if prev_total is not None and total >= prev_total:
+            no_progress_rounds += 1
+        else:
+            no_progress_rounds = 0
+        prev_total = total
+        if no_progress_rounds >= no_progress_limit:
+            log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
+                f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
+                "major finding(s) remain and likely need a human decision (see `tempa answer`).")
+            notify_attention(
+                AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
+                "Clarification needs human answers",
+                "Review and answer the remaining findings before continuing finalization.",
+                details={"critical": critical, "major": major},
+            )
+            sys.exit(1)
+
         config = load_config()
-        apply_prompt = build_apply_clarification_prompt(config)
-        apply_start_ts = time.time()
-        apply_success = run_with_usage_limit_retry(
-            lambda apply_prompt=apply_prompt, run_number=run_number, config=config: run_apply_clarification_session(
-                apply_prompt, run_number, get_backend_def(get_backend(config, "clarify")),
-                get_model(config, "clarify"), get_reasoning_effort(config, "clarify"),
-            ),
-            f"Clarify (finalize) round #{run_number} — apply",
-        )
-        if _state.auth_error_hit:
-            sys.exit(3)
-        if not apply_success:
+        # Resume the evaluate session that just wrote this round's findings (see
+        # tempa_config.get_clarify_session_id / run_clarification_session) — it already
+        # paid to read the whole PRD, so applying via --resume reuses that context
+        # instead of a cold session re-reading the PRD and every backlog file itself.
+        # Checked against the "clarify_apply" stage's backend (not "clarify"'s) — that's
+        # the CLI that will actually try the --resume, and a session id only means
+        # anything to the backend that produced it. If clarify_apply is configured with a
+        # different backend than clarify (e.g. evaluate on Claude, apply on Codex), there
+        # is nothing to resume and this correctly returns None.
+        resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
+        if not _run_apply_step(config, resume_session_id=resume_sid):
             log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
             notify_attention(
                 AttentionEventType.CLARIFICATION_FAILED, "Clarification",
                 f"Clarification apply round {run_number} failed",
                 "Review the apply session log and resolve the failure before continuing.",
+                details={"round": run_number},
             )
             sys.exit(1)
-
-        config = load_config()
-        config["last_clarification_action"] = "apply"
-        save_config(config)
-        _stamp_clarify_timing(_clarification_result_files(clar_dir), "apply_seconds", time.time() - apply_start_ts)
 
         log("Resolutions applied. Running re-evaluation...")
 
@@ -461,18 +532,63 @@ def _record_clarify_applied_state(config: dict, clar_dir: Path) -> None:
     save_config(config)
 
 
-def _run_apply_step(config: dict) -> bool:
+def _run_apply_step(config: dict, resume_session_id: str | None = None) -> bool:
     """Run one apply-clarification session (writes answers/resolutions into the PRD/spec
     documents) and log the outcome. Returns True on success, False on failure. Exits the
     process directly on an auth error, matching every other clarify subcommand's behavior
     (a usage-limit hit is not a failure — it's retried in place; see
-    run_with_usage_limit_retry)."""
-    prompt = build_apply_clarification_prompt(config)
+    run_with_usage_limit_retry).
+
+    Only the apply backlog (files not yet reflected in config["clarify_applied_hashes"])
+    is sent to the agent — see _clarification_backlog — instead of every clarification
+    file ever written, so an apply session's input doesn't grow with the number of past
+    clarification rounds. If there's no backlog at all (e.g. called right after a fresh
+    evaluate pass with nothing to apply yet, or everything was already applied), no
+    session is spawned.
+
+    `resume_session_id`, when given, is passed straight through to
+    run_apply_clarification_session — normally the evaluate session that just wrote the
+    backlog files (see run_clarify_finalize), so this apply pass reuses that session's
+    already-paid-for PRD context instead of starting cold. Callers that apply independently
+    of any evaluate pass in this process (e.g. a standalone `tempa clarify --apply`) leave
+    this None, which is the previous, always-fresh behavior."""
+    clar_dir = Path(get_sources(config).get("clarifications", ""))
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
+    backlog = sorted(set(unanswered_files) | set(unapplied_files))
+    if not backlog:
+        log("Apply: nothing to apply — every clarification file is already applied.")
+        return True
+
+    # Mechanically fill any still-empty "Your answer" with its own Recommendation text
+    # BEFORE applying (no agent call — same as _resolve_clarification_backlog's pre-loop
+    # step) so the clarification file itself ends up recording exactly what the apply
+    # prompt is about to do (fall back to Recommendation for anything left unanswered).
+    # Without this, a finding resolved this way stays permanently "Unanswered" in the
+    # dashboard even after its resolution has been successfully applied to the PRD/spec.
+    if unanswered_files:
+        filled = _fill_unanswered_with_recommendations(unanswered_files)
+        if filled:
+            log(f"Filled {filled} unanswered finding(s) across {len(unanswered_files)} file(s) "
+                "with their own recommendation before applying.")
+
+    prompt = build_apply_clarification_prompt(config, backlog)
     apply_start_ts = time.time()
-    if not run_with_usage_limit_retry(
-        lambda: run_apply_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
-        "Apply",
-    ):
+    apply_backend = get_backend_def(get_backend(config, "clarify_apply"))
+    apply_model = get_model(config, "clarify_apply")
+    apply_effort = get_reasoning_effort(config, "clarify_apply")
+
+    def _attempt_apply() -> bool:
+        # Re-read fresh on every attempt (including retries): prefer resuming THIS apply
+        # step's own previous (usage-limit/overload-interrupted) attempt if one exists —
+        # it may already have made partial progress — otherwise fall back to
+        # `resume_session_id` (typically the evaluate session that just wrote this
+        # backlog, passed in by the caller).
+        cfg = load_config()
+        sid = get_clarify_apply_session_id(cfg, apply_backend.name) or resume_session_id
+        return run_apply_clarification_session(prompt, 1, apply_backend, apply_model, apply_effort, resume_session_id=sid)
+
+    if not run_with_usage_limit_retry(_attempt_apply, "Apply"):
         if _state.auth_error_hit:
             sys.exit(3)
         log("Apply clarification failed.")
@@ -485,6 +601,10 @@ def _run_apply_step(config: dict) -> bool:
     log(f"Apply clarification done. Remaining findings: "
         f"critical={f.get('critical', 0)}, major={f.get('major', 0)}, minor={f.get('minor', 0)}")
     config["last_clarification_action"] = "apply"
+    # This apply step is done — drop its retry-resume id so a LATER, unrelated apply call
+    # doesn't try to resume a session that already finished this backlog.
+    config.pop("clarify_apply_session_id", None)
+    config.pop("clarify_apply_session_backend", None)
     clar_dir = Path(get_sources(config).get("clarifications", ""))
     _record_clarify_applied_state(config, clar_dir)
     _stamp_clarify_timing(_clarification_result_files(clar_dir), "apply_seconds", time.time() - apply_start_ts)

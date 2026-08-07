@@ -88,7 +88,7 @@ def test_claude_extract_session_id():
 def test_marker_lists_are_lowercase(backend):
     # tempa_session lowercases the scanned text before matching, so an
     # uppercase-containing marker here would never match anything.
-    for marker in backend.usage_limit_markers + backend.auth_error_markers:
+    for marker in backend.usage_limit_markers + backend.auth_error_markers + backend.overloaded_markers:
         assert marker == marker.lower()
 
 

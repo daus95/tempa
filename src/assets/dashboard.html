@@ -7,6 +7,37 @@
 <style>/*__CSS__*/</style>
 </head>
 <body>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/></symbol>
+  <symbol id="i-file-pen-line" viewBox="0 0 24 24"><path d="M12 22h6a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10.4 12.6a2 2 0 1 1 3 3L8 20l-4 1 1-4Z"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12m0-12 4 4m-4-4-4 4M20 17v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4c0-.5.5-1 1-1h13.7a1 1 0 0 1 .8 1.6l-3 4a1 1 0 0 0 0 1.2l3 4A1 1 0 0 1 18.7 15H5"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4c0-.9 1-1.4 1.7-.9l13 8a1 1 0 0 1 0 1.8l-13 8c-.7.5-1.7 0-1.7-.9z"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
+  <symbol id="i-square-dashed" viewBox="0 0 24 24"><path d="M5 3a2 2 0 0 0-2 2M19 3a2 2 0 0 1 2 2M21 19a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1M14 3h1M9 21h1M14 21h1M3 9v1M3 14v1M21 9v1M21 14v1"/></symbol>
+  <symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m-7 7 7-7 7 7"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7M7 3v4a1 1 0 0 0 1 1h7"/></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="M21.7 18 13.9 4.4a2.15 2.15 0 0 0-3.8 0L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3zM12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M3 10a2 2 0 0 1 .7-1.5l7-6a2 2 0 0 1 2.6 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-8a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.2 2a1 1 0 0 1 1 .84l.24 1.5a7.5 7.5 0 0 1 1.86.76l1.32-.72a1 1 0 0 1 1.24.2l1.72 1.7a1 1 0 0 1 .2 1.25l-.72 1.32c.36.58.63 1.2.78 1.86l1.5.24a1 1 0 0 1 .84 1v2.4a1 1 0 0 1-.84 1l-1.5.24a7.4 7.4 0 0 1-.78 1.86l.72 1.33a1 1 0 0 1-.2 1.24l-1.72 1.7a1 1 0 0 1-1.24.2l-1.32-.72a7.5 7.5 0 0 1-1.86.78l-.24 1.5a1 1 0 0 1-1 .84h-2.4a1 1 0 0 1-1-.84l-.24-1.5a7.4 7.4 0 0 1-1.86-.78l-1.32.72a1 1 0 0 1-1.24-.2l-1.72-1.7a1 1 0 0 1-.2-1.24l.72-1.33a7.5 7.5 0 0 1-.78-1.86l-1.5-.24a1 1 0 0 1-.84-1v-2.4a1 1 0 0 1 .84-1l1.5-.24c.15-.65.42-1.28.78-1.86l-.72-1.32a1 1 0 0 1 .2-1.24l1.72-1.72a1 1 0 0 1 1.24-.2l1.33.72c.58-.36 1.2-.63 1.86-.78l.24-1.5a1 1 0 0 1 1-.83z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M21.3 8.7 8.7 21.3a1 1 0 0 1-1.4 0l-4.6-4.6a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="m7.5 10.5 2 2M10.5 7.5l2 2M13.5 4.5l2 2M4.5 13.5l2 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-circle-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 2-3 4M12 17h.01"/></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.18a9.93 9.93 0 0 1 3.8 0M17.6 3.51a9.94 9.94 0 0 1 2.69 2.7M21.82 10.1a9.93 9.93 0 0 1 0 3.8M20.49 17.6a9.94 9.94 0 0 1-2.7 2.69M13.9 21.82a9.94 9.94 0 0 1-3.8 0M6.4 20.49a9.94 9.94 0 0 1-2.69-2.7M2.18 13.9a9.93 9.93 0 0 1 0-3.8M3.51 6.4a9.94 9.94 0 0 1 2.7-2.69"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 11c0-2 2-3 2-3h4l6.4-4.1a1 1 0 0 1 1.6.8v14.6a1 1 0 0 1-1.6.8L9 16H5s-2-1-2-3z"/><path d="M9 11v6M17.5 9.5a4.5 4.5 0 0 1 0 5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+</svg>
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
@@ -45,16 +76,16 @@
             No application repository folder has been set yet.
           </div>
           <button type="button" class="big-action" id="homeSelectFolderBtn">
-            <span class="big-action-icon">📂</span>
+            <span class="big-action-icon"><svg class="icon-svg"><use href="#i-folder-open"></use></svg></span>
             <span class="big-action-label">Select Working Folder</span>
           </button>
         </div>
         <div id="homeSteps" class="home-steps hidden">
           <div class="home-workspace-panel" id="homeWorkspacePanel">
-            <span class="home-workspace-icon">📁</span>
+            <span class="home-workspace-icon"><svg class="icon-svg"><use href="#i-folder"></use></svg></span>
             <span class="home-workspace-label">Working Folder:</span>
             <span class="home-workspace-path" id="homeWorkspacePath" title="Open in Explorer"></span>
-            <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder">✕</button>
+            <button type="button" class="home-workspace-close hidden" id="homeWorkspaceCloseBtn" title="Close working folder"><svg class="icon-svg"><use href="#i-x"></use></svg></button>
           </div>
           <div class="home-backend-status" id="homeBackendStatusPanel">
             <div class="home-backend-status-label">CLI backends ready for this workspace:</div>
@@ -62,14 +93,14 @@
           </div>
           <div class="home-step home-step-optional" id="homeStepPrinciples">
             <div class="home-step-header">
-              <span class="home-step-icon">📐</span>
+              <span class="home-step-icon"><svg class="icon-svg"><use href="#i-ruler"></use></svg></span>
               <span class="home-step-title">Architecture Principles</span>
               <span class="home-step-badge">Optional</span>
             </div>
             <p class="home-step-desc">Project-wide rules Tempa applies to every stage — clarification, planning, implementation, and QA. Skip this and go straight to step 1 if you don't need them.</p>
             <div class="home-step-actions">
               <button type="button" class="clarify-run-btn secondary" id="homePrinciplesBtn">
-                <span>📐</span><span>Set / View Principles</span>
+                <span><svg class="icon-svg"><use href="#i-ruler"></use></svg></span><span>Set / View Principles</span>
               </button>
             </div>
             <div class="home-step-status" id="homeStepPrinciplesStatus"></div>
@@ -82,11 +113,11 @@
             <p class="home-step-desc">Upload specification documents (PRD) as the basis for clarification and implementation. <a href="/spec-guide" target="_blank" rel="noopener">What should go in here? →</a></p>
             <div class="home-step-actions">
               <button type="button" class="big-action" id="homeAddFileBtn">
-                <span class="big-action-icon">📄</span>
+                <span class="big-action-icon"><svg class="icon-svg"><use href="#i-file-text"></use></svg></span>
                 <span class="big-action-label">Add File</span>
               </button>
               <button type="button" class="big-action" id="homeAddFolderBtn">
-                <span class="big-action-icon">📁</span>
+                <span class="big-action-icon"><svg class="icon-svg"><use href="#i-folder"></use></svg></span>
                 <span class="big-action-label">Add Folder</span>
               </button>
             </div>
@@ -101,16 +132,16 @@
             <p class="home-step-desc">Run clarification to find and resolve ambiguities/conflicts in the specification.</p>
             <div class="home-step-actions">
               <button type="button" class="clarify-run-btn" id="homeStartClarifyBtn">
-                <span>▶️</span><span>Start Clarification</span>
+                <span><svg class="icon-svg filled"><use href="#i-play"></use></svg></span><span>Start Clarification</span>
               </button>
               <button type="button" class="clarify-run-btn secondary" id="homeOpenUnansweredBtn" disabled>
-                <span>📝</span><span>Answer Findings</span>
+                <span><svg class="icon-svg"><use href="#i-file-pen-line"></use></svg></span><span>Answer Findings</span>
               </button>
               <button type="button" class="clarify-run-btn secondary" id="homeApplyAnswersBtn" disabled>
-                <span>📤</span><span>Apply Answers</span>
+                <span><svg class="icon-svg"><use href="#i-upload"></use></svg></span><span>Apply Answers</span>
               </button>
               <button type="button" class="clarify-run-btn secondary" id="homeFinalizeClarifyBtn">
-                <span>🏁</span><span>Finalized Clarification</span>
+                <span><svg class="icon-svg"><use href="#i-flag"></use></svg></span><span>Finalized Clarification</span>
               </button>
             </div>
             <div class="home-step-status" id="homeStep2Status"></div>
@@ -124,14 +155,14 @@
             <p class="home-step-desc">Start the automated implementation process based on the clarification results.</p>
             <div class="home-step-actions">
               <button type="button" class="clarify-run-btn" id="homeStartImplementBtn">
-                <span>🚀</span><span>Start Implementation</span>
+                <span><svg class="icon-svg"><use href="#i-rocket"></use></svg></span><span>Start Implementation</span>
               </button>
             </div>
             <div class="home-step-status" id="homeStep3Status"></div>
           </div>
           <div class="home-danger-zone">
             <button type="button" class="home-clear-btn" id="homeClearAllBtn">
-              <span>🗑️</span><span>Clear All</span>
+              <span><svg class="icon-svg"><use href="#i-trash-2"></use></svg></span><span>Clear All</span>
             </button>
             <p class="home-step-desc">Delete all plan, QA, log, and clarification results (specification files will not be deleted). This action cannot be undone.</p>
           </div>
@@ -146,11 +177,11 @@
         <div class="spec-overview-hint">Pick a file from Specification on the left to view it.</div>
         <div class="spec-overview-actions">
           <button type="button" class="big-action" id="addFileBtn">
-            <span class="big-action-icon">📄</span>
+            <span class="big-action-icon"><svg class="icon-svg"><use href="#i-file-text"></use></svg></span>
             <span class="big-action-label">Add File</span>
           </button>
           <button type="button" class="big-action" id="addFolderBtn">
-            <span class="big-action-icon">📁</span>
+            <span class="big-action-icon"><svg class="icon-svg"><use href="#i-folder"></use></svg></span>
             <span class="big-action-label">Add Folder</span>
           </button>
         </div>
@@ -164,13 +195,13 @@
       <div id="clarifyOverviewPane" class="pane clarify-overview-pane hidden">
         <div class="clarify-run-actions">
           <button type="button" class="clarify-run-btn" id="startClarifyBtn">
-            <span>▶️</span><span>Start Clarification</span>
+            <span><svg class="icon-svg filled"><use href="#i-play"></use></svg></span><span>Start Clarification</span>
           </button>
           <button type="button" class="clarify-run-btn secondary" id="openUnansweredBtn" disabled>
-            <span>📝</span><span>Answer Findings</span>
+            <span><svg class="icon-svg"><use href="#i-file-pen-line"></use></svg></span><span>Answer Findings</span>
           </button>
           <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
-            <span>📤</span><span>Apply Answers</span>
+            <span><svg class="icon-svg"><use href="#i-upload"></use></svg></span><span>Apply Answers</span>
           </button>
         </div>
         <div class="gate-panel" id="skipMinorCard">
@@ -192,13 +223,17 @@
           <p class="gate-hint hidden" id="finalizeGateHint"></p>
           <ul class="gate-checklist" id="finalizeGateList"></ul>
           <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
-            <span>🏁</span><span>Finalized Clarification</span>
+            <span><svg class="icon-svg"><use href="#i-flag"></use></svg></span><span>Finalized Clarification</span>
           </button>
+          <button type="button" class="clarify-run-btn secondary hidden" id="stopFinalizeClarifyBtn">
+            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Finalize</span>
+          </button>
+          <span class="clarify-round-badge hidden" id="finalizeRoundProgress"></span>
         </div>
         <div class="ready-banner hidden" id="implementReadyBanner">
           <div class="ready-banner-text" id="implementReadyBannerText"></div>
           <button type="button" class="clarify-run-btn" id="clarifyStartImplementBtn">
-            <span>🚀</span><span>Start Implementation</span>
+            <span><svg class="icon-svg"><use href="#i-rocket"></use></svg></span><span>Start Implementation</span>
           </button>
         </div>
         <details class="clarify-log hidden" id="clarifyLogPanel">
@@ -223,10 +258,10 @@
       <div id="implPane" class="pane impl-pane hidden">
         <div class="impl-header">
           <button type="button" class="clarify-run-btn" id="startImplementBtn">
-            <span>🚀</span><span>Start Implementation</span>
+            <span><svg class="icon-svg"><use href="#i-rocket"></use></svg></span><span>Start Implementation</span>
           </button>
           <button type="button" class="clarify-run-btn secondary hidden" id="stopImplementBtn">
-            <span>⏹️</span><span>Stop Implementation</span>
+            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Implementation</span>
           </button>
           <span class="impl-header-status" id="implHeaderStatus"></span>
         </div>
@@ -256,7 +291,7 @@
           <div class="settings-backend-status">
             <ul class="gate-checklist" id="settingsBackendStatusList"></ul>
             <button type="button" class="clarify-run-btn secondary" id="settingsDetectBackendsBtn">
-              <span>🔄</span><span>Detect CLI Backends</span>
+              <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Detect CLI Backends</span>
             </button>
           </div>
           <div class="settings-field">
@@ -269,6 +304,17 @@
               <select id="settingsEffortClarify" class="settings-effort-select"></select>
             </div>
             <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
+          </div>
+          <div class="settings-field">
+            <label for="settingsBackendClarifyApply">Clarify — Apply / Auto-Answer</label>
+            <p class="settings-field-desc">Used to apply already-decided answers/recommendations to the PRD/spec (<code>clarify --apply</code>, the apply half of <code>--finalize</code>) and to auto-answer unanswered findings — mechanical work compared to evaluating the PRD, so it defaults to a cheaper model. Backend/model/effort are independent of the Clarifications stage above — mechanical apply work doesn't need the same reasoning strength (or even the same CLI) as evaluate.</p>
+            <div class="settings-inline-row">
+              <select id="settingsBackendClarifyApply" class="settings-backend-select"></select>
+              <input type="text" id="settingsModelClarifyApply" class="settings-model-input" list="modelSuggestionsClarifyApply" autocomplete="off">
+              <datalist id="modelSuggestionsClarifyApply"></datalist>
+              <select id="settingsEffortClarifyApply" class="settings-effort-select"></select>
+            </div>
+            <p class="settings-model-note hidden" id="settingsModelNoteClarifyApply"></p>
           </div>
           <div class="settings-field">
             <label for="settingsBackendPlan">Planning</label>
@@ -306,7 +352,7 @@
             <input type="number" id="settingsMaxSessionRun" min="1" step="1">
           </div>
           <div class="settings-field">
-            <label for="settingsMaxClarificationRun">Max Clarification Runs</label>
+            <label for="settingsMaxClarificationRun">Max Finalize Clarification Round</label>
             <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
             <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
           </div>
@@ -330,7 +376,7 @@
               Clarification — Start Implementation has its own separate requirement, configured independently below
               under "Start Implementation".</p>
             <div class="settings-warning hidden" id="settingsAllowFinalizeWithCriticalWarning">
-              ⚠️ Enabled — Finalized Clarification can start with critical findings still open, and its automation
+              <svg class="icon-svg icon-status-failed"><use href="#i-triangle-alert"></use></svg> Enabled — Finalized Clarification can start with critical findings still open, and its automation
               will try to resolve them unsupervised. Double-check the results before relying on them.
             </div>
           </div>
@@ -400,6 +446,30 @@
           <span class="settings-save-status" id="settingsTestEmailStatus"></span>
         </div>
         <div class="settings-group">
+          <h3>Retries &amp; Timing</h3>
+          <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work. These changes take effect on any already-running session or agent runner — no restart needed.</p>
+          <div class="settings-field">
+            <label for="settingsUsageLimitRetryWaitMin">Usage Limit Retry Wait (minutes)</label>
+            <p class="settings-field-desc">How long to wait before automatically retrying a clarify/implement/QA/verify step after the configured backend's subscription/token usage limit is hit.</p>
+            <input type="number" id="settingsUsageLimitRetryWaitMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsUsageLimitHeartbeatMin">Usage Limit Heartbeat Interval (minutes)</label>
+            <p class="settings-field-desc">How often a "still waiting" log line is printed while waiting out a usage limit, so a long wait doesn't look hung.</p>
+            <input type="number" id="settingsUsageLimitHeartbeatMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsServerOverloadRetryWaitMin">Server Overload Retry Wait (minutes)</label>
+            <p class="settings-field-desc">How long to wait before automatically retrying after the backend's API reports itself overloaded (e.g. a transient 529 response).</p>
+            <input type="number" id="settingsServerOverloadRetryWaitMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsPollIntervalSec">Implementation Poll Interval (seconds)</label>
+            <p class="settings-field-desc">How often the <code>tempa implement</code> agent runner checks for new work while idle.</p>
+            <input type="number" id="settingsPollIntervalSec" min="1" step="1">
+          </div>
+        </div>
+        <div class="settings-group">
           <h3>Updates</h3>
           <p class="settings-field-desc">Check whether a newer Tempa release has been published on GitHub, and update this installation in place.</p>
           <div class="settings-update-row">
@@ -409,10 +479,10 @@
             </div>
             <div class="settings-update-actions">
               <button type="button" class="clarify-run-btn secondary" id="settingsCheckUpdateBtn">
-                <span>🔄</span><span>Check for Updates</span>
+                <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Check for Updates</span>
               </button>
               <button type="button" class="clarify-run-btn hidden" id="settingsUpdateBtn">
-                <span>⬆️</span><span>Update Now</span>
+                <span><svg class="icon-svg"><use href="#i-arrow-up"></use></svg></span><span>Update Now</span>
               </button>
             </div>
           </div>
@@ -420,7 +490,7 @@
         </div>
         <div class="settings-actions">
           <button type="button" class="clarify-run-btn" id="settingsSaveBtn">
-            <span>💾</span><span>Save Settings</span>
+            <span><svg class="icon-svg"><use href="#i-save"></use></svg></span><span>Save Settings</span>
           </button>
           <span class="settings-save-status" id="settingsSaveStatus"></span>
         </div>
@@ -447,7 +517,7 @@
         </div>
         <div class="settings-actions">
           <button type="button" class="clarify-run-btn" id="principlesSaveBtn">
-            <span>💾</span><span>Save Principles</span>
+            <span><svg class="icon-svg"><use href="#i-save"></use></svg></span><span>Save Principles</span>
           </button>
           <span class="settings-save-status" id="principlesSaveStatus"></span>
         </div>

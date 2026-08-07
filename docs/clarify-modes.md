@@ -99,12 +99,13 @@ tempa clarify --auto-answer
 Automatically answers clarification findings that are **still unanswered** (one pass,
 **without** re-evaluating or looking for new findings):
 
-1. The agent reads the clarification result file in `sources.clarifications`, checking which
-   findings don't have an answer yet.
+1. Tempa first works out which clarification files still have at least one unanswered
+   finding — files that are already fully answered are skipped entirely, so they're never
+   read by the agent.
 2. For each unanswered finding → adds an answer/resolution directly in the clarification
    file (based on PRD analysis), without overwriting answers that already exist.
-3. If **every** finding has already been answered → no changes are made; the console shows a
-   message that there's nothing left to answer.
+3. If **every** finding has already been answered → no session is even started; the console
+   shows a message that there's nothing left to answer.
 
 Useful as a middle ground: let the agent answer first, then you review/correct.
 
@@ -114,12 +115,16 @@ Useful as a middle ground: let the agent answer first, then you review/correct.
 tempa clarify --apply
 ```
 
-Applies the answers/resolutions **already recorded** in the clarification file into the
+Applies the answers/resolutions **already recorded** in the clarification file(s) into the
 PRD/spec document (`sources.prd`) — one session, **without** re-evaluating. This is the step
-after answering (whether manually or via `--auto-answer`): the agent reads the resolutions in
-`sources.clarifications`, then edits the relevant PRD/spec documents, and updates
-`last_clarification_findings`. If there's no clarification result yet, the harness asks you
-to run `clarify` first.
+after answering (whether manually or via `--auto-answer`): the agent reads the resolutions,
+then edits the relevant PRD/spec documents, and updates `last_clarification_findings`. If
+there's no clarification result yet, the harness asks you to run `clarify` first.
+
+Only the files that actually still need applying are sent to the agent — every file already
+reflected in `clarify_applied_hashes` (see [config-json.md](config-json.md)) is skipped, so a
+workspace with many past clarification rounds doesn't pay to re-read all of them on every
+apply.
 
 Difference from `--finalize`: `--apply` doesn't re-evaluate — it only applies existing
 answers. `--finalize` combines evaluate + apply in a loop.
@@ -158,6 +163,14 @@ its own resolution to the PRD/spec document → repeat until `critical == 0` and
 (remaining `minor` findings are considered acceptable). Here the agent decides the answers,
 not you — run this once you're confident its recommended answers can be trusted.
 
+Each round's apply step resumes the evaluate session that just wrote its findings (see
+`clarify_session_id` in [config-json.md](config-json.md)) instead of starting a fresh session
+that re-reads the whole PRD — the evaluate session already paid for that context. If
+`finalize_no_progress_rounds` (default `2`) evaluate rounds in a row fail to reduce the
+critical+major count, the loop stops on its own instead of running to `max_clarification_run`
+— those findings likely need a human decision (`tempa answer`) rather than more automated
+apply passes.
+
 `--skip-minor` also applies here (`tempa clarify --finalize --skip-minor`), skipping minor
 findings on every evaluate pass in the loop.
 
@@ -170,6 +183,16 @@ Clarification Overview ("Unanswered" / "Fully answered" sections), even after la
 or answers are applied. Applying answers (`clarify --apply`, or saving in the web UI) never
 touches the clarification files themselves — only the PRD/spec documents and `config.json`.
 
-The dashboard's "Finalize readiness" panel shows **Round N of M**, where N is
-`last_clarification_round` (the most recent evaluate pass) and M is `max_clarification_run` —
-the same limit that bounds the `--finalize` loop above.
+The dashboard's "Finalize readiness" panel shows **Round N**, where N is
+`last_clarification_round` — a running total across *every* evaluate pass ever, manual
+`clarify` and `clarify --finalize` alike — shown alone, with no total, since manual `clarify`
+isn't bounded by `max_clarification_run`.
+
+Progress against that limit is a separate counter, `last_finalize_round`: it resets to `0` at
+the start of every `--finalize` run and counts up to `max_clarification_run` (M) within that
+one run only, independent of the all-time total above. It's shown as **N / M** next to the
+"Finalized Clarification" button, ticking up live once a second while the run is in progress.
+
+While a finalize run is in progress, "Finalized Clarification" is itself replaced by a **Stop
+Finalize** button — clicking it (after a confirmation prompt) kills the running process, the
+same way "Stop Implementation" does for `tempa implement`.

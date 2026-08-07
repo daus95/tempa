@@ -213,7 +213,7 @@ def _file_severity_stats(path: Path, timings: dict | None = None) -> dict | None
     }
 
 
-def _latest_evaluation_findings(files: list[dict]) -> dict:
+def _latest_evaluation_findings(files: list[dict], clean_since: float = 0) -> dict:
     """True critical/major/minor counts from ONLY the most recently started
     evaluation round's file (by "started_at", see _file_started_at) — NOT summed
     across every clarification file ever produced. Every past round's file is
@@ -233,7 +233,21 @@ def _latest_evaluation_findings(files: list[dict]) -> dict:
     clarification file itself — see _record_clarify_applied_state's docstring
     below). A finding counts here whether or not it's been answered: being
     answered means a resolution was proposed, not that the file stopped listing it
-    as a finding."""
+    as a finding.
+
+    `clean_since` (config.json's "last_clean_evaluation_at", stamped by
+    _stamp_clean_evaluation_if_zero in tempa_clarify.py) is the one signal this
+    file-based approach can't produce on its own: a fresh evaluate pass that finds
+    zero findings across every severity leaves no new file behind (per
+    prompt/clarification.md, the agent only writes a file when there's a finding to
+    record), so without this, the gate would keep reading whatever the last
+    finding-bearing file said even though a more recent, genuinely clean round has
+    already superseded it. If `clean_since` is newer than the latest file's
+    started_at (or there's no file at all), the round it represents wins and this
+    returns all-zero."""
+    latest_started_at = max((f.get("started_at", 0) for f in files), default=0)
+    if clean_since and clean_since > latest_started_at:
+        return {"critical": 0, "major": 0, "minor": 0}
     if not files:
         return {"critical": 0, "major": 0, "minor": 0}
     latest = max(files, key=lambda f: f.get("started_at", 0))
@@ -242,11 +256,17 @@ def _latest_evaluation_findings(files: list[dict]) -> dict:
 
 def _clarify_finalize_status(
     findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
-    allow_finalize_with_critical: bool = False,
+    allow_finalize_with_critical: bool = False, finalize_round: int = 0,
 ) -> dict:
-    """Whether "Finalized Clarification" is currently allowed to run.
+    """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
+    state, NOT a gate: the button itself is only disabled while a clarify run is already
+    in progress (see renderFinalizeGate in dashboard.js, and _handle_clarify_run_start in
+    dashboard_server.py, which deliberately has no server-side precondition for mode
+    "finalize"). "ready" is what the dashboard uses to decide whether to relabel Start
+    Clarification -> Continue Clarification and explain what Finalize would still have to
+    do unsupervised.
 
-    Requires all of:
+    "ready" is True when all of:
       - at least one clarification action has ever completed ("hasRun")
       - that most recent action was a fresh evaluate pass, not a bare apply
         ("lastAction" == "evaluate") — answering criticals and applying them isn't
@@ -261,9 +281,10 @@ def _clarify_finalize_status(
         toggle; off by default). With it on, Finalize is allowed to start with
         critical findings still open, so its automated evaluate/apply loop attempts
         to resolve them unsupervised instead of requiring a human to answer them
-        first. This never relaxes the separate Start Implementation gate
-        (_handle_implement_run_start), which always requires zero critical and zero
-        major findings regardless of this setting.
+        first. This setting never affects the separate Start Implementation gate
+        (_handle_implement_run_start), which is a real gate and follows its own
+        config.json setting, "implementation_start_requirement" — see
+        _implement_readiness_status below.
 
     `last_action` is config.json's "last_clarification_action" (caller's
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
@@ -271,9 +292,16 @@ def _clarify_finalize_status(
     (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
     _run_apply_step(), and run_clarify_finalize() there.
 
-    `round_`/`max_round` are config.json's "last_clarification_round" /
-    "max_clarification_run" — passed straight through so the dashboard can show
-    "Round N of M" without a separate request."""
+    `round_`/`max_round`/`finalize_round` are config.json's "last_clarification_round" /
+    "max_clarification_run" / "last_finalize_round" — passed straight through so the
+    dashboard can show both numbers without a separate request. `round_` is a running
+    total across every evaluate pass ever (manual `clarify` or one iteration of
+    `clarify --finalize`) and is NOT bounded by `max_round` — only `finalize_round` is:
+    it resets to 0 at the start of every `clarify --finalize` run and counts up to
+    `max_round` within that one run (see run_clarify_finalize in tempa_clarify.py).
+    Shown next to "Finalize readiness" is just `round_` on its own (no total, since it
+    isn't bounded); `finalize_round`/`max_round` together are shown as progress next to
+    the "Finalized Clarification" button instead."""
     fresh_evaluate = last_action == "evaluate"
     critical_ok = findings["critical"] == 0 or allow_finalize_with_critical
     ready = fresh_evaluate and critical_ok
@@ -284,6 +312,7 @@ def _clarify_finalize_status(
         "ready": ready,
         "round": round_,
         "maxRound": max_round,
+        "finalizeRound": finalize_round,
         "allowFinalizeWithCritical": allow_finalize_with_critical,
     }
 

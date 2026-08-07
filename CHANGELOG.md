@@ -24,6 +24,221 @@ once the first tagged release is cut.
   `#/components/responses/Unauthorized` reference. Failure markers are now evaluated only
   for plain diagnostic output and structured backend failure events.
 
+- **A finding resolved during `clarify --finalize` stayed permanently "Unanswered" in the
+  dashboard, even after finalize succeeded.** When apply had no recorded "Your answer" for a
+  finding, it fell back to that finding's own Recommendation to resolve the PRD/spec — but
+  never wrote that fallback back into the clarification file itself, so the file kept
+  showing 0 answered forever, regardless of the PRD already being fixed and finalize having
+  reached 0 critical/0 major. `_run_apply_step` now mechanically fills any still-empty
+  "Your answer" with its own Recommendation (no agent call — same as the pre-loop backlog
+  resolution step) right before applying, so the clarification file ends up recording
+  exactly what was applied.
+
+## [0.5.0] - 2026-08-07
+
+### Added
+
+- **A separate `clarify_apply` stage for clarify's apply/auto-answer work**, configurable
+  the same way as `clarify`/`plan`/`implement` — its own AI model (`tempa set-model
+  --clarify-apply <model>`, default `claude-sonnet-5`), CLI backend (`tempa set-backend
+  --clarify-apply <backend>`), and reasoning effort (`tempa set-effort --clarify-apply
+  <level>`); new "Clarify — Apply / Auto-Answer" field in dashboard Settings with its own
+  backend/model/effort controls. Drives `clarify --apply`, `clarify --auto-answer`, and the
+  apply half of `--finalize` — mechanical work compared to evaluating the PRD (`clarify`,
+  still `claude-opus-5` by default), so it no longer has to run on the same backend/model/
+  effort as evaluate.
+- **`resume_implementation_sessions` and `finalize_no_progress_rounds` config options.** See
+  "Changed" below for what they control; both are on by default and don't require any action.
+- **Configurable retry/poll timing in Settings.** The wait before automatically retrying
+  after a usage limit or server overload, the usage-limit heartbeat log interval, and the
+  `tempa implement` scheduler's poll interval — previously hardcoded (30 min / 5 min / 5 min /
+  60s) — are now stored in `config.json` (`usage_limit_retry_wait_sec`,
+  `usage_limit_heartbeat_sec`, `server_overloaded_retry_wait_sec`, `poll_interval_sec`) and
+  editable from a new "Retries & Timing" card in dashboard Settings, above "Updates". Changes
+  take effect on an already-running session or agent runner on its next wait/poll check — no
+  restart needed.
+
+### Changed
+
+- **Clarify and implement sessions no longer re-pay to re-read context they already have.**
+  Several changes that together cut token usage substantially on longer-running
+  clarification and implementation, with no reduction in what gets evaluated or checked:
+  - `clarify --apply` (and the apply half of `--finalize`) now reads only the clarification
+    files that actually still need applying (the "apply backlog", tracked via
+    `clarify_applied_hashes`) instead of every clarification file ever written for the
+    workspace — previously O(N²) in the number of past rounds. `--auto-answer` likewise only
+    reads files that still have an unanswered finding.
+  - `clarify --finalize`'s apply step now resumes (`--resume`) the evaluate session that just
+    wrote the findings it's applying, instead of starting a fresh session that re-reads the
+    whole PRD from scratch. A usage-limit/overload retry mid-apply resumes that same partial
+    apply attempt rather than losing it and starting over.
+  - `tempa implement` now actually uses `--resume` for continuation/require_fixing epic
+    sessions (the session id was already being captured and stored, but never passed back
+    in) — new sessions no longer re-read the epic's specification file from scratch every
+    `features_per_session` batch. New `resume_implementation_sessions` config option (default
+    `true`) to disable if resuming ever misbehaves for a given backend/workspace.
+  - `clarify --finalize` now stops on its own (`finalize_no_progress_rounds`, default `2`) if
+    apply fails to reduce the critical+major finding count for that many rounds in a row,
+    instead of continuing to burn full-PRD re-evaluation rounds up to `max_clarification_run`
+    — those findings likely need a human decision instead.
+- **Dashboard icons are now inline Lucide SVGs instead of emoji.** Every button, sidebar entry,
+  status marker, severity dot, and log-line icon in the dashboard (`dashboard.html`/`.js`/`.css`)
+  previously used raw emoji characters, which render inconsistently across platforms/fonts. They're
+  now a small inline `<symbol>` sprite (added once in `dashboard.html`) referenced via
+  `<svg><use></svg>`, with color applied through CSS (`--critical`/`--major`/`--minor`/`--ok`/`--danger`)
+  instead of baked into the glyph. A new `iconSvg()` helper in `dashboard.js` renders icons built
+  dynamically (severity dots, epic/feature status, clarification log lines, checklists). Out of
+  scope: CLI terminal output (`tempa_*.py`) and one `<option>` element's text, since neither can
+  render SVG.
+
+## [0.4.10] - 2026-08-06
+
+### Added
+
+- **A "Stop Finalize" button.** "Finalized Clarification" now swaps to "Stop Finalize" for as
+  long as that run is in progress (the same Start/Stop toggle "Start Implementation" already
+  has), and clicking it — after a confirm — kills the running `clarify --finalize` subprocess
+  (`taskkill /T /F` on Windows, so its backend CLI child dies with it, same as Stop
+  Implementation). New `_stop_clarify_run` in `dashboard_runs.py` and `POST /api/clarify/stop`
+  in `dashboard_server.py`; only mode `"finalize"` can be stopped this way.
+
+- **Saving a new "Max Finalize Clarification Round" while a Finalized Clarification run is in progress
+  now warns that the running loop won't pick it up.** `clarify --finalize` reads that setting
+  once, when its process starts, and keeps counting toward it for the whole evaluate/apply
+  loop — so lowering the limit mid-run leaves the log counting `ROUND 17/25` while Settings
+  reads `10`, which looks like the limit isn't enforced at all. The limit is enforced; it
+  just applies from the next finalize run onward (no restart needed — each run is a fresh
+  process). Settings now says so in a modal right after saving, driven by a new `warning`
+  field on `/api/config/save` computed server-side from the actually-running run.
+
+### Changed
+
+- **Settings' "Max Clarification Runs" is now "Max Finalize Clarification Round"** — the old
+  name read as a cap on clarification in general, but it only ever bounds the automated
+  `clarify --finalize` loop; manual `clarify` runs are unlimited. For the same reason, the
+  Clarification page's "Finalize readiness" panel (and the Home page's Clarification step)
+  now show just **Round N** (rounds run so far, uncapped) instead of **Round N of M**, which
+  wrongly implied manual rounds counted toward that max too.
+
+- **Finalize's round progress is now tracked separately from the all-time round count.**
+  `last_clarification_round` (the "Round N" above) used to be overwritten by `--finalize`
+  with its own in-run counter, so it could visibly go *backwards* the moment a finalize run
+  finished its first round (e.g. drop from `5`, after 5 manual rounds, to `1`) — and then kept
+  climbing with every later manual round, misrepresenting itself as finalize progress. It's
+  now a true running total (`+= 1` on every evaluate pass, manual or finalize alike), while a
+  new `last_clarification_round`-independent counter, `last_finalize_round`, resets to `0` at
+  the start of every `--finalize` run and counts up to `max_clarification_run` within that one
+  run only. That counter is what's now shown as **N / M** next to the "Finalized
+  Clarification" button, live-updated every second while a run is in progress. `tempa clear`
+  now resets the new `last_finalize_round` too, alongside every other tracked clarify field
+  (`_reset_clarify_config_state` in `tempa_maintenance.py`).
+
+- **The dashboard's "Start Implementation" button becomes "Continue Implementation" once
+  implementation has actually started**, on all three surfaces that carry it (Home step 3,
+  the Clarification ready banner, the Implementation header) — the same Start/Continue
+  relabeling the clarification buttons already had. "Started" means at least one epic has
+  moved off `pending` or carries a `last_run` stamp (a drafted-but-never-run plan is still a
+  Start), and it's computed server-side and reported as the new `started` field of
+  `/api/implement/run`, so the three buttons can't disagree.
+
+### Fixed
+
+- **A `failed` epic made the dashboard's Start/Continue Implementation button do nothing.**
+  `implement` halts on any failed epic that precedes the next one to work on, so after a
+  session failure every click just re-ran the halt: the log said to run
+  `tempa implement --reset-failed`, but the dashboard had no way to do that — the only way
+  forward was the CLI. The dashboard's implement run now performs that reset itself
+  (`tempa implement --reset-failed`, streamed into the Log tab) before starting
+  `tempa implement`. It's a no-op when nothing is failed, and the CLI's own behavior is
+  unchanged — plain `tempa implement` still halts and still tells you to reset. **Stop
+  Implementation** now also covers this first step: pressing it during the reset pass stops
+  the run instead of letting implement start anyway, and it no longer reports "not running"
+  in the brief gap between the run's two child processes.
+
+- **A provider overload (529) could leave `implement` permanently halted on a `failed`
+  epic.** When the AI provider's API reports itself overloaded, `implement` waits and retries
+  — but the interrupted session can still have been marked `failed` in config.json (the
+  overload is only skipped when its marker is actually recognized in the streamed output, so
+  an overload in different wording, or one that kills the CLI again on the next attempt,
+  looks like a plain non-zero exit). That status is sticky and blocking: `check_and_run`
+  halts on any failed epic preceding the next one to work on, so both the retry and every
+  later `tempa implement` run kept failing on it until it was reset by hand. The retry now
+  performs that reset itself (`failed` → `pending`, the in-process equivalent of
+  `tempa implement --reset-failed`) before resuming. A real session failure is unaffected —
+  it still stops the runner and keeps its `failed` status. The halt message now also names
+  the command to run (`tempa implement --reset-failed`).
+- **Documentation that no longer matched the code.** README's Clarification step still
+  described **Finalized Clarification** as staying disabled "until a Finalize readiness
+  panel shows all 3 conditions met" — that gate was removed on both sides (the button is
+  only disabled while a clarify run is in progress, and `_handle_clarify_run_start` has no
+  server-side precondition for mode `finalize`), and the panel is informational with 4
+  items. Rewritten as a readiness panel that tells you how much Finalize will do
+  unsupervised, including the `allow_finalize_with_critical` override and the automatic
+  backlog resolution. README's Start Implementation step likewise still asserted a fixed
+  "no critical or major findings" requirement, predating
+  `implementation_start_requirement`; it now describes the default plus the `no_critical` /
+  `none` levels, the always-applies "clarification has run at least once" condition, and
+  that the requirement is enforced server-side.
+- **`docs/config-json.md` claimed to document every `config.json` key but was missing two**
+  that the readiness gates and the Clarification overview depend on:
+  `last_clarification_action` and `clarify_applied_hashes`. Both are now documented, along
+  with the default values of `features_per_session` / `max_session_run` /
+  `max_clarification_run` and the dashboard Settings field each maps to.
+- **Stale internal docstrings** in `dashboard_clarify_parse._clarify_finalize_status` (still
+  described itself as a gate, and claimed Start Implementation "always requires zero
+  critical and zero major findings regardless of this setting") and in
+  `dashboard_runs._start_clarify_run` (same removed-gate framing).
+
+### Added
+
+- README (CLI → Step 4) and `docs/start-implementation.md` now document the 529-overload
+  pause/retry behavior, including the automatic `failed` → `pending` reset that happens
+  before the retry resumes.
+
+### Changed
+
+- `CLAUDE.md`: documented the branch-naming convention (`feat/*`, `fix/*`, `docs/*`,
+  `refactor/*`).
+
+## [0.4.9] - 2026-08-05
+
+### Fixed
+
+- **A transient "529 Overloaded" (or similar server-side-overload) response from the
+  configured backend's API made `clarify`/`implement`/`verify` mark the in-progress
+  epic/session as failed and stop the agent runner entirely**, even though nothing was
+  actually broken — the CLI's raw text (e.g. Claude Code's `API Error: 529 Overloaded.
+  This is a server-side issue, usually temporary — try again in a moment.`) didn't match
+  any known usage-limit or auth-error marker, so it fell through to a plain failure. Added
+  a third failure category alongside usage-limit and auth-error detection
+  (`overloaded_markers` on `Backend`, `_state.server_overloaded_hit`): an overload stop now
+  pauses for 5 minutes (`SERVER_OVERLOADED_RETRY_WAIT_SEC`) and retries automatically,
+  leaving the epic/session resumable exactly like a usage-limit stop does, instead of
+  marking it failed.
+
+## [0.4.8] - 2026-08-05
+
+### Fixed
+
+- **A clarification round that finds zero findings could leave "Finalized Clarification"
+  and "Start Implementation" stuck blocked forever**, even though the PRD was genuinely
+  clean. The finalize/implement readiness gates read the most recently *started*
+  clarification file's own finding tags (deliberately, so a resolved critical finding can't
+  keep counting forever — see `_latest_evaluation_findings`) — but a fresh evaluate pass
+  that finds nothing leaves no new file behind to read (there's nothing to write per
+  `prompt/clarification.md`), so the gate kept reading whichever older file still had
+  findings in it. Added `config.json`'s `last_clean_evaluation_at`, stamped whenever a
+  fresh evaluate pass reports zero critical/major/minor findings
+  (`_stamp_clean_evaluation_if_zero` in `tempa_clarify.py`); the readiness gate now treats
+  a clean stamp newer than the latest finding-bearing file as the current, authoritative
+  state.
+- **Claude Code's "weekly limit" message wasn't recognized as a usage-limit stop**, so
+  hitting it made `clarify`/`implement`/`verify` exit with a plain error instead of waiting
+  30 minutes and retrying (the behavior added in 0.4.6). The CLI's actual wording — "You've
+  hit your weekly limit · resets ..." — didn't match any of `CLAUDE.usage_limit_markers`,
+  which only covered the 5-hour/session limit phrasings. Added `"hit your weekly limit"`
+    and `"weekly limit reached"` markers.
+
 ## [0.4.7] - 2026-08-05
 
 ### Added
