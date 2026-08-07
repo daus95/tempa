@@ -10,12 +10,14 @@ once the first tagged release is cut.
 
 ### Added
 
-- **Optional email alerts for human-attention states.** Configure SMTP in Dashboard Settings
-  (credentials remain environment variables) to receive deduplicated alerts for authentication
+- **Optional email alerts for human-attention states.** Configure Gmail, Microsoft 365, or
+  custom SMTP in Dashboard Settings, with credentials saved locally in the workspace or
+  supplied through environment variables. Select which events should notify you and verify
+  delivery from the dashboard or with `tempa notifications test`. Alerts cover authentication
   failures, permanent workflow failures, safety limits, unanswered critical/major clarification
-  findings, verification failures, and confirmation waits. Automatic resume/retry/self-healing
-  paths intentionally remain silent. Pending delivery is retained in a durable per-workspace
-  outbox and can be checked with `tempa notifications test`.
+  findings, verification failures, and confirmation waits, while automatic recovery paths stay
+  silent. Events are deduplicated in a durable per-workspace outbox and failed deliveries are
+  retried by a later Tempa run.
 
 ### Fixed
 
@@ -237,7 +239,7 @@ once the first tagged release is cut.
   30 minutes and retrying (the behavior added in 0.4.6). The CLI's actual wording — "You've
   hit your weekly limit · resets ..." — didn't match any of `CLAUDE.usage_limit_markers`,
   which only covered the 5-hour/session limit phrasings. Added `"hit your weekly limit"`
-    and `"weekly limit reached"` markers.
+  and `"weekly limit reached"` markers.
 
 ## [0.4.7] - 2026-08-05
 
