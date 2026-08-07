@@ -152,11 +152,19 @@ def test_reset_clarify_config_state_clears_tracked_keys():
         "last_auto_answer": 5,
         "last_clarification_round": 7,
         "last_finalize_round": 3,
+        "clarify_session_id": "eval-sid",
+        "clarify_session_backend": "claude",
+        "clarify_apply_session_id": "apply-sid",
+        "clarify_apply_session_backend": "claude",
     }
     tm._reset_clarify_config_state(config)
     assert "last_clarification_action" not in config
     assert "last_clarification_findings" not in config
     assert "clarify_applied_hashes" not in config
+    assert "clarify_session_id" not in config
+    assert "clarify_session_backend" not in config
+    assert "clarify_apply_session_id" not in config
+    assert "clarify_apply_session_backend" not in config
     assert config["last_auto_answer"] == 0
     assert config["last_clarification_round"] == 0
     assert config["last_finalize_round"] == 0

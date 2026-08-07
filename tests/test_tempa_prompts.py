@@ -272,19 +272,34 @@ def test_build_clarification_prompt_narrow_params(tmp_path, isolate_tempa_paths)
 
 
 def test_build_apply_clarification_prompt(tmp_path, isolate_tempa_paths):
-    _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification", "APPLY ${sources.prd}")
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification", "APPLY ${sources.prd} FILES:${clarification_files}")
     config = _sample_config(tmp_path)
-    prompt = tp.build_apply_clarification_prompt(config)
+    files = [tmp_path / "clarification-20260101-000000.md", tmp_path / "clarification-20260102-000000.md"]
+    prompt = tp.build_apply_clarification_prompt(config, files)
     assert "APPLY " in prompt
     assert "${sources.prd}" not in prompt
+    for f in files:
+        assert str(f) in prompt
+
+
+def test_build_apply_clarification_prompt_empty_files(tmp_path, isolate_tempa_paths):
+    """No backlog files -> the placeholder substitutes to an empty string, not left
+    unresolved — build_apply_clarification_prompt always receives an explicit list now
+    (see _run_apply_step), never "read everything in the folder" implicitly."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification", "FILES:[${clarification_files}]")
+    config = _sample_config(tmp_path)
+    prompt = tp.build_apply_clarification_prompt(config, [])
+    assert "FILES:[]" in prompt
 
 
 def test_build_auto_answer_prompt(tmp_path, isolate_tempa_paths):
-    _write_prompt(isolate_tempa_paths["prompt_dir"], "auto_answer", "AUTO ${sources.clarifications}")
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "auto_answer", "AUTO ${sources.clarifications} FILES:${clarification_files}")
     config = _sample_config(tmp_path)
-    prompt = tp.build_auto_answer_prompt(config)
+    files = [tmp_path / "clarification-20260101-000000.md"]
+    prompt = tp.build_auto_answer_prompt(config, files)
     assert "AUTO " in prompt
     assert "${sources.clarifications}" not in prompt
+    assert str(files[0]) in prompt
 
 
 # ---------------------------------------------------------------------------

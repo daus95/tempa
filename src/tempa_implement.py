@@ -23,6 +23,7 @@ from tempa_config import (
     get_poll_interval_sec,
     get_qa_dir,
     get_reasoning_effort,
+    get_resume_implementation_sessions,
     get_sources,
     load_config,
     save_config,
@@ -144,11 +145,23 @@ def check_and_run(features_override: int | None = None) -> None:
                 total = session.get("total_features", 0)
                 completed = session.get("completed_features", 0)
                 progress_str = f"{completed}/{total}" if total else "?"
-                log(f"Session [{label}] progress: {progress_str} features — starting a new session")
+                # A stale on_progress session (the previous session was interrupted —
+                # process killed, machine restarted, etc.) still gets a resumable
+                # session_id captured on the epic if one was ever produced (see
+                # _capture_session_id / run_session) — resume it instead of starting
+                # cold and re-reading the epic spec + code again, same reasoning as the
+                # continuation case below.
+                resume_sid = (
+                    get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+                    if get_resume_implementation_sessions(config) else None
+                )
+                log(f"Session [{label}] progress: {progress_str} features — "
+                    f"{'resuming' if resume_sid else 'starting'} a session")
 
                 prompt = build_session_prompt(
                     config, session.get("epic_name", ""),
                     is_continuation=completed > 0, features_override=features_override,
+                    is_resumed=bool(resume_sid),
                 )
 
                 if not _validate_and_increment_run(config, i, label):
@@ -162,7 +175,7 @@ def check_and_run(features_override: int | None = None) -> None:
                 _state.running_index = i
                 _state.running_thread = threading.Thread(
                     target=run_session,
-                    args=(i, prompt, label),
+                    args=(i, prompt, label, resume_sid),
                     kwargs={"features_override": features_override},
                     daemon=True,
                 )
@@ -246,10 +259,20 @@ def check_and_run(features_override: int | None = None) -> None:
         label = session.get("epic_name", f"epic_{next_index}")
         is_require_fixing = session["status"] == "require_fixing"
         is_continuation = is_require_fixing or session.get("completed_features", 0) > 0
+        # Resume the epic's previous implementation session when continuing it (never for
+        # a brand-new epic's first session — there's no session_id to resume yet anyway)
+        # so it doesn't re-pay to read the epic spec + code it already read. A
+        # require_fixing epic's QA report is still read fresh every time regardless (see
+        # _build_qa_report_section) — only the "re-read the spec" instruction is skipped.
+        resume_sid = (
+            get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+            if is_continuation and get_resume_implementation_sessions(config) else None
+        )
         prompt = build_session_prompt(
             config, session.get("epic_name", ""),
             is_continuation=is_continuation,
             features_override=features_override,
+            is_resumed=bool(resume_sid),
         )
 
         if not _validate_and_increment_run(config, next_index, label):
@@ -264,7 +287,7 @@ def check_and_run(features_override: int | None = None) -> None:
         _state.running_index = next_index
         _state.running_thread = threading.Thread(
             target=run_session,
-            args=(next_index, prompt, label),
+            args=(next_index, prompt, label, resume_sid),
             kwargs={"features_override": features_override},
             daemon=True,
         )

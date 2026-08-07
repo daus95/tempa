@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 import tempa_clarify as tc
+import tempa_config
 
 
 def _item(item_id, severity, heading, where, question, recommendation, answer, wrap_answer=True):
@@ -209,3 +212,393 @@ def test_stamp_clean_evaluation_any_nonzero_severity_leaves_config_untouched():
         config = {}
         tc._stamp_clean_evaluation_if_zero(config, critical, major, minor)
         assert "last_clean_evaluation_at" not in config
+
+
+# ---------------------------------------------------------------------------
+# _run_apply_step — only sends the apply backlog to the agent (never every
+# clarification file ever written), resumes when told to, and cleans up its own
+# retry-resume id once done.
+# ---------------------------------------------------------------------------
+
+def _config_with_clar_dir(tmp_path, **extra):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    prd_dir = tmp_path / "prd"
+    prd_dir.mkdir()
+    config = {"sources": {"clarifications": str(clar_dir), "prd": str(prd_dir)}, **extra}
+    import tempa_config
+    tempa_config.save_config(config)
+    return tempa_config.load_config(), clar_dir
+
+
+def test_run_apply_step_no_backlog_spawns_no_session(tmp_path, isolate_tempa_paths, monkeypatch):
+    config, clar_dir = _config_with_clar_dir(tmp_path)
+    text = _item("1", "major", "T", "w", "q", "rec", "answered")
+    f = clar_dir / "a.md"
+    f.write_text(text, encoding="utf-8")
+    config["clarify_applied_hashes"] = {"a.md": _hash(text)}
+
+    called = []
+    monkeypatch.setattr(tc, "run_apply_clarification_session", lambda *a, **k: called.append((a, k)) or True)
+
+    assert tc._run_apply_step(config) is True
+    assert called == []
+
+
+def test_run_apply_step_sends_only_backlog_files(tmp_path, isolate_tempa_paths, monkeypatch):
+    config, clar_dir = _config_with_clar_dir(tmp_path)
+    stale_text = _item("1", "minor", "T0", "w", "q", "rec0", "answer0")
+    stale = clar_dir / "already-applied.md"
+    stale.write_text(stale_text, encoding="utf-8")
+    config["clarify_applied_hashes"] = {"already-applied.md": _hash(stale_text)}
+
+    backlog_file = clar_dir / "backlog.md"
+    backlog_file.write_text(_item("1", "critical", "T1", "w", "q", "rec1", ""), encoding="utf-8")
+
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+
+    seen = {}
+
+    def fake_prompt(cfg, files):
+        seen["files"] = files
+        return "PROMPT"
+    monkeypatch.setattr(tc, "build_apply_clarification_prompt", fake_prompt)
+    monkeypatch.setattr(tc, "run_apply_clarification_session", lambda *a, **k: True)
+
+    assert tc._run_apply_step(config) is True
+    assert seen["files"] == [backlog_file]  # NOT stale (already-applied.md)
+
+
+def test_run_apply_step_resumes_given_session_id(tmp_path, isolate_tempa_paths, monkeypatch):
+    config, clar_dir = _config_with_clar_dir(tmp_path)
+    (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort="", resume_session_id=None):
+        seen["resume_session_id"] = resume_session_id
+        return True
+    monkeypatch.setattr(tc, "run_apply_clarification_session", fake_session)
+
+    assert tc._run_apply_step(config, resume_session_id="evaluate-sid") is True
+    assert seen["resume_session_id"] == "evaluate-sid"
+
+
+def test_run_apply_step_own_retry_session_id_wins_over_passed_in_one(tmp_path, isolate_tempa_paths, monkeypatch):
+    # If THIS apply step already made a partial attempt (captured its own session id
+    # into config["clarify_apply_session_id"] — e.g. a usage-limit retry mid-apply), that
+    # takes priority over resuming the evaluate session again.
+    config, clar_dir = _config_with_clar_dir(
+        tmp_path, clarify_apply_session_id="apply-sid", clarify_apply_session_backend="claude",
+    )
+    (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort="", resume_session_id=None):
+        seen["resume_session_id"] = resume_session_id
+        return True
+    monkeypatch.setattr(tc, "run_apply_clarification_session", fake_session)
+
+    assert tc._run_apply_step(config, resume_session_id="evaluate-sid") is True
+    assert seen["resume_session_id"] == "apply-sid"
+
+
+def test_run_apply_step_success_clears_own_retry_session_id(tmp_path, isolate_tempa_paths, monkeypatch):
+    config, clar_dir = _config_with_clar_dir(
+        tmp_path, clarify_apply_session_id="apply-sid", clarify_apply_session_backend="claude",
+    )
+    (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+    monkeypatch.setattr(tc, "run_apply_clarification_session", lambda *a, **k: True)
+
+    assert tc._run_apply_step(config) is True
+    saved = tempa_config.load_config()
+    assert "clarify_apply_session_id" not in saved
+    assert "clarify_apply_session_backend" not in saved
+
+
+def test_run_apply_step_uses_clarify_apply_model(tmp_path, isolate_tempa_paths, monkeypatch):
+    config, clar_dir = _config_with_clar_dir(tmp_path, models={"clarify_apply": "claude-haiku-4-5-20251001"})
+    (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
+    import tempa_config
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort="", resume_session_id=None):
+        seen["model"] = model
+        return True
+    monkeypatch.setattr(tc, "run_apply_clarification_session", fake_session)
+
+    assert tc._run_apply_step(config) is True
+    assert seen["model"] == "claude-haiku-4-5-20251001"
+
+
+def test_run_apply_step_uses_clarify_apply_backend_and_effort_independent_of_clarify(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    # clarify_apply is a full stage: its backend/effort don't have to match clarify's.
+    config, clar_dir = _config_with_clar_dir(
+        tmp_path,
+        backends={"clarify": "claude", "clarify_apply": "codex"},
+        reasoning_efforts={"clarify": "high", "clarify_apply": "low"},
+    )
+    (clar_dir / "a.md").write_text(_item("1", "major", "T", "w", "q", "rec", ""), encoding="utf-8")
+    tempa_config.save_config(config)
+    config = tempa_config.load_config()
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort="", resume_session_id=None):
+        seen["backend"] = backend.name
+        seen["reasoning_effort"] = reasoning_effort
+        return True
+    monkeypatch.setattr(tc, "run_apply_clarification_session", fake_session)
+
+    assert tc._run_apply_step(config) is True
+    assert seen["backend"] == "codex"
+    assert seen["reasoning_effort"] == "low"
+
+
+# ---------------------------------------------------------------------------
+# run_clarify_finalize — convergence guard
+#
+# If apply can't reduce the critical+major count for `finalize_no_progress_rounds`
+# rounds in a row, the loop must stop on its own instead of burning the rest of
+# max_clarification_run re-evaluating a PRD that apply has no more moves on (the
+# remaining findings need a human decision).
+# ---------------------------------------------------------------------------
+
+def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+
+    calls = {"evaluate": 0, "apply": 0}
+
+    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        calls["evaluate"] += 1
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = {"critical": 2, "major": 1, "minor": 0}
+        tempa_config.save_config(cfg)
+        return True
+
+    def fake_run_apply_step(config, resume_session_id=None):
+        calls["apply"] += 1
+        return True
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    # Round 1: 3 findings, no prior round to compare against -> no-progress count stays 0.
+    # Round 2: still 3 findings (no reduction) -> no-progress count becomes 1.
+    # Round 3: still 3 findings -> no-progress count reaches the default limit (2) -> stop
+    # BEFORE applying again — evaluate ran 3 times, apply only ran after rounds 1 and 2.
+    assert calls["evaluate"] == 3
+    assert calls["apply"] == 2
+
+
+def test_finalize_keeps_going_when_findings_are_decreasing(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+
+    findings_by_round = [
+        {"critical": 3, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},  # done: no critical/major left
+    ]
+    calls = {"evaluate": 0, "apply": 0}
+
+    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = findings_by_round[calls["evaluate"]]
+        calls["evaluate"] += 1
+        tempa_config.save_config(cfg)
+        return True
+
+    def fake_run_apply_step(config, resume_session_id=None):
+        calls["apply"] += 1
+        return True
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0  # reached 0 critical/0 major -> clean success
+    assert calls["evaluate"] == 3
+    assert calls["apply"] == 2  # no apply needed after the clean 3rd round
+
+
+def test_finalize_apply_resumes_evaluate_session(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+
+    seen = {}
+
+    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = {"critical": 1, "major": 0, "minor": 0}
+        cfg["clarify_session_id"] = "eval-sid-42"
+        cfg["clarify_session_backend"] = "claude"
+        tempa_config.save_config(cfg)
+        return True
+
+    def fake_run_apply_step(config, resume_session_id=None):
+        seen["resume_session_id"] = resume_session_id
+        return False  # stop after the first round so the test doesn't need round 2
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert seen["resume_session_id"] == "eval-sid-42"
+
+
+def test_finalize_apply_does_not_resume_when_clarify_apply_backend_differs(tmp_path, isolate_tempa_paths, monkeypatch):
+    # clarify_apply is configured with a different backend than clarify's evaluate
+    # session — a session id captured under "claude" is meaningless to "codex", so the
+    # apply step must NOT be handed a resume_session_id in this case.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
+        "backends": {"clarify": "claude", "clarify_apply": "codex"},
+    })
+
+    seen = {}
+
+    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = {"critical": 1, "major": 0, "minor": 0}
+        cfg["clarify_session_id"] = "eval-sid-42"
+        cfg["clarify_session_backend"] = "claude"
+        tempa_config.save_config(cfg)
+        return True
+
+    def fake_run_apply_step(config, resume_session_id=None):
+        seen["resume_session_id"] = resume_session_id
+        return False
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    assert seen["resume_session_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# run_clarify_answer (auto-answer) — only sends files with an unanswered finding
+# ---------------------------------------------------------------------------
+
+def test_auto_answer_sends_only_unanswered_files(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+
+    answered_file = clar_dir / "answered.md"
+    answered_file.write_text(_item("1", "minor", "T0", "w", "q", "rec0", "already answered"), encoding="utf-8")
+    unanswered_file = clar_dir / "unanswered.md"
+    unanswered_file.write_text(_item("1", "critical", "T1", "w", "q", "rec1", ""), encoding="utf-8")
+
+    seen = {}
+
+    def fake_prompt(cfg, files):
+        seen["files"] = files
+        return "PROMPT"
+    monkeypatch.setattr(tc, "build_auto_answer_prompt", fake_prompt)
+    monkeypatch.setattr(tc, "run_clarification_session", lambda *a, **k: True)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_answer()
+
+    assert exc.value.code == 0
+    assert seen["files"] == [unanswered_file]
+
+
+def test_auto_answer_nothing_to_answer_spawns_no_session(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+    (clar_dir / "answered.md").write_text(
+        _item("1", "minor", "T0", "w", "q", "rec0", "already answered"), encoding="utf-8")
+
+    called = []
+    monkeypatch.setattr(tc, "run_clarification_session", lambda *a, **k: called.append(1) or True)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_answer()
+
+    assert exc.value.code == 0
+    assert called == []
+
+
+def test_auto_answer_uses_clarify_apply_model(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
+        "models": {"clarify_apply": "claude-haiku-4-5-20251001"},
+    })
+    (clar_dir / "a.md").write_text(_item("1", "critical", "T1", "w", "q", "rec1", ""), encoding="utf-8")
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort=""):
+        seen["model"] = model
+        return True
+    monkeypatch.setattr(tc, "run_clarification_session", fake_session)
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_answer()
+
+    assert seen["model"] == "claude-haiku-4-5-20251001"
+
+
+def test_auto_answer_uses_clarify_apply_backend_and_effort(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
+        "backends": {"clarify": "claude", "clarify_apply": "copilot"},
+        "reasoning_efforts": {"clarify": "high", "clarify_apply": "medium"},
+    })
+    (clar_dir / "a.md").write_text(_item("1", "critical", "T1", "w", "q", "rec1", ""), encoding="utf-8")
+
+    seen = {}
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort=""):
+        seen["backend"] = backend.name
+        seen["reasoning_effort"] = reasoning_effort
+        return True
+    monkeypatch.setattr(tc, "run_clarification_session", fake_session)
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_answer()
+
+    assert seen["backend"] == "copilot"
+    assert seen["reasoning_effort"] == "medium"

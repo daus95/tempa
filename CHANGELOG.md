@@ -10,6 +10,17 @@ once the first tagged release is cut.
 
 ### Added
 
+- **A separate `clarify_apply` stage for clarify's apply/auto-answer work**, configurable
+  the same way as `clarify`/`plan`/`implement` — its own AI model (`tempa set-model
+  --clarify-apply <model>`, default `claude-sonnet-5`), CLI backend (`tempa set-backend
+  --clarify-apply <backend>`), and reasoning effort (`tempa set-effort --clarify-apply
+  <level>`); new "Clarify — Apply / Auto-Answer" field in dashboard Settings with its own
+  backend/model/effort controls. Drives `clarify --apply`, `clarify --auto-answer`, and the
+  apply half of `--finalize` — mechanical work compared to evaluating the PRD (`clarify`,
+  still `claude-opus-5` by default), so it no longer has to run on the same backend/model/
+  effort as evaluate.
+- **`resume_implementation_sessions` and `finalize_no_progress_rounds` config options.** See
+  "Changed" below for what they control; both are on by default and don't require any action.
 - **Configurable retry/poll timing in Settings.** The wait before automatically retrying
   after a usage limit or server overload, the usage-limit heartbeat log interval, and the
   `tempa implement` scheduler's poll interval — previously hardcoded (30 min / 5 min / 5 min /
@@ -21,6 +32,27 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **Clarify and implement sessions no longer re-pay to re-read context they already have.**
+  Several changes that together cut token usage substantially on longer-running
+  clarification and implementation, with no reduction in what gets evaluated or checked:
+  - `clarify --apply` (and the apply half of `--finalize`) now reads only the clarification
+    files that actually still need applying (the "apply backlog", tracked via
+    `clarify_applied_hashes`) instead of every clarification file ever written for the
+    workspace — previously O(N²) in the number of past rounds. `--auto-answer` likewise only
+    reads files that still have an unanswered finding.
+  - `clarify --finalize`'s apply step now resumes (`--resume`) the evaluate session that just
+    wrote the findings it's applying, instead of starting a fresh session that re-reads the
+    whole PRD from scratch. A usage-limit/overload retry mid-apply resumes that same partial
+    apply attempt rather than losing it and starting over.
+  - `tempa implement` now actually uses `--resume` for continuation/require_fixing epic
+    sessions (the session id was already being captured and stored, but never passed back
+    in) — new sessions no longer re-read the epic's specification file from scratch every
+    `features_per_session` batch. New `resume_implementation_sessions` config option (default
+    `true`) to disable if resuming ever misbehaves for a given backend/workspace.
+  - `clarify --finalize` now stops on its own (`finalize_no_progress_rounds`, default `2`) if
+    apply fails to reduce the critical+major finding count for that many rounds in a row,
+    instead of continuing to burn full-PRD re-evaluation rounds up to `max_clarification_run`
+    — those findings likely need a human decision instead.
 - **Dashboard icons are now inline Lucide SVGs instead of emoji.** Every button, sidebar entry,
   status marker, severity dot, and log-line icon in the dashboard (`dashboard.html`/`.js`/`.css`)
   previously used raw emoji characters, which render inconsistently across platforms/fonts. They're

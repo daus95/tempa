@@ -131,13 +131,24 @@ def build_session_prompt(
     epic_name: str,
     is_continuation: bool = False,
     features_override: int | None = None,
+    is_resumed: bool = False,
 ) -> str:
-    """Build a full prompt for a new session, incorporating continuation and features_per_session."""
+    """Build a full prompt for a new session, incorporating continuation and features_per_session.
+
+    `is_resumed` is True when this session will be launched with `--resume` against the
+    epic's previous session (see check_and_run / tempa_config.get_resume_implementation_sessions)
+    — the spec, code, and everything else that session already read is still in its
+    context, so the prompt uses "continuation_resumed" instead of "continuation": it
+    drops the "re-read the spec file" instruction that would otherwise make every
+    session re-pay to read the epic spec from disk."""
     params = _resolve_template_params(config, epic_name)
     epic = epic_name
 
     if is_continuation:
-        template = load_prompt("continuation") or load_prompt("implementation")
+        if is_resumed:
+            template = load_prompt("continuation_resumed") or load_prompt("continuation") or load_prompt("implementation")
+        else:
+            template = load_prompt("continuation") or load_prompt("implementation")
     else:
         template = load_prompt("implementation")
 
@@ -219,24 +230,34 @@ def build_clarification_prompt(config: dict, skip_minor: bool = False) -> str:
     return build_prompt(template, params)
 
 
-def build_apply_clarification_prompt(config: dict) -> str:
+def build_apply_clarification_prompt(config: dict, files: list[Path]) -> str:
+    """`files` is the exact set of clarification result files to read/apply — the
+    apply backlog (see tempa_clarify._clarification_backlog), NOT necessarily every
+    file in sources.clarifications. Reading only the backlog (rather than every
+    clarification file ever written) is what keeps apply's input from growing
+    O(N^2) with the number of past clarification rounds."""
     sources = get_sources(config)
     template = load_prompt("apply_clarification")
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
+        "clarification_files": "\n".join(str(f) for f in files),
     }
     return build_prompt(template, params)
 
 
-def build_auto_answer_prompt(config: dict) -> str:
+def build_auto_answer_prompt(config: dict, files: list[Path]) -> str:
+    """`files` is the exact set of clarification result files that still have at
+    least one unanswered finding — see tempa_clarify._clarification_backlog's
+    unanswered_files. Same O(N^2)-avoidance rationale as build_apply_clarification_prompt."""
     sources = get_sources(config)
     template = load_prompt("auto_answer")
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
+        "clarification_files": "\n".join(str(f) for f in files),
     }
     return build_prompt(template, params)
 
