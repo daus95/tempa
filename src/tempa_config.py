@@ -26,7 +26,6 @@ WORKING_DIR = SCRIPT_DIR.parent
 # they live inside src/ — anchored to this module's own folder, not SCRIPT_DIR (the root).
 # One .md file per prompt (readable, editable); loaded via load_prompt() in tempa_prompts.
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
-POLL_INTERVAL_SEC = 60
 
 # Tiny bootstrap pointer, at Tempa's own install root: one line holding the absolute path
 # of the currently active workspace, so Tempa knows which workspace's own config.json to
@@ -207,6 +206,10 @@ DEFAULT_CONFIG = {
     "features_per_session": 3,
     "max_session_run": 30,
     "max_clarification_run": 20,
+    "usage_limit_retry_wait_sec": 1800,
+    "usage_limit_heartbeat_sec": 300,
+    "server_overloaded_retry_wait_sec": 300,
+    "poll_interval_sec": 60,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
     "last_clean_evaluation_at": 0,
@@ -438,6 +441,44 @@ def get_skip_minor_findings(config: dict) -> bool:
     """Return config.json's "skip_minor_findings" (dashboard toggle + CLI --skip-minor
     default), defaulting to True for a missing value."""
     return bool(config.get("skip_minor_findings", True))
+
+
+def _get_positive_number(config: dict, key: str, default: int) -> int | float:
+    """Return config[key] if it's a positive int/float, else `default` (missing/invalid
+    value). Accepts float as well as int — not because config.json is expected to store
+    fractional seconds, but so tests can monkeypatch load_config with sub-second values
+    (e.g. 0.01) instead of actually sleeping whole seconds."""
+    value = config.get(key, default)
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return value if is_number and value > 0 else default
+
+
+def get_usage_limit_retry_wait_sec(config: dict) -> int | float:
+    """Return config.json's "usage_limit_retry_wait_sec" — how long to wait before
+    retrying a clarify/implement/QA/verify step after a usage-limit stop (see
+    tempa_session.wait_out_usage_limit) — defaulting to 1800 (30 minutes)."""
+    return _get_positive_number(config, "usage_limit_retry_wait_sec", DEFAULT_CONFIG["usage_limit_retry_wait_sec"])
+
+
+def get_usage_limit_heartbeat_sec(config: dict) -> int | float:
+    """Return config.json's "usage_limit_heartbeat_sec" — how often a "still waiting"
+    heartbeat is logged during the usage-limit wait above — defaulting to 300 (5 minutes)."""
+    return _get_positive_number(config, "usage_limit_heartbeat_sec", DEFAULT_CONFIG["usage_limit_heartbeat_sec"])
+
+
+def get_server_overloaded_retry_wait_sec(config: dict) -> int | float:
+    """Return config.json's "server_overloaded_retry_wait_sec" — how long to wait before
+    retrying after the backend's API reports itself overloaded (see
+    tempa_session.wait_out_server_overload) — defaulting to 300 (5 minutes)."""
+    return _get_positive_number(
+        config, "server_overloaded_retry_wait_sec", DEFAULT_CONFIG["server_overloaded_retry_wait_sec"]
+    )
+
+
+def get_poll_interval_sec(config: dict) -> int | float:
+    """Return config.json's "poll_interval_sec" — how often `tempa implement`'s scheduler
+    loop polls for new work — defaulting to 60 (1 minute)."""
+    return _get_positive_number(config, "poll_interval_sec", DEFAULT_CONFIG["poll_interval_sec"])
 
 
 # Field names used to persist a resumable session id on an epic entry, per kind. Kept

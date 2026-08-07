@@ -307,14 +307,18 @@ def test_log_session_result_overloaded_stops_before_checking_exit_code(tmp_path)
 # ---------------------------------------------------------------------------
 # A usage-limit stop is a pause, not a failure: run_with_usage_limit_retry keeps
 # re-calling its run_fn, waiting out the limit between attempts, for as long as
-# _state.usage_limit_hit stays set. USAGE_LIMIT_RETRY_WAIT_SEC/HEARTBEAT_SEC are
-# monkeypatched to ~0 here so these tests don't actually sleep 30 minutes.
+# _state.usage_limit_hit stays set. The wait/heartbeat durations now come from
+# config.json (see tempa_config.get_usage_limit_retry_wait_sec &c.) — load_config is
+# monkeypatched to return ~0-second values here so these tests don't actually sleep
+# 30 minutes.
 
 @pytest.fixture(autouse=True)
 def _no_real_wait(monkeypatch):
-    monkeypatch.setattr(ts, "USAGE_LIMIT_RETRY_WAIT_SEC", 0.01)
-    monkeypatch.setattr(ts, "USAGE_LIMIT_HEARTBEAT_SEC", 0.01)
-    monkeypatch.setattr(ts, "SERVER_OVERLOADED_RETRY_WAIT_SEC", 0.01)
+    monkeypatch.setattr(ts, "load_config", lambda: {
+        "usage_limit_retry_wait_sec": 0.01,
+        "usage_limit_heartbeat_sec": 0.01,
+        "server_overloaded_retry_wait_sec": 0.01,
+    })
 
 
 def _fake_run_fn(results):
@@ -380,8 +384,8 @@ def test_wait_out_usage_limit_clears_state():
 # ---------------------------------------------------------------------------
 # Mirrors the usage-limit tests above: a server-overload stop (e.g. Anthropic's 529) is
 # also a pause, not a failure, and goes through the very same run_with_usage_limit_retry
-# loop — just waiting out SERVER_OVERLOADED_RETRY_WAIT_SEC (monkeypatched to ~0 above)
-# instead of USAGE_LIMIT_RETRY_WAIT_SEC between attempts.
+# loop — just waiting out server_overloaded_retry_wait_sec (monkeypatched to ~0 above)
+# instead of usage_limit_retry_wait_sec between attempts.
 
 def _fake_run_fn_overload(results):
     """Like _fake_run_fn, but the second element of each pair sets

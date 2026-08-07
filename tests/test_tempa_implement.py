@@ -81,7 +81,6 @@ def _drive_poll_loop(monkeypatch, *, first_stop: str) -> dict:
 
     monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
     monkeypatch.setattr(ti, "wait_out_server_overload", fake_wait_out_server_overload)
-    monkeypatch.setattr(ti, "POLL_INTERVAL_SEC", 0)
     return seen
 
 

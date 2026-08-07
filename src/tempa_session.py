@@ -33,6 +33,9 @@ from tempa_config import (
     get_model,
     get_qa_dir,
     get_reasoning_effort,
+    get_server_overloaded_retry_wait_sec,
+    get_usage_limit_heartbeat_sec,
+    get_usage_limit_retry_wait_sec,
     load_config,
     save_config,
     set_epic_session_id,
@@ -128,30 +131,31 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
 # happens inside that subprocess with no dashboard-side logic of its own needed.
 # Authentication errors (see _handle_auth_error) are deliberately NOT retried this way —
 # waiting can't fix an expired/invalid credential, only re-authenticating can.
-USAGE_LIMIT_RETRY_WAIT_SEC = 30 * 60
-# How often to log a "still waiting" heartbeat during that wait, so a long-running
-# terminal/log doesn't look hung for the full 30 minutes with no output at all.
-USAGE_LIMIT_HEARTBEAT_SEC = 5 * 60
-
-# A server-overload response (e.g. Anthropic's 529 "Overloaded") is a much shorter-lived
-# condition than a usage limit typically resolving within minutes, so the wait is short and
-# unconditional — no heartbeat needed at this length, unlike the 30-minute usage-limit wait.
-SERVER_OVERLOADED_RETRY_WAIT_SEC = 5 * 60
+#
+# The wait/heartbeat durations themselves are configurable (config.json's
+# usage_limit_retry_wait_sec / usage_limit_heartbeat_sec / server_overloaded_retry_wait_sec,
+# see tempa_config.py) — read fresh via load_config() on every wait below (which never
+# caches, see load_config's docstring) rather than once at import time, so a Settings
+# change reaches an already-running wait on its very next check, no restart needed.
 
 
 def wait_out_usage_limit(label: str, attempt: int) -> None:
-    """Block for USAGE_LIMIT_RETRY_WAIT_SEC (emitting periodic heartbeat log lines), then
-    clear `_state.usage_limit_hit` and `_state.stop_event` so the caller can retry
-    `label`'s just-interrupted step. `attempt` (1, 2, 3, ...) only affects the log
-    wording — callers increment it themselves across repeated calls."""
-    resume_at = datetime.now().timestamp() + USAGE_LIMIT_RETRY_WAIT_SEC
+    """Block for config.json's usage_limit_retry_wait_sec (emitting periodic heartbeat log
+    lines every usage_limit_heartbeat_sec), then clear `_state.usage_limit_hit` and
+    `_state.stop_event` so the caller can retry `label`'s just-interrupted step. `attempt`
+    (1, 2, 3, ...) only affects the log wording — callers increment it themselves across
+    repeated calls."""
+    config = load_config()
+    retry_wait_sec = get_usage_limit_retry_wait_sec(config)
+    heartbeat_sec = get_usage_limit_heartbeat_sec(config)
+    resume_at = datetime.now().timestamp() + retry_wait_sec
     resume_str = datetime.fromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S")
     log(f"{label} paused — usage limit reached on the configured backend. This is not an "
-        f"error: waiting {USAGE_LIMIT_RETRY_WAIT_SEC // 60} minutes for the limit to reset, "
+        f"error: waiting {retry_wait_sec // 60} minutes for the limit to reset, "
         f"then retrying automatically (retry #{attempt}, around {resume_str}).")
-    remaining = USAGE_LIMIT_RETRY_WAIT_SEC
+    remaining = retry_wait_sec
     while remaining > 0:
-        chunk = min(USAGE_LIMIT_HEARTBEAT_SEC, remaining)
+        chunk = min(heartbeat_sec, remaining)
         time.sleep(chunk)
         remaining -= chunk
         if remaining > 0:
@@ -163,16 +167,17 @@ def wait_out_usage_limit(label: str, attempt: int) -> None:
 
 
 def wait_out_server_overload(label: str, attempt: int) -> None:
-    """Block for SERVER_OVERLOADED_RETRY_WAIT_SEC, then clear `_state.server_overloaded_hit`
-    and `_state.stop_event` so the caller can retry `label`'s just-interrupted step.
-    `attempt` (1, 2, 3, ...) only affects the log wording — callers increment it themselves
-    across repeated calls."""
-    resume_at = datetime.now().timestamp() + SERVER_OVERLOADED_RETRY_WAIT_SEC
+    """Block for config.json's server_overloaded_retry_wait_sec, then clear
+    `_state.server_overloaded_hit` and `_state.stop_event` so the caller can retry
+    `label`'s just-interrupted step. `attempt` (1, 2, 3, ...) only affects the log
+    wording — callers increment it themselves across repeated calls."""
+    retry_wait_sec = get_server_overloaded_retry_wait_sec(load_config())
+    resume_at = datetime.now().timestamp() + retry_wait_sec
     resume_str = datetime.fromtimestamp(resume_at).strftime("%Y-%m-%d %H:%M:%S")
     log(f"{label} paused — the backend's API reported it is overloaded. This is not an "
-        f"error on Tempa's or the target app's side: waiting {SERVER_OVERLOADED_RETRY_WAIT_SEC // 60} "
+        f"error on Tempa's or the target app's side: waiting {retry_wait_sec // 60} "
         f"minutes, then retrying automatically (retry #{attempt}, around {resume_str}).")
-    time.sleep(SERVER_OVERLOADED_RETRY_WAIT_SEC)
+    time.sleep(retry_wait_sec)
     log(f"Overload wait over — retrying {label} now (retry #{attempt})...")
     _state.server_overloaded_hit = False
     _state.stop_event.clear()

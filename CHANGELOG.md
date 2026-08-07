@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable retry/poll timing in Settings.** The wait before automatically retrying
+  after a usage limit or server overload, the usage-limit heartbeat log interval, and the
+  `tempa implement` scheduler's poll interval — previously hardcoded (30 min / 5 min / 5 min /
+  60s) — are now stored in `config.json` (`usage_limit_retry_wait_sec`,
+  `usage_limit_heartbeat_sec`, `server_overloaded_retry_wait_sec`, `poll_interval_sec`) and
+  editable from a new "Retries & Timing" card in dashboard Settings, above "Updates". Changes
+  take effect on an already-running session or agent runner on its next wait/poll check — no
+  restart needed.
+
 ### Changed
 
 - **Dashboard icons are now inline Lucide SVGs instead of emoji.** Every button, sidebar entry,

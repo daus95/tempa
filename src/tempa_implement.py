@@ -1,7 +1,7 @@
 """The implement pipeline: the poll loop, the top-level `main` entry, and plan-epics.
 
 `main` decides whether to run plan first (no pending work, or --replan) then loops calling
-`check_and_run` every POLL_INTERVAL_SEC seconds. `check_and_run` is the scheduler: it picks
+`check_and_run` every config.json poll_interval_sec seconds. `check_and_run` is the scheduler: it picks
 the single next thing to do (resume QA, resume an on_progress epic, gate QA, implement the
 next require_fixing/pending epic) and starts it on a daemon thread, guarded by _state.lock.
 """
@@ -15,12 +15,12 @@ from pathlib import Path
 
 from tempa_backend import get_backend_def
 from tempa_config import (
-    POLL_INTERVAL_SEC,
     WORKING_DIR,
     get_backend,
     get_config_path,
     get_epic_session_id,
     get_model,
+    get_poll_interval_sec,
     get_qa_dir,
     get_reasoning_effort,
     get_sources,
@@ -363,10 +363,11 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             sys.exit(1)
 
     start_time = datetime.now()
+    poll_interval_sec = get_poll_interval_sec(config)
     banner_parts = [
         f"Agent Runner started {start_time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"dir={WORKING_DIR}",
-        f"poll={POLL_INTERVAL_SEC}s",
+        f"poll={poll_interval_sec}s",
     ]
     _plog = process_log_path()
     if _plog:
@@ -378,7 +379,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
     _print_session_plan(load_config(), features_override)
 
     log(f"Agent runner started — working dir: {WORKING_DIR}", to_console=False)
-    log(f"Poll interval: {POLL_INTERVAL_SEC}s | Config: {get_config_path()}", to_console=False)
+    log(f"Poll interval: {poll_interval_sec}s | Config: {get_config_path()}", to_console=False)
     if features_override is not None:
         log(f"features_per_session override: {features_override}", to_console=False)
 
@@ -393,7 +394,9 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             except Exception as e:
                 log(f"Unexpected error in check_and_run: {e}")
 
-            _state.stop_event.wait(timeout=POLL_INTERVAL_SEC)
+            # Re-read every cycle (load_config() never caches) so a Settings change to
+            # poll_interval_sec reaches this already-running loop without a restart.
+            _state.stop_event.wait(timeout=get_poll_interval_sec(load_config()))
 
         if _state.auth_error_hit:
             log("Agent runner stopped — authentication failed (see message above). "
