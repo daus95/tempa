@@ -241,6 +241,13 @@ def test_handle_usage_limit_no_match_returns_false_without_side_effects():
     process.terminate.assert_not_called()
 
 
+def test_usage_limit_recovery_never_sends_an_attention_notification(monkeypatch):
+    notifier = Mock()
+    monkeypatch.setattr(ts, "notify_attention", notifier)
+    assert ts._handle_usage_limit("usage limit reached", Mock(), "label", tb.CLAUDE) is True
+    notifier.assert_not_called()
+
+
 def test_handle_auth_error_sets_friendly_message():
     process = Mock()
     handled = ts._handle_auth_error("invalid api key", process, "label", tb.CLAUDE)

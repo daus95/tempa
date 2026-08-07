@@ -38,6 +38,7 @@ from tempa_config import (
     set_epic_session_id,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
+from tempa_notifications import AttentionEventType, notify_attention
 
 
 def _is_usage_limit_text(text: str, backend: Backend) -> bool:
@@ -79,6 +80,13 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
     _state.auth_error_hit = True
     _state.auth_error_message = backend.friendly_auth_error_message(text)
     log(f"[{label}] {_state.auth_error_message}")
+    notify_attention(
+        AttentionEventType.AUTHENTICATION_REQUIRED,
+        label,
+        f"{backend.label} authentication failed",
+        "Re-authenticate the configured CLI backend, then run the command again.",
+        details={"backend": backend.name},
+    )
     _state.stop_event.set()
     with contextlib.suppress(Exception):
         process.terminate()
@@ -494,6 +502,14 @@ def run_session(
             config["epic"][index]["status"] = "failed"
             save_config(config)
             log(f"Session [{session_label}] marked as failed")
+            notify_attention(
+                AttentionEventType.IMPLEMENTATION_FAILED,
+                "Implementation",
+                f"{session_label} implementation failed",
+                "Review the session log, correct the issue, then run `tempa implement --reset-failed`.",
+                epic=session_label,
+                log_path=log_path,
+            )
             _state.stop_event.set()
         _state.running_thread = None
         _state.running_index = None

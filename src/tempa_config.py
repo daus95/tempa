@@ -195,6 +195,11 @@ DEFAULT_REASONING_EFFORTS = {
 #     been run at least once — see _implement_readiness_status in
 #     dashboard_clarify_parse.py).
 IMPLEMENTATION_START_REQUIREMENTS = ("no_critical_or_major", "no_critical", "none")
+DEFAULT_EMAIL_NOTIFICATION_EVENTS = (
+    "authentication_required", "implementation_failed", "plan_failed", "session_limit_reached",
+    "qa_limit_reached", "clarification_answers_required", "clarification_limit_reached",
+    "clarification_failed", "confirmation_required", "verification_failed", "backend_test_failed",
+)
 
 
 # Fresh-install / deleted-file fallback for load_config() below. Mirrors the shape
@@ -213,9 +218,39 @@ DEFAULT_CONFIG = {
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
     "implementation_start_requirement": "no_critical_or_major",
+    "notifications": {
+        "email": {
+            "enabled": False,
+            "provider": "custom",
+            "smtp_host": "",
+            "smtp_port": 587,
+            "security": "starttls",
+            "smtp_username": "",
+            "smtp_password": "",
+            "from": "",
+            "recipients": [],
+            "username_env": "TEMPA_SMTP_USERNAME",
+            "password_env": "TEMPA_SMTP_PASSWORD",
+            "timeout_seconds": 10,
+            "events": list(DEFAULT_EMAIL_NOTIFICATION_EVENTS),
+        },
+    },
     "epic": [],
     "workspace": dict(DEFAULT_WORKSPACE),
 }
+
+
+def get_email_notifications(config: dict) -> dict:
+    """Return normalized, non-secret email-notification settings."""
+    defaults = copy.deepcopy(DEFAULT_CONFIG["notifications"]["email"])
+    candidate = (config.get("notifications") or {}).get("email")
+    if isinstance(candidate, dict):
+        defaults.update(candidate)
+    defaults["enabled"] = bool(defaults["enabled"])
+    defaults["recipients"] = [str(value).strip() for value in defaults["recipients"]
+                              if isinstance(value, str) and value.strip()]
+    defaults["events"] = [str(value) for value in defaults["events"] if isinstance(value, str)]
+    return defaults
 
 
 def load_config() -> dict:

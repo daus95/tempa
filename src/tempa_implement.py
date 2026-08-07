@@ -28,6 +28,7 @@ from tempa_config import (
     save_config,
 )
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
+from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
     build_plan_epics_prompt,
     build_qa_prompt,
@@ -49,6 +50,12 @@ def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
     total_run = config["epic"][index].get("total_run", 0)
     if max_run is not None and total_run >= max_run:
         log(f"Session [{label}] has reached the max_session_run limit ({max_run}). Stopping.")
+        notify_attention(
+            AttentionEventType.SESSION_LIMIT_REACHED, "Implementation",
+            f"{label} reached its session limit",
+            "Review the epic and either fix it or raise max_session_run before continuing.",
+            epic=label, details={"max_session_run": max_run},
+        )
         return False
     config["epic"][index]["total_run"] = total_run + 1
     return True
@@ -60,6 +67,12 @@ def _validate_and_increment_qa_run(config: dict, index: int, label: str) -> bool
     qa_total_run = config["epic"][index].get("qa_total_run", 0)
     if max_run is not None and qa_total_run >= max_run:
         log(f"QA [{label}] has reached the max_session_run limit ({max_run}). Skipping QA.")
+        notify_attention(
+            AttentionEventType.QA_LIMIT_REACHED, "QA",
+            f"{label} QA reached its session limit",
+            "QA was skipped by the run limit. Review the epic and QA report before relying on it.",
+            epic=label, details={"max_session_run": max_run},
+        )
         config["epic"][index]["qa_passed"] = True
         config["epic"][index]["qa_status"] = "done"
         return False
@@ -320,6 +333,7 @@ def _has_pending_work(config: dict) -> bool:
 
 def main(features_override: int | None = None, replan: bool = False) -> None:
     _init_process_log()
+    flush_pending_notifications()
 
     config = load_config()
     if replan or not _has_pending_work(config):
@@ -332,6 +346,10 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             if _state.auth_error_hit:
                 sys.exit(3)
             log("Plan failed — agent runner stopping.")
+            notify_attention(
+                AttentionEventType.PLAN_FAILED, "Planning", "Plan generation failed",
+                "Review the planning session log and source specifications, then rerun `tempa implement`.",
+            )
             sys.exit(1)
 
     start_time = datetime.now()

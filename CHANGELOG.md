@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Optional email alerts for human-attention states.** Configure SMTP in Dashboard Settings
+  (credentials remain environment variables) to receive deduplicated alerts for authentication
+  failures, permanent workflow failures, safety limits, unanswered critical/major clarification
+  findings, verification failures, and confirmation waits. Automatic resume/retry/self-healing
+  paths intentionally remain silent. Pending delivery is retained in a durable per-workspace
+  outbox and can be checked with `tempa notifications test`.
+
 ### Fixed
 
 - Codex CLI sessions no longer report a false authentication failure when successful

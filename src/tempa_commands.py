@@ -49,6 +49,7 @@ from tempa_config import (
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _print_log_tail, _state, log
+from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
 from tempa_session import (
     _run_backend_session,
@@ -63,6 +64,7 @@ def run_test() -> None:
     this is the command that answers "can Tempa actually drive this CLI," so it should
     reflect whichever backend the pipeline will actually use."""
     config = load_config()
+    flush_pending_notifications()
     backend = get_backend_def(get_backend(config, "implement"))
 
     test_file = WORKING_DIR / "permission-test.txt"
@@ -98,6 +100,9 @@ def run_test() -> None:
         exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, "permission test", [0])
     except Exception as e:
         log(f"TEST FAILED — error running {backend.label}: {e}")
+        notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
+                         "Backend permission test failed", "Review the backend configuration and test log.",
+                         details={"backend": backend.name})
         return
 
     if test_file.exists():
@@ -109,8 +114,14 @@ def run_test() -> None:
         log(f"TEST stopped — usage limit reached (see log: {log_path.name})")
     elif exit_code != 0:
         log(f"TEST FAILED — {backend.label} exited with code {exit_code} (see log: {log_path.name})")
+        notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
+                         "Backend permission test failed", "Review the backend configuration and test log.",
+                         log_path=log_path, details={"backend": backend.name, "exit_code": exit_code})
     elif not done_file.exists():
         log(f"TEST FAILED — {backend.label} did not complete all steps (done marker missing) (see log: {log_path.name})")
+        notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
+                         "Backend permission test did not complete", "Review the backend configuration and test log.",
+                         log_path=log_path, details={"backend": backend.name})
     else:
         done_file.unlink()
         log("TEST PASSED — all steps completed successfully")
@@ -118,6 +129,7 @@ def run_test() -> None:
 
 def run_verify(epic: str) -> None:
     config = load_config()
+    flush_pending_notifications()
     verify_dir = get_verify_dir()
     verify_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -164,6 +176,9 @@ def run_verify(epic: str) -> None:
     if exit_code != 0:
         log(f"Verification FAILED for [{epic}] — exit code {exit_code}")
         _print_log_tail(log_path)
+        notify_attention(AttentionEventType.VERIFICATION_FAILED, "Verification",
+                         f"{epic} verification failed", "Review the verification log and report, then rerun verification.",
+                         epic=epic, log_path=log_path, details={"exit_code": exit_code})
         return
 
     if output_file.exists():
@@ -173,6 +188,9 @@ def run_verify(epic: str) -> None:
         log(f"Verification complete — report saved from response: {output_file}")
     else:
         log(f"Verification finished but no report was generated. Check log: {log_path}")
+        notify_attention(AttentionEventType.VERIFICATION_FAILED, "Verification",
+                         f"{epic} verification produced no report", "Review the verification log and rerun verification.",
+                         epic=epic, log_path=log_path)
 
 
 def print_workspace(config: dict | None = None) -> None:
