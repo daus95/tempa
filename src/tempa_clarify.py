@@ -519,6 +519,18 @@ def _run_apply_step(config: dict, resume_session_id: str | None = None) -> bool:
         log("Apply: nothing to apply — every clarification file is already applied.")
         return True
 
+    # Mechanically fill any still-empty "Your answer" with its own Recommendation text
+    # BEFORE applying (no agent call — same as _resolve_clarification_backlog's pre-loop
+    # step) so the clarification file itself ends up recording exactly what the apply
+    # prompt is about to do (fall back to Recommendation for anything left unanswered).
+    # Without this, a finding resolved this way stays permanently "Unanswered" in the
+    # dashboard even after its resolution has been successfully applied to the PRD/spec.
+    if unanswered_files:
+        filled = _fill_unanswered_with_recommendations(unanswered_files)
+        if filled:
+            log(f"Filled {filled} unanswered finding(s) across {len(unanswered_files)} file(s) "
+                "with their own recommendation before applying.")
+
     prompt = build_apply_clarification_prompt(config, backlog)
     apply_start_ts = time.time()
     apply_backend = get_backend_def(get_backend(config, "clarify_apply"))

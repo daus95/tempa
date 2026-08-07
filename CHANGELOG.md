@@ -8,6 +8,18 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A finding resolved during `clarify --finalize` stayed permanently "Unanswered" in the
+  dashboard, even after finalize succeeded.** When apply had no recorded "Your answer" for a
+  finding, it fell back to that finding's own Recommendation to resolve the PRD/spec — but
+  never wrote that fallback back into the clarification file itself, so the file kept
+  showing 0 answered forever, regardless of the PRD already being fixed and finalize having
+  reached 0 critical/0 major. `_run_apply_step` now mechanically fills any still-empty
+  "Your answer" with its own Recommendation (no agent call — same as the pre-loop backlog
+  resolution step) right before applying, so the clarification file ends up recording
+  exactly what was applied.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added
