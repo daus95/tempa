@@ -21,6 +21,12 @@ const INITIAL_SKIP_MINOR_FINDINGS = /*__SKIP_MINOR_FINDINGS__*/null;
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+// Renders one of the <symbol id="i-*"> icons defined in the sprite at the top of
+// dashboard.html as an inline <svg><use> — the Lucide-icon equivalent of the emoji
+// strings this app used to interpolate directly into innerHTML/textContent.
+function iconSvg(name, extraClass) {
+  return `<svg class="icon-svg${extraClass ? " " + extraClass : ""}"><use href="#i-${name}"></use></svg>`;
+}
 function inlineMd(src) {
   const codes = [];
   src = src.replace(/`([^`]+?)`/g, (m, c) => {
@@ -356,7 +362,7 @@ function updateToolbar() {
     filepathEl.appendChild(document.createTextNode(PRD_NAME + "/" + state.selectedSpecPath));
     if (state.specDirty) {
       const dot = document.createElement("span");
-      dot.className = "dirty"; dot.textContent = "● unsaved";
+      dot.className = "dirty"; dot.innerHTML = iconSvg("circle", "filled") + " unsaved";
       filepathEl.appendChild(dot);
     }
   } else if (kind === "clarify") {
@@ -365,7 +371,7 @@ function updateToolbar() {
     filepathEl.appendChild(document.createTextNode("Clarification/" + state.selectedClarifyPath));
     if (state.clarifyDirty) {
       const dot = document.createElement("span");
-      dot.className = "dirty"; dot.textContent = "● unsaved";
+      dot.className = "dirty"; dot.innerHTML = iconSvg("circle", "filled") + " unsaved";
       filepathEl.appendChild(dot);
     }
   }
@@ -384,21 +390,21 @@ function confirmDiscardIfDirty() {
 // Sidebar (top-level sections + nested trees)
 // ---------------------------------------------------------------------------
 function specIconFor(node) {
-  if (node.type === "dir") return "📁";
-  if (node.markdown) return "📝";
-  if (node.text) return "📄";
-  return "🔒";
+  if (node.type === "dir") return iconSvg("folder");
+  if (node.markdown) return iconSvg("file-pen-line");
+  if (node.text) return iconSvg("file-text");
+  return iconSvg("lock");
 }
 
 function renderSidebar() {
   treeEl.innerHTML = "";
-  treeEl.appendChild(renderLeafSection("home", "🏠", "Home"));
+  treeEl.appendChild(renderLeafSection("home", iconSvg("house"), "Home"));
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
-  treeEl.appendChild(renderLeafSection("implementation", "🛠️", "Implementation", !state.workspaceInitialized));
+  treeEl.appendChild(renderLeafSection("implementation", iconSvg("wrench"), "Implementation", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
-  treeBottomEl.appendChild(renderLeafSection("principles", "📐", "Architecture Principles", !state.workspaceInitialized));
-  treeBottomEl.appendChild(renderLeafSection("settings", "⚙️", "Settings", !state.workspaceInitialized));
+  treeBottomEl.appendChild(renderLeafSection("principles", iconSvg("ruler"), "Architecture Principles", !state.workspaceInitialized));
+  treeBottomEl.appendChild(renderLeafSection("settings", iconSvg("settings"), "Settings", !state.workspaceInitialized));
 }
 
 async function selectTop(key) {
@@ -645,7 +651,7 @@ function renderSpecSection() {
   const row = document.createElement("div");
   row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "") +
     (disabled ? " disabled" : "");
-  row.innerHTML = `<span class="twist">▶</span><span class="icon">📁</span><span class="label">Specification</span>`;
+  row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("folder")}</span><span class="label">Specification</span>`;
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop("specification");
@@ -680,12 +686,12 @@ function renderSpecNode(node, depth) {
 
   const twist = document.createElement("span");
   twist.className = "twist" + (isDir ? "" : " hidden");
-  twist.textContent = "▶";
+  twist.innerHTML = iconSvg("chevron-right");
   row.appendChild(twist);
 
   const icon = document.createElement("span");
   icon.className = "icon";
-  icon.textContent = specIconFor(node);
+  icon.innerHTML = specIconFor(node);
   row.appendChild(icon);
 
   const label = document.createElement("span");
@@ -729,7 +735,7 @@ function renderClarifySection() {
   row.className = "row top" + (state.activeTop === "clarification" && state.clarifyShowingOverview ? " selected" : "") +
     (disabled ? " disabled" : "");
   const count = state.clarifyUnanswered.length;
-  row.innerHTML = `<span class="twist">▶</span><span class="icon">❓</span><span class="label">Clarification</span>` +
+  row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("circle-help")}</span><span class="label">Clarification</span>` +
     (count ? `<span class="badge-count">${count}</span>` : "");
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
@@ -757,7 +763,7 @@ function renderClarifyFileRow(file) {
   const row = document.createElement("div");
   row.className = "row" + (!state.clarifyShowingOverview && file.path === state.selectedClarifyPath ? " selected" : "");
   row.style.paddingLeft = "21px";
-  row.innerHTML = `<span class="twist hidden"></span><span class="icon">📝</span>` +
+  row.innerHTML = `<span class="twist hidden"></span><span class="icon">${iconSvg("file-pen-line")}</span>` +
     `<span class="label">${escapeHtml(file.name)}</span>` +
     `<span class="file-status">${file.answered}/${file.total}</span>`;
   row.addEventListener("click", () => openClarifyFile(file));
@@ -768,7 +774,7 @@ function renderClarifyFileRow(file) {
 // ---------------------------------------------------------------------------
 // Clarification overview (right panel shown when "Clarification" itself is selected)
 // ---------------------------------------------------------------------------
-const SEVERITY_ICON = { critical: "🔴", major: "🟠", minor: "🟡" };
+const SEVERITY_ICON = { critical: "icon-severity-critical", major: "icon-severity-major", minor: "icon-severity-minor" };
 const SEVERITY_LABEL = { critical: "Critical", major: "Major", minor: "Minor" };
 
 // One icon per severity that actually has findings, each carrying a native-tooltip
@@ -782,7 +788,7 @@ function findingsCell(file) {
     const cls = counts.answered === counts.total ? "count-ok" : "count-pending";
     parts.push(
       `<span class="findings-icon" title="${SEVERITY_LABEL[sev]}: ${counts.answered}/${counts.total}">` +
-        `<span class="findings-icon-glyph">${SEVERITY_ICON[sev]}</span>` +
+        `<span class="findings-icon-glyph">${iconSvg("circle", "filled " + SEVERITY_ICON[sev])}</span>` +
         `<span class="${cls}">${counts.answered}/${counts.total}</span>` +
       `</span>`
     );
@@ -809,13 +815,13 @@ function formatClarifyDuration(seconds) {
 
 function statusCell(file) {
   return file.answered === file.total
-    ? '<span class="status-complete">✅ Complete</span>'
-    : `<span class="status-pending">🔶 ${file.answered}/${file.total}</span>`;
+    ? `<span class="status-complete">${iconSvg("circle-check")} Complete</span>`
+    : `<span class="status-pending">${iconSvg("circle-dashed")} ${file.answered}/${file.total}</span>`;
 }
 
 function appliedCell(file) {
   return file.applied
-    ? '<span class="clarify-applied-badge">✅ Applied</span>'
+    ? `<span class="clarify-applied-badge">${iconSvg("circle-check")} Applied</span>`
     : '<button type="button" class="clarify-apply-btn">Apply Answer</button>';
 }
 
@@ -930,7 +936,7 @@ function implementBlockedToast(ir) {
 function renderImplementReadyBanner() {
   const ir = state.implementReadiness;
   implementReadyBanner.classList.toggle("hidden", !ir.ready);
-  if (ir.ready) implementReadyBannerText.innerHTML = `<strong>✅ Ready for implementation.</strong> ${implementReadyMessage(ir)}`;
+  if (ir.ready) implementReadyBannerText.innerHTML = `<strong>${iconSvg("circle-check")} Ready for implementation.</strong> ${implementReadyMessage(ir)}`;
 }
 
 clarifyStartImplementBtn.addEventListener("click", async () => {
@@ -965,11 +971,11 @@ skipMinorFindingsToggle.addEventListener("change", async () => {
 // + log panel)
 // ---------------------------------------------------------------------------
 // Shared renderer for the readiness checklists (Finalize Clarification / Start
-// Implementation): items is [{ok, label}], rendered as a ✅/⬜ list into listEl.
+// Implementation): items is [{ok, label}], rendered as a checked/unchecked icon list into listEl.
 function renderGateChecklist(listEl, items) {
   listEl.innerHTML = items.map((it) =>
     `<li class="gate-item ${it.ok ? "ok" : "pending"}">` +
-      `<span class="icon">${it.ok ? "✅" : "⬜"}</span><span>${escapeHtml(it.label)}</span></li>`
+      `<span class="icon">${it.ok ? iconSvg("circle-check") : iconSvg("square")}</span><span>${escapeHtml(it.label)}</span></li>`
   ).join("");
 }
 
@@ -1132,21 +1138,21 @@ function clarifyRunStatusLabel(mode) {
 function formatClarifyLogLine(text) {
   if (/^\[\d{2}:\d{2}:\d{2}\].*\[\d+ rows\](\s*\[[^\]]*\])*\s*$/.test(text)) {
     const m = text.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$/);
-    return { cls: "progress", icon: "⏳", time: m ? m[1] : "", msg: m ? m[2] : text };
+    return { cls: "progress", icon: "loader-circle", time: m ? m[1] : "", msg: m ? m[2] : text };
   }
   const trimmed = text.trim();
   if (/^==.+==$/.test(trimmed)) {
-    return { cls: "banner", icon: "📣", time: "", msg: trimmed.replace(/^=+\s*|\s*=+$/g, "") };
+    return { cls: "banner", icon: "megaphone", time: "", msg: trimmed.replace(/^=+\s*|\s*=+$/g, "") };
   }
   let time = "", msg = text;
   const tsMatch = text.match(/^\[\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2})\]\s?(.*)$/);
   if (tsMatch) { time = tsMatch[1]; msg = tsMatch[2]; }
-  if (/^\[OK\]/i.test(msg)) return { cls: "ok", icon: "✅", time, msg: msg.replace(/^\[OK\]\s*/i, "") };
-  if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "✅", time, msg };
-  if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "❌", time, msg };
-  if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "⚠️", time, msg: msg.replace(/^\[!\]\s*/, "") };
-  if (/usage limit reached|reached the .* limit|overloaded/i.test(msg)) return { cls: "warn", icon: "⚠️", time, msg };
-  return { cls: "plain", icon: "•", time, msg };
+  if (/^\[OK\]/i.test(msg)) return { cls: "ok", icon: "circle-check", time, msg: msg.replace(/^\[OK\]\s*/i, "") };
+  if (/SUCCEEDED/.test(msg)) return { cls: "ok", icon: "circle-check", time, msg };
+  if (/FAILED|ERROR|\[error\]|authentication failed/i.test(msg)) return { cls: "err", icon: "circle-x", time, msg };
+  if (/^\[!\]/.test(msg)) return { cls: "warn", icon: "triangle-alert", time, msg: msg.replace(/^\[!\]\s*/, "") };
+  if (/usage limit reached|reached the .* limit|overloaded/i.test(msg)) return { cls: "warn", icon: "triangle-alert", time, msg };
+  return { cls: "plain", icon: "circle-dashed", time, msg };
 }
 
 function appendClarifyLogRow(text) {
@@ -1155,7 +1161,7 @@ function appendClarifyLogRow(text) {
   row.className = "clarify-log-line " + f.cls;
   row.innerHTML =
     (f.time ? `<span class="clarify-log-time">${escapeHtml(f.time)}</span>` : "") +
-    `<span class="clarify-log-icon">${f.icon}</span>` +
+    `<span class="clarify-log-icon">${iconSvg(f.icon, f.cls === "progress" ? "icon-spin" : "")}</span>` +
     `<span class="clarify-log-msg">${escapeHtml(f.msg)}</span>`;
   return row;
 }
@@ -1323,10 +1329,12 @@ implTabStatusBtn.addEventListener("click", () => setImplTab("status"));
 implTabLogBtn.addEventListener("click", () => setImplTab("log"));
 
 function epicStatusIcon(status) {
-  return { done: "✅", on_progress: "🔄", pending: "⬜", failed: "❌", require_fixing: "🔧" }[status] || "❔";
+  const name = { done: "circle-check", on_progress: "refresh-cw", pending: "square", failed: "circle-x", require_fixing: "wrench" }[status] || "circle-help";
+  return iconSvg(name, status === "on_progress" ? "icon-spin" : "");
 }
 function featureStatusIcon(status) {
-  return { done: "✅", failed: "❌", require_fixing: "🔧" }[status] || "⬜";
+  const name = { done: "circle-check", failed: "circle-x", require_fixing: "wrench" }[status] || "square";
+  return iconSvg(name);
 }
 
 function renderImplementStatus() {
@@ -1904,7 +1912,7 @@ const IMPLEMENT_REQUIREMENT_RISK = {
 function updateImplementRequirementWarning(requirement) {
   const risk = IMPLEMENT_REQUIREMENT_RISK[requirement];
   settingsImplementRequirementWarning.classList.toggle("hidden", !risk);
-  if (risk) settingsImplementRequirementWarning.textContent = "⚠️ " + risk;
+  if (risk) settingsImplementRequirementWarning.innerHTML = iconSvg("triangle-alert") + " " + escapeHtml(risk);
 }
 
 // Explain the risk before letting the user actually select a relaxed option — reverts
