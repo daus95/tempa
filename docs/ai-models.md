@@ -5,9 +5,9 @@ CLI backend) is differentiated per stage, and how to configure it.
 
 ## CLI backend
 
-Each stage (`clarify`, `plan`, `implement`) is also driven by a specific **CLI backend** —
-which agentic coding CLI Tempa shells out to for that stage. Stored in `config.json` under
-the `backends` key, default `claude` for every stage:
+Each stage (`clarify`, `clarify_apply`, `plan`, `implement`) is also driven by a specific
+**CLI backend** — which agentic coding CLI Tempa shells out to for that stage. Stored in
+`config.json` under the `backends` key, default `claude` for every stage:
 
 | Backend | CLI | Notes |
 |---------|-----|-------|
@@ -16,7 +16,7 @@ the `backends` key, default `claude` for every stage:
 | `codex` | OpenAI Codex CLI (`codex`) | Model catalog is Codex's own — pass a real model id. |
 
 ```bash
-tempa set-backend --clarify claude --plan copilot --implement codex
+tempa set-backend --clarify claude --clarify-apply codex --plan copilot --implement codex
 tempa show-backends                              # show the backend per stage
 ```
 
@@ -38,6 +38,14 @@ Each stage has a different workload profile:
   its output determines the validity of every plan & implementation that follows — it needs
   the most careful reasoning to catch subtle ambiguity/conflicts in the PRD. Default: the
   most capable model (`claude-opus-5`).
+- **Clarify — apply / auto-answer** (`clarify_apply`) — applying already-decided
+  answers/recommendations into the PRD/spec (`clarify --apply`, the apply half of
+  `--finalize`) and auto-answering unanswered findings (`clarify --auto-answer`) — is
+  mechanical compared to evaluating the PRD: it's copying an already-made decision, not
+  making one. Default: a faster/cheaper model (`claude-sonnet-5`). A full stage of its own —
+  its backend and reasoning effort are configured independently of `clarify`'s, since the
+  optimal choice for mechanical apply work isn't necessarily the same as for evaluate (e.g.
+  evaluate on Claude Opus at high effort, apply on a cheaper backend/model entirely).
 - **Plan drafting** (`plan`) and **implementation** (`implement`) run repeatedly and
   automatically at high volume (per epic/feature/session), unattended — here speed & cost
   matter more, as long as quality stays adequate. Default: a faster/cheaper model that's
@@ -53,12 +61,13 @@ The AI model is stored in `config.json` under the `models` key.
 
 | Stage | Used by | Default |
 |-------|----------------|---------|
-| `clarify` | `clarify` | `claude-opus-5` (opus-5) |
+| `clarify` | `clarify` (evaluate) | `claude-opus-5` (opus-5) |
+| `clarify_apply` | `clarify --apply`, `--auto-answer`, the apply half of `--finalize` | `claude-sonnet-5` (sonnet-5) |
 | `plan` | plan drafting (automatic via `implement`, or `implement --replan`) | `claude-sonnet-5` (sonnet-5) |
 | `implement` | `implement`, QA, `verify` | `claude-sonnet-5` (sonnet-5) |
 
 ```bash
-tempa set-model --clarify opus-5 --plan sonnet-5 --implement sonnet-5
+tempa set-model --clarify opus-5 --clarify-apply sonnet-5 --plan sonnet-5 --implement sonnet-5
 tempa set-model --implement claude-opus-5      # accepts an alias or a full model id
 tempa show-models                              # show the model per stage
 ```
@@ -76,7 +85,7 @@ Each stage also has a **Reasoning Effort** setting — how hard the backend CLI 
 default `""` (no override; the CLI/model's own default is used) for every stage.
 
 ```bash
-tempa set-effort --clarify high --plan medium --implement high
+tempa set-effort --clarify high --clarify-apply low --plan medium --implement high
 tempa set-effort --implement ""                  # clear it back to the CLI/model default
 tempa show-efforts                                # show the reasoning effort per stage
 ```

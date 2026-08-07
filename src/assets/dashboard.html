@@ -306,6 +306,17 @@
             <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
           </div>
           <div class="settings-field">
+            <label for="settingsBackendClarifyApply">Clarify — Apply / Auto-Answer</label>
+            <p class="settings-field-desc">Used to apply already-decided answers/recommendations to the PRD/spec (<code>clarify --apply</code>, the apply half of <code>--finalize</code>) and to auto-answer unanswered findings — mechanical work compared to evaluating the PRD, so it defaults to a cheaper model. Backend/model/effort are independent of the Clarifications stage above — mechanical apply work doesn't need the same reasoning strength (or even the same CLI) as evaluate.</p>
+            <div class="settings-inline-row">
+              <select id="settingsBackendClarifyApply" class="settings-backend-select"></select>
+              <input type="text" id="settingsModelClarifyApply" class="settings-model-input" list="modelSuggestionsClarifyApply" autocomplete="off">
+              <datalist id="modelSuggestionsClarifyApply"></datalist>
+              <select id="settingsEffortClarifyApply" class="settings-effort-select"></select>
+            </div>
+            <p class="settings-model-note hidden" id="settingsModelNoteClarifyApply"></p>
+          </div>
+          <div class="settings-field">
             <label for="settingsBackendPlan">Planning</label>
             <p class="settings-field-desc">Used to automatically draft the epic/feature/task plan before implementation starts (via Start Implementation, or a replan). Runs frequently and unattended, so speed and cost usually matter more here than for Clarification.</p>
             <div class="settings-inline-row">

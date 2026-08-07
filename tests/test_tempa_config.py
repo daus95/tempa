@@ -291,6 +291,15 @@ def test_get_backend_unknown_stage_falls_back_to_claude():
     assert tempa_config.get_backend({}, "nonexistent-stage") == "claude"
 
 
+def test_get_backend_clarify_apply_is_independent_stage():
+    # clarify_apply is a full stage — its backend can differ from clarify's, not just
+    # follow it (see DEFAULT_BACKENDS in tempa_config.py).
+    assert tempa_config.get_backend({}, "clarify_apply") == "claude"
+    config = {"backends": {"clarify": "claude", "clarify_apply": "codex"}}
+    assert tempa_config.get_backend(config, "clarify") == "claude"
+    assert tempa_config.get_backend(config, "clarify_apply") == "codex"
+
+
 # ---------------------------------------------------------------------------
 # get_reasoning_efforts / get_reasoning_effort
 # ---------------------------------------------------------------------------
@@ -317,6 +326,13 @@ def test_get_reasoning_effort_stage_absent_falls_back_to_empty():
 
 def test_get_reasoning_effort_unknown_stage_falls_back_to_empty():
     assert tempa_config.get_reasoning_effort({}, "nonexistent-stage") == ""
+
+
+def test_get_reasoning_effort_clarify_apply_is_independent_stage():
+    assert tempa_config.get_reasoning_effort({}, "clarify_apply") == ""
+    config = {"reasoning_efforts": {"clarify": "high", "clarify_apply": "low"}}
+    assert tempa_config.get_reasoning_effort(config, "clarify") == "high"
+    assert tempa_config.get_reasoning_effort(config, "clarify_apply") == "low"
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +390,62 @@ def test_get_epic_session_id_qa_has_no_legacy_key_fallback():
     epic = {"qa_session_id": "old-qa-sid"}
     assert tempa_config.get_epic_session_id(epic, "claude", kind="qa") == "old-qa-sid"
     assert tempa_config.get_epic_session_id(epic, "codex", kind="qa") is None
+
+
+# ---------------------------------------------------------------------------
+# get_clarify_session_id / get_clarify_apply_session_id
+# ---------------------------------------------------------------------------
+
+def test_get_clarify_session_id_absent_returns_none():
+    assert tempa_config.get_clarify_session_id({}, "claude") is None
+
+
+def test_get_clarify_session_id_returns_id_for_matching_backend():
+    config = {"clarify_session_id": "eval-sid", "clarify_session_backend": "claude"}
+    assert tempa_config.get_clarify_session_id(config, "claude") == "eval-sid"
+
+
+def test_get_clarify_session_id_none_on_backend_mismatch():
+    config = {"clarify_session_id": "eval-sid", "clarify_session_backend": "codex"}
+    assert tempa_config.get_clarify_session_id(config, "claude") is None
+
+
+def test_get_clarify_apply_session_id_independent_of_evaluate_session_id():
+    config = {
+        "clarify_session_id": "eval-sid", "clarify_session_backend": "claude",
+        "clarify_apply_session_id": "apply-sid", "clarify_apply_session_backend": "claude",
+    }
+    assert tempa_config.get_clarify_session_id(config, "claude") == "eval-sid"
+    assert tempa_config.get_clarify_apply_session_id(config, "claude") == "apply-sid"
+
+
+# ---------------------------------------------------------------------------
+# get_resume_implementation_sessions
+# ---------------------------------------------------------------------------
+
+def test_get_resume_implementation_sessions_defaults_true():
+    assert tempa_config.get_resume_implementation_sessions({}) is True
+
+
+def test_get_resume_implementation_sessions_respects_false():
+    assert tempa_config.get_resume_implementation_sessions({"resume_implementation_sessions": False}) is False
+
+
+def test_get_resume_implementation_sessions_ignores_non_bool_value():
+    assert tempa_config.get_resume_implementation_sessions({"resume_implementation_sessions": "nope"}) is True
+
+
+# ---------------------------------------------------------------------------
+# get_model — DEFAULT_MODELS now includes "clarify_apply"
+# ---------------------------------------------------------------------------
+
+def test_get_model_clarify_apply_defaults_to_sonnet():
+    assert tempa_config.get_model({}, "clarify_apply") == "claude-sonnet-5"
+
+
+def test_get_model_clarify_apply_overridable():
+    config = {"models": {"clarify_apply": "claude-haiku-4-5-20251001"}}
+    assert tempa_config.get_model(config, "clarify_apply") == "claude-haiku-4-5-20251001"
 
 
 # ---------------------------------------------------------------------------

@@ -120,3 +120,108 @@ def test_main_plain_session_failure_keeps_failed_status(isolate_tempa_paths, mon
     assert exc.value.code == 1
     assert seen["waits"] == []
     assert tempa_config.load_config()["epic"][0]["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# check_and_run — resuming an epic's previous implementation session
+#
+# A continuation session (an epic that already has completed_features > 0, is
+# require_fixing, or is a stale on_progress left by an interrupted session) used to
+# always start `run_session` cold, even though the epic's previous session_id was
+# already captured and stored (see tempa_session._capture_session_id) — resume_session_id
+# was dead code for implementation. check_and_run now looks that id up (via
+# get_epic_session_id) and passes it through, so the epic spec + code it already read
+# don't get re-read from scratch every features_per_session batch. run_session itself is
+# stubbed here — these tests are only about what check_and_run decides to pass it.
+# ---------------------------------------------------------------------------
+
+def _run_check_and_run_capturing_resume(monkeypatch) -> dict:
+    """Stub ti.run_session to record the resume_session_id it was called with (instead of
+    spawning a real backend session), drive check_and_run once, and wait for the daemon
+    thread it starts to finish."""
+    seen: dict = {}
+
+    def fake_run_session(index, prompt, session_label, resume_session_id=None, features_override=None):
+        seen["resume_session_id"] = resume_session_id
+        seen["session_label"] = session_label
+
+    monkeypatch.setattr(ti, "run_session", fake_run_session)
+    ti.check_and_run()
+    assert _state.running_thread is not None, "check_and_run didn't start a session thread"
+    _state.running_thread.join(timeout=5)
+    return seen
+
+
+def test_check_and_run_resumes_continuation_epic_with_matching_backend_session(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({"epic": [{
+        "epic_name": "e1", "status": "pending", "completed_features": 1, "total_features": 2,
+        "features": [{"id": "f1", "name": "n1", "status": "done"}, {"id": "f2", "name": "n2", "status": "pending"}],
+        "session_id": "sess-123", "session_backend": "claude",
+    }]})
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] == "sess-123"
+
+
+def test_check_and_run_no_resume_for_brand_new_epic(isolate_tempa_paths, monkeypatch):
+    # First session for this epic ever: completed_features=0, not require_fixing, no
+    # session_id recorded yet — nothing to resume, same as before this change.
+    tempa_config.save_config({"epic": [{
+        "epic_name": "e1", "status": "pending", "completed_features": 0, "total_features": 2,
+        "features": [{"id": "f1", "name": "n1", "status": "pending"}],
+    }]})
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] is None
+
+
+def test_check_and_run_no_resume_when_backend_mismatch(isolate_tempa_paths, monkeypatch):
+    # session_id was captured under a different backend than the one now configured for
+    # "implement" — get_epic_session_id refuses to hand it back (a session id from one
+    # CLI is meaningless to another).
+    tempa_config.save_config({
+        "epic": [{
+            "epic_name": "e1", "status": "pending", "completed_features": 1, "total_features": 2,
+            "features": [{"id": "f1", "name": "n1", "status": "done"}, {"id": "f2", "name": "n2", "status": "pending"}],
+            "session_id": "sess-123", "session_backend": "codex",
+        }],
+        "backends": {"implement": "claude"},
+    })
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] is None
+
+
+def test_check_and_run_no_resume_when_disabled_in_config(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({
+        "epic": [{
+            "epic_name": "e1", "status": "pending", "completed_features": 1, "total_features": 2,
+            "features": [{"id": "f1", "name": "n1", "status": "done"}, {"id": "f2", "name": "n2", "status": "pending"}],
+            "session_id": "sess-123", "session_backend": "claude",
+        }],
+        "resume_implementation_sessions": False,
+    })
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] is None
+
+
+def test_check_and_run_resumes_require_fixing_epic(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({"epic": [{
+        "epic_name": "e1", "status": "require_fixing", "completed_features": 2, "total_features": 2,
+        "features": [{"id": "f1", "name": "n1", "status": "require_fixing"}],
+        "session_id": "sess-999", "session_backend": "claude",
+        "qa_passed": False,
+    }]})
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] == "sess-999"
+
+
+def test_check_and_run_resumes_stale_on_progress_epic(isolate_tempa_paths, monkeypatch):
+    # An epic left `on_progress` by a session that was interrupted (process killed,
+    # machine restarted) before completing even one feature still has a resumable
+    # session_id if one was ever captured — check_and_run's "always start a new session"
+    # comment predates this: it now resumes that session instead of starting cold.
+    tempa_config.save_config({"epic": [{
+        "epic_name": "e1", "status": "on_progress", "completed_features": 0, "total_features": 3,
+        "features": [{"id": "f1", "name": "n1", "status": "pending"}],
+        "session_id": "sess-777", "session_backend": "claude",
+    }]})
+    seen = _run_check_and_run_capturing_resume(monkeypatch)
+    assert seen["resume_session_id"] == "sess-777"

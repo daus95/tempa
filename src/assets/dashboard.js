@@ -197,15 +197,20 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
   modalExtraBtn = $("modalExtraBtn"),
-  settingsModelClarify = $("settingsModelClarify"), settingsModelPlan = $("settingsModelPlan"),
+  settingsModelClarify = $("settingsModelClarify"), settingsModelClarifyApply = $("settingsModelClarifyApply"),
+  settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"),
-  settingsBackendClarify = $("settingsBackendClarify"), settingsBackendPlan = $("settingsBackendPlan"),
+  settingsBackendClarify = $("settingsBackendClarify"), settingsBackendClarifyApply = $("settingsBackendClarifyApply"),
+  settingsBackendPlan = $("settingsBackendPlan"),
   settingsBackendImplement = $("settingsBackendImplement"),
-  modelSuggestionsClarify = $("modelSuggestionsClarify"), modelSuggestionsPlan = $("modelSuggestionsPlan"),
+  modelSuggestionsClarify = $("modelSuggestionsClarify"), modelSuggestionsClarifyApply = $("modelSuggestionsClarifyApply"),
+  modelSuggestionsPlan = $("modelSuggestionsPlan"),
   modelSuggestionsImplement = $("modelSuggestionsImplement"),
-  settingsEffortClarify = $("settingsEffortClarify"), settingsEffortPlan = $("settingsEffortPlan"),
+  settingsEffortClarify = $("settingsEffortClarify"), settingsEffortClarifyApply = $("settingsEffortClarifyApply"),
+  settingsEffortPlan = $("settingsEffortPlan"),
   settingsEffortImplement = $("settingsEffortImplement"),
-  settingsModelNoteClarify = $("settingsModelNoteClarify"), settingsModelNotePlan = $("settingsModelNotePlan"),
+  settingsModelNoteClarify = $("settingsModelNoteClarify"), settingsModelNoteClarifyApply = $("settingsModelNoteClarifyApply"),
+  settingsModelNotePlan = $("settingsModelNotePlan"),
   settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
@@ -1680,6 +1685,7 @@ function wireBackendModelStage(backendSelect, modelInput, modelDatalist, modelNo
   });
 }
 wireBackendModelStage(settingsBackendClarify, settingsModelClarify, modelSuggestionsClarify, settingsModelNoteClarify, settingsEffortClarify);
+wireBackendModelStage(settingsBackendClarifyApply, settingsModelClarifyApply, modelSuggestionsClarifyApply, settingsModelNoteClarifyApply, settingsEffortClarifyApply);
 wireBackendModelStage(settingsBackendPlan, settingsModelPlan, modelSuggestionsPlan, settingsModelNotePlan, settingsEffortPlan);
 wireBackendModelStage(settingsBackendImplement, settingsModelImplement, modelSuggestionsImplement, settingsModelNoteImplement, settingsEffortImplement);
 
@@ -1687,18 +1693,23 @@ function fillSettingsForm(config) {
   state.backendsStatus = config.backends_status || state.backendsStatus;
   renderBackendStatus();
   populateBackendSelect(settingsBackendClarify, config.backends.clarify);
+  populateBackendSelect(settingsBackendClarifyApply, config.backends.clarify_apply);
   populateBackendSelect(settingsBackendPlan, config.backends.plan);
   populateBackendSelect(settingsBackendImplement, config.backends.implement);
   populateModelDatalist(modelSuggestionsClarify, config.backends.clarify);
+  populateModelDatalist(modelSuggestionsClarifyApply, config.backends.clarify_apply);
   populateModelDatalist(modelSuggestionsPlan, config.backends.plan);
   populateModelDatalist(modelSuggestionsImplement, config.backends.implement);
   updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify);
+  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply);
   updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan);
   updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement);
   settingsModelClarify.value = config.models.clarify;
+  settingsModelClarifyApply.value = config.models.clarify_apply;
   settingsModelPlan.value = config.models.plan;
   settingsModelImplement.value = config.models.implement;
   populateEffortSelect(settingsEffortClarify, config.backends.clarify, config.models.clarify, config.reasoning_efforts.clarify);
+  populateEffortSelect(settingsEffortClarifyApply, config.backends.clarify_apply, config.models.clarify_apply, config.reasoning_efforts.clarify_apply);
   populateEffortSelect(settingsEffortPlan, config.backends.plan, config.models.plan, config.reasoning_efforts.plan);
   populateEffortSelect(settingsEffortImplement, config.backends.implement, config.models.implement, config.reasoning_efforts.implement);
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
@@ -1824,16 +1835,19 @@ settingsSaveBtn.addEventListener("click", async () => {
       body: JSON.stringify({
         models: {
           clarify: settingsModelClarify.value,
+          clarify_apply: settingsModelClarifyApply.value,
           plan: settingsModelPlan.value,
           implement: settingsModelImplement.value,
         },
         backends: {
           clarify: settingsBackendClarify.value,
+          clarify_apply: settingsBackendClarifyApply.value,
           plan: settingsBackendPlan.value,
           implement: settingsBackendImplement.value,
         },
         reasoning_efforts: {
           clarify: settingsEffortClarify.value,
+          clarify_apply: settingsEffortClarifyApply.value,
           plan: settingsEffortPlan.value,
           implement: settingsEffortImplement.value,
         },

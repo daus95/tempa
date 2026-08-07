@@ -601,13 +601,46 @@ def _run_oneshot_session(
     return _log_session_result(f"[{label}]", exit_code, log_path)
 
 
+def _capture_clarify_session_id(
+    backend: Backend, initial: str | None, label: str, id_key: str = "clarify_session_id",
+    backend_key: str = "clarify_session_backend",
+) -> Callable[[dict], None]:
+    """Like _capture_session_id, but for clarify/apply sessions — these aren't tied to an
+    epic index, so the captured id is persisted directly under top-level config.json keys
+    instead of into an epic entry. `id_key`/`backend_key` default to the evaluate session's
+    keys (see tempa_config.get_clarify_session_id); run_apply_clarification_session passes
+    the apply-specific pair instead (get_clarify_apply_session_id)."""
+    captured = [initial]
+
+    def _on_json_event(data: dict) -> None:
+        if captured[0] is not None:
+            return
+        sid = backend.extract_session_id(data)
+        if not sid:
+            return
+        captured[0] = sid
+        with _state.lock:
+            cfg = load_config()
+            cfg[id_key] = sid
+            cfg[backend_key] = backend.name
+            save_config(cfg)
+        log(f"{label} session_id: {sid}", to_console=False)
+
+    return _on_json_event
+
+
 def run_clarification_session(
     prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
 ) -> bool:
-    """Run a single clarification session against `backend`. Always starts a fresh
-    session — never resumes. No session_id is captured or stored; each loop iteration is
-    independent."""
+    """Run a single clarification (evaluate) session against `backend`. Always starts a
+    fresh session — never resumes itself (a fresh full read of the PRD every round is
+    what makes evaluate trustworthy). Its session id IS captured (into
+    config["clarify_session_id"]), purely so a same-backend apply pass run right after it
+    (run_apply_clarification_session) can resume it — that session already paid to read
+    the whole PRD, so applying via --resume reuses that context instead of re-reading it
+    cold."""
     label = f"Clarification run #{run_number}"
+    on_json_event = _capture_clarify_session_id(backend, None, label)
     exit_code, log_path = _run_backend_session(
         backend,
         prompt,
@@ -616,23 +649,44 @@ def run_clarification_session(
         banner_label=label,
         reasoning_effort=reasoning_effort,
         progress_tag="CLARIFY",
+        on_json_event=on_json_event,
     )
     return _log_session_result(label, exit_code, log_path)
 
 
 def run_apply_clarification_session(
     prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
+    resume_session_id: str | None = None,
 ) -> bool:
-    """Apply clarification findings to PRD/spec documents against `backend`. Always
-    starts a fresh session."""
+    """Apply clarification findings to PRD/spec documents against `backend`.
+
+    `resume_session_id`, when given, resumes an existing session instead of starting
+    fresh — normally the evaluate session that just wrote the findings being applied
+    (see tempa_config.get_clarify_session_id / _run_apply_step), so the apply pass reuses
+    context that session already paid to build instead of re-reading the PRD and every
+    backlog clarification file cold. Omit it (e.g. a standalone `tempa clarify --apply`
+    run some time after evaluate, or a backend mismatch) to fall back to a fresh session,
+    same as before."""
     label = f"Apply-clarifications run #{run_number}"
+    action = "Resuming" if resume_session_id else "Starting"
+    # Captured under its own top-level keys (distinct from the evaluate session's
+    # clarify_session_id) so a usage-limit/overload retry of THIS apply attempt (see
+    # tempa_config.get_clarify_apply_session_id) can resume it instead of losing whatever
+    # this attempt already did and falling back to resuming evaluate — or starting cold
+    # — again.
+    on_json_event = _capture_clarify_session_id(
+        backend, resume_session_id, label,
+        id_key="clarify_apply_session_id", backend_key="clarify_apply_session_backend",
+    )
     exit_code, log_path = _run_backend_session(
         backend,
         prompt,
         model,
         log_prefix=f"apply_clarification_{run_number}",
-        banner_label=label,
+        banner_label=f"{action} {label}",
+        resume_session_id=resume_session_id,
         reasoning_effort=reasoning_effort,
         progress_tag="APPLY",
+        on_json_event=on_json_event,
     )
     return _log_session_result(label, exit_code, log_path)

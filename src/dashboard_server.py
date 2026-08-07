@@ -731,14 +731,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Malformed request."})
             return
         backends = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (backends_in.get(stage) or "").strip()
             if value not in tempa_backend.BACKENDS:
                 self._send_json(400, {"ok": False, "error": f"The {stage} backend must be one of: {', '.join(tempa_backend.BACKENDS)}."})
                 return
             backends[stage] = value
         models = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (models_in.get(stage) or "").strip()
             if not value:
                 self._send_json(400, {"ok": False, "error": f"The {stage} model cannot be empty."})
@@ -747,7 +747,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             # the model string is stored as-is (see tempa_config._resolve_model_alias).
             models[stage] = tempa_config._resolve_model_alias(value) if backends[stage] == "claude" else value
         reasoning_efforts = {}
-        for stage in ("clarify", "plan", "implement"):
+        for stage in ("clarify", "clarify_apply", "plan", "implement"):
             value = (reasoning_efforts_in.get(stage) or "").strip()
             backend_def = tempa_backend.get_backend_def(backends[stage])
             if not tempa_backend.is_valid_reasoning_effort(backend_def, models[stage], value):

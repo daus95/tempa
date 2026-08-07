@@ -103,6 +103,14 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("last_clarification_findings", None)
     config.pop("clarify_applied_hashes", None)
     config.pop("last_clean_evaluation_at", None)
+    # Resumable session ids (see tempa_config.get_clarify_session_id /
+    # get_clarify_apply_session_id) are meaningless once the clarification files they
+    # point at are gone — leaving them would risk a later apply/evaluate --resume-ing a
+    # session about a backlog that no longer exists.
+    config.pop("clarify_session_id", None)
+    config.pop("clarify_session_backend", None)
+    config.pop("clarify_apply_session_id", None)
+    config.pop("clarify_apply_session_backend", None)
     config["last_clarification_round"] = 0
     config["last_finalize_round"] = 0
     config["last_auto_answer"] = 0

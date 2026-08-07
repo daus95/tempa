@@ -99,13 +99,13 @@ USAGE
   tempa show-folders         Show the active working folders (+ resolved absolute paths)
   tempa close-folder         Detach the active workspace (its config/logs/qa/specs stay put in
                                   <root>/.tempa/, untouched — reopen it later with `init` to resume)
-  tempa set-model [--clarify m] [--plan m] [--implement m]
+  tempa set-model [--clarify m] [--clarify-apply m] [--plan m] [--implement m]
                                   Set the AI model per stage (alias: opus-5, sonnet-5, ... — claude only)
   tempa show-models          Show the AI model per stage
-  tempa set-backend [--clarify b] [--plan b] [--implement b]
+  tempa set-backend [--clarify b] [--clarify-apply b] [--plan b] [--implement b]
                                   Set the CLI backend per stage: claude | copilot | codex
   tempa show-backends        Show the CLI backend per stage
-  tempa set-effort [--clarify e] [--plan e] [--implement e]
+  tempa set-effort [--clarify e] [--clarify-apply e] [--plan e] [--implement e]
                                   Set the reasoning effort per stage (must be supported by that
                                   stage's backend+model; "" clears it back to the CLI/model default)
   tempa show-efforts         Show the reasoning effort per stage
@@ -258,6 +258,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-model", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 
@@ -265,6 +266,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-backend", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 
@@ -272,6 +274,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("set-effort", parents=[common], add_help=False)
     p.add_argument("--clarify")
+    p.add_argument("--clarify-apply")
     p.add_argument("--plan")
     p.add_argument("--implement")
 
