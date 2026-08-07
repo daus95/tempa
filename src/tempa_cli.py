@@ -47,11 +47,11 @@ from tempa_commands import (
     set_working_folders,
 )
 from tempa_config import (
-    POLL_INTERVAL_SEC,
     WORKING_DIR,
     get_backend,
     get_config_path,
     get_epic_session_id,
+    get_poll_interval_sec,
     get_qa_dir,
     get_skip_minor_findings,
     load_config,
@@ -87,7 +87,7 @@ Agent Runner — Qlar Medical Clinic Back-Office
 
 Config  : {get_config_path()}
 Work dir: {WORKING_DIR}
-Poll    : {POLL_INTERVAL_SEC}s
+Poll    : {get_poll_interval_sec(config)}s
 
 USAGE
 
@@ -127,7 +127,7 @@ USAGE
   tempa clarify --clear      Delete all files in .tempa/specs/clarifications except claude.md (asks for confirmation; --yes to skip)
 
   -- Plan & Start Implementation --
-  tempa implement            Start the agent runner (polls every {POLL_INTERVAL_SEC}s).
+  tempa implement            Start the agent runner (polls every {get_poll_interval_sec(config)}s).
                                   If there's no task (epic/feature/QA) in config.json yet, run
                                   plan (lay out Epic/Feature/Task from the PRD) automatically first.
   tempa implement --replan   Force re-running plan first, then continue/start implementation

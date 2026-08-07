@@ -307,6 +307,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": config.get("max_clarification_run"),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
                 "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
+                "usage_limit_retry_wait_sec": tempa_config.get_usage_limit_retry_wait_sec(config),
+                "usage_limit_heartbeat_sec": tempa_config.get_usage_limit_heartbeat_sec(config),
+                "server_overloaded_retry_wait_sec": tempa_config.get_server_overloaded_retry_wait_sec(config),
+                "poll_interval_sec": tempa_config.get_poll_interval_sec(config),
                 "backends_status": _backend_status(),
             },
         })
@@ -776,6 +780,22 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if not ok:
             self._send_json(400, {"ok": False, "error": "Max Finalize Clarification Round must be a positive whole number."})
             return
+        ok, usage_limit_retry_wait_sec = _parse_limit("usage_limit_retry_wait_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Usage Limit Retry Wait must be a positive whole number."})
+            return
+        ok, usage_limit_heartbeat_sec = _parse_limit("usage_limit_heartbeat_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Usage Limit Heartbeat Interval must be a positive whole number."})
+            return
+        ok, server_overloaded_retry_wait_sec = _parse_limit("server_overloaded_retry_wait_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Server Overload Retry Wait must be a positive whole number."})
+            return
+        ok, poll_interval_sec = _parse_limit("poll_interval_sec", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Implementation Poll Interval must be a positive whole number."})
+            return
         allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
         implementation_start_requirement = payload.get("implementation_start_requirement")
         if implementation_start_requirement not in tempa_config.IMPLEMENTATION_START_REQUIREMENTS:
@@ -796,6 +816,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["max_clarification_run"] = max_clarification_run
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
         config["implementation_start_requirement"] = implementation_start_requirement
+        config["usage_limit_retry_wait_sec"] = usage_limit_retry_wait_sec
+        config["usage_limit_heartbeat_sec"] = usage_limit_heartbeat_sec
+        config["server_overloaded_retry_wait_sec"] = server_overloaded_retry_wait_sec
+        config["poll_interval_sec"] = poll_interval_sec
         tempa_config.save_config(config)
         print("[settings] configuration saved")
         # The save itself always succeeds; `warning` is an advisory note about a setting
@@ -816,6 +840,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": max_clarification_run,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
                 "implementation_start_requirement": implementation_start_requirement,
+                "usage_limit_retry_wait_sec": usage_limit_retry_wait_sec,
+                "usage_limit_heartbeat_sec": usage_limit_heartbeat_sec,
+                "server_overloaded_retry_wait_sec": server_overloaded_retry_wait_sec,
+                "poll_interval_sec": poll_interval_sec,
                 "backends_status": _backend_status(),
             },
         })

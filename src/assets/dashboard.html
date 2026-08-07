@@ -408,6 +408,30 @@
           </div>
         </div>
         <div class="settings-group">
+          <h3>Retries &amp; Timing</h3>
+          <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work. These changes take effect on any already-running session or agent runner — no restart needed.</p>
+          <div class="settings-field">
+            <label for="settingsUsageLimitRetryWaitMin">Usage Limit Retry Wait (minutes)</label>
+            <p class="settings-field-desc">How long to wait before automatically retrying a clarify/implement/QA/verify step after the configured backend's subscription/token usage limit is hit.</p>
+            <input type="number" id="settingsUsageLimitRetryWaitMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsUsageLimitHeartbeatMin">Usage Limit Heartbeat Interval (minutes)</label>
+            <p class="settings-field-desc">How often a "still waiting" log line is printed while waiting out a usage limit, so a long wait doesn't look hung.</p>
+            <input type="number" id="settingsUsageLimitHeartbeatMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsServerOverloadRetryWaitMin">Server Overload Retry Wait (minutes)</label>
+            <p class="settings-field-desc">How long to wait before automatically retrying after the backend's API reports itself overloaded (e.g. a transient 529 response).</p>
+            <input type="number" id="settingsServerOverloadRetryWaitMin" min="1" step="1">
+          </div>
+          <div class="settings-field">
+            <label for="settingsPollIntervalSec">Implementation Poll Interval (seconds)</label>
+            <p class="settings-field-desc">How often the <code>tempa implement</code> agent runner checks for new work while idle.</p>
+            <input type="number" id="settingsPollIntervalSec" min="1" step="1">
+          </div>
+        </div>
+        <div class="settings-group">
           <h3>Updates</h3>
           <p class="settings-field-desc">Check whether a newer Tempa release has been published on GitHub, and update this installation in place.</p>
           <div class="settings-update-row">

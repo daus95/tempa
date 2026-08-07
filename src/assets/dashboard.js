@@ -212,6 +212,10 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),
   settingsImplementRequirementWarning = $("settingsImplementRequirementWarning"),
+  settingsUsageLimitRetryWaitMin = $("settingsUsageLimitRetryWaitMin"),
+  settingsUsageLimitHeartbeatMin = $("settingsUsageLimitHeartbeatMin"),
+  settingsServerOverloadRetryWaitMin = $("settingsServerOverloadRetryWaitMin"),
+  settingsPollIntervalSec = $("settingsPollIntervalSec"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
   settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
@@ -1706,6 +1710,10 @@ function fillSettingsForm(config) {
   for (const input of settingsImplementRequirementInputs) input.checked = input.value === requirement;
   updateImplementRequirementWarning(requirement);
   lastImplementRequirement = requirement;
+  settingsUsageLimitRetryWaitMin.value = Math.round((config.usage_limit_retry_wait_sec ?? 1800) / 60);
+  settingsUsageLimitHeartbeatMin.value = Math.round((config.usage_limit_heartbeat_sec ?? 300) / 60);
+  settingsServerOverloadRetryWaitMin.value = Math.round((config.server_overloaded_retry_wait_sec ?? 300) / 60);
+  settingsPollIntervalSec.value = config.poll_interval_sec ?? 60;
 }
 
 async function renderSettings() {
@@ -1834,6 +1842,10 @@ settingsSaveBtn.addEventListener("click", async () => {
         max_clarification_run: settingsMaxClarificationRun.value,
         allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
         implementation_start_requirement: selectedImplementRequirement(),
+        usage_limit_retry_wait_sec: Number(settingsUsageLimitRetryWaitMin.value) * 60,
+        usage_limit_heartbeat_sec: Number(settingsUsageLimitHeartbeatMin.value) * 60,
+        server_overloaded_retry_wait_sec: Number(settingsServerOverloadRetryWaitMin.value) * 60,
+        poll_interval_sec: Number(settingsPollIntervalSec.value),
       }),
     });
     const data = await res.json();
