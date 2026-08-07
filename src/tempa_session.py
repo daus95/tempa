@@ -41,6 +41,7 @@ from tempa_config import (
     set_epic_session_id,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
+from tempa_notifications import AttentionEventType, notify_attention
 
 
 def _is_usage_limit_text(text: str, backend: Backend) -> bool:
@@ -106,10 +107,41 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
     _state.auth_error_hit = True
     _state.auth_error_message = backend.friendly_auth_error_message(text)
     log(f"[{label}] {_state.auth_error_message}")
+    notify_attention(
+        AttentionEventType.AUTHENTICATION_REQUIRED,
+        label,
+        f"{backend.label} authentication failed",
+        "Re-authenticate the configured CLI backend, then run the command again.",
+        details={"backend": backend.name},
+    )
     _state.stop_event.set()
     with contextlib.suppress(Exception):
         process.terminate()
     return True
+
+
+def _failure_marker_text(raw_line: str, data: dict | None) -> str:
+    """Return text eligible for backend-failure marker matching.
+
+    Backend JSON events can embed arbitrary command output.  Matching markers against the
+    whole serialized event therefore turns application text such as an OpenAPI
+    ``#/components/responses/Unauthorized`` reference into a false CLI authentication
+    failure.  Plain stderr and structured failure events remain eligible; successful and
+    informational JSON events do not.
+    """
+    if data is None:
+        return raw_line
+
+    event_type = str(data.get("type", "")).lower()
+    if event_type == "error" or "failed" in event_type or data.get("is_error") is True:
+        return raw_line
+
+    if event_type == "result":
+        exit_code = data.get("exitCode", data.get("exit_code"))
+        if exit_code not in (None, 0, "0"):
+            return raw_line
+
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -313,30 +345,31 @@ def _stream_backend_process(
         for raw_line in process.stdout:
             row_count[0] += 1
             line = raw_line.strip()
-            if _handle_usage_limit(raw_line, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            if _handle_auth_error(raw_line, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            if _handle_overloaded(raw_line, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
+            data = None
             if line.startswith("{"):
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     data = json.loads(line)
-                    readable = backend.parse_line(data)
-                    if readable:
-                        log_file.write(readable + "\n")
-                        log_file.flush()
-                    if on_json_event:
-                        on_json_event(data)
-                except json.JSONDecodeError:
-                    log_file.write(raw_line)
+
+            marker_text = _failure_marker_text(raw_line, data)
+            if _handle_usage_limit(marker_text, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
+            if _handle_auth_error(marker_text, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
+            if _handle_overloaded(marker_text, process, label, backend):
+                log_file.write(raw_line)
+                log_file.flush()
+                break
+            if data is not None:
+                readable = backend.parse_line(data)
+                if readable:
+                    log_file.write(readable + "\n")
                     log_file.flush()
+                if on_json_event:
+                    on_json_event(data)
             else:
                 log_file.write(raw_line)
                 log_file.flush()
@@ -544,6 +577,14 @@ def run_session(
             config["epic"][index]["status"] = "failed"
             save_config(config)
             log(f"Session [{session_label}] marked as failed")
+            notify_attention(
+                AttentionEventType.IMPLEMENTATION_FAILED,
+                "Implementation",
+                f"{session_label} implementation failed",
+                "Review the session log, correct the issue, then run `tempa implement --reset-failed`.",
+                epic=session_label,
+                log_path=log_path,
+            )
             _state.stop_event.set()
         _state.running_thread = None
         _state.running_index = None

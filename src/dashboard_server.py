@@ -47,6 +47,7 @@ from dashboard_runs import (
     _stop_implement_run,
 )
 from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within, build_tree
+from tempa_notifications import DEFAULT_ENABLED_EVENTS, send_test_email
 
 if sys.platform == "win32":
     from dashboard_winui import _open_and_focus_folder, _pick_folder_dialog
@@ -307,6 +308,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": config.get("max_clarification_run"),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
                 "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
+                "notifications": {"email": tempa_config.get_email_notifications(config)},
                 "usage_limit_retry_wait_sec": tempa_config.get_usage_limit_retry_wait_sec(config),
                 "usage_limit_heartbeat_sec": tempa_config.get_usage_limit_heartbeat_sec(config),
                 "server_overloaded_retry_wait_sec": tempa_config.get_server_overloaded_retry_wait_sec(config),
@@ -365,6 +367,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_workspace_close()
         elif parsed.path == "/api/config/save":
             self._handle_config_save()
+        elif parsed.path == "/api/notifications/test-email":
+            self._handle_test_email()
         elif parsed.path == "/api/principles/save":
             self._handle_principles_save()
         elif parsed.path == "/api/update/run":
@@ -806,7 +810,43 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             })
             return
 
-        config = tempa_config.load_config()
+        current_config = tempa_config.load_config()
+        email_in = ((payload.get("notifications") or {}).get("email"))
+        if not isinstance(email_in, dict):
+            email_in = tempa_config.get_email_notifications(current_config)
+        try:
+            smtp_port = int(email_in.get("smtp_port", 587))
+            timeout_seconds = int(email_in.get("timeout_seconds", 10))
+        except (TypeError, ValueError):
+            self._send_json(400, {"ok": False, "error": "SMTP port and timeout must be whole numbers."})
+            return
+        security = str(email_in.get("security", "starttls"))
+        provider = str(email_in.get("provider", "custom"))
+        recipients_in, events_in = email_in.get("recipients", []), email_in.get("events", [])
+        if (security not in ("starttls", "ssl", "none") or provider not in ("gmail", "office365", "custom")
+                or not 1 <= smtp_port <= 65535 or timeout_seconds < 1):
+            self._send_json(400, {"ok": False, "error": "Invalid SMTP security, port, or timeout."})
+            return
+        if not isinstance(recipients_in, list) or not isinstance(events_in, list):
+            self._send_json(400, {"ok": False, "error": "Email recipients and events must be lists."})
+            return
+        recipients = [value.strip() for value in recipients_in if isinstance(value, str) and value.strip()]
+        email = {
+            "enabled": bool(email_in.get("enabled")), "provider": provider,
+            "smtp_host": str(email_in.get("smtp_host", "")).strip(),
+            "smtp_port": smtp_port, "security": security, "from": str(email_in.get("from", "")).strip(),
+            "smtp_username": str(email_in.get("smtp_username", "")),
+            "smtp_password": str(email_in.get("smtp_password", "")),
+            "recipients": recipients, "username_env": str(email_in.get("username_env", "TEMPA_SMTP_USERNAME")).strip() or "TEMPA_SMTP_USERNAME",
+            "password_env": str(email_in.get("password_env", "TEMPA_SMTP_PASSWORD")).strip() or "TEMPA_SMTP_PASSWORD",
+            "timeout_seconds": timeout_seconds,
+            "events": [value for value in events_in if value in DEFAULT_ENABLED_EVENTS],
+        }
+        if email["enabled"] and (not email["smtp_host"] or not email["from"] or not recipients):
+            self._send_json(400, {"ok": False, "error": "Enabled email needs SMTP host, sender, and at least one recipient."})
+            return
+
+        config = current_config
         previous_max_clarification_run = config.get("max_clarification_run")
         config["models"] = models
         config["backends"] = backends
@@ -816,6 +856,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["max_clarification_run"] = max_clarification_run
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
         config["implementation_start_requirement"] = implementation_start_requirement
+        config["notifications"] = {"email": email}
         config["usage_limit_retry_wait_sec"] = usage_limit_retry_wait_sec
         config["usage_limit_heartbeat_sec"] = usage_limit_heartbeat_sec
         config["server_overloaded_retry_wait_sec"] = server_overloaded_retry_wait_sec
@@ -840,6 +881,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": max_clarification_run,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
                 "implementation_start_requirement": implementation_start_requirement,
+                "notifications": {"email": email},
                 "usage_limit_retry_wait_sec": usage_limit_retry_wait_sec,
                 "usage_limit_heartbeat_sec": usage_limit_heartbeat_sec,
                 "server_overloaded_retry_wait_sec": server_overloaded_retry_wait_sec,
@@ -847,6 +889,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "backends_status": _backend_status(),
             },
         })
+
+    def _handle_test_email(self) -> None:
+        ok, message = send_test_email()
+        self._send_json(200 if ok else 400, {"ok": ok, "message": message})
 
     def _handle_principles_save(self) -> None:
         """Save the Architecture Principles document. Blank content deletes the file, which

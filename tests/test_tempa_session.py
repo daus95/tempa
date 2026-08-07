@@ -9,6 +9,7 @@ anything — it only resolves an executable and (for file_ref backends) writes a
 
 from __future__ import annotations
 
+import json
 from unittest.mock import Mock
 
 import pytest
@@ -85,6 +86,36 @@ def test_is_auth_error_text_matches_every_marker_for_its_own_backend(backend):
 
 def test_is_auth_error_text_unrelated_text_false():
     assert ts._is_auth_error_text("some generic error occurred", tb.CLAUDE) is False
+
+
+def test_failure_marker_text_ignores_unauthorized_in_successful_codex_command_output():
+    # Regression for process_20260807_111444.txt: Codex successfully printed an OpenAPI
+    # document, but Tempa scanned the complete item.completed JSON line and mistook this
+    # schema reference for a CLI credential failure.
+    pattern = '$ref: "#/components/responses/Unauthorized"'
+    data = {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "aggregated_output": pattern,
+            "exit_code": 0,
+            "status": "completed",
+        },
+    }
+    raw_line = json.dumps(data)
+
+    assert data["item"]["aggregated_output"] == pattern
+    assert "Unauthorized" in raw_line
+    assert ts._failure_marker_text(raw_line, data) == ""
+    assert ts._is_auth_error_text(ts._failure_marker_text(raw_line, data), tb.CODEX) is False
+
+
+def test_failure_marker_text_keeps_unauthorized_in_codex_failure_event():
+    data = {"type": "turn.failed", "error": {"message": "Unauthorized"}}
+    raw_line = json.dumps(data)
+
+    assert ts._failure_marker_text(raw_line, data) == raw_line
+    assert ts._is_auth_error_text(ts._failure_marker_text(raw_line, data), tb.CODEX) is True
 
 
 def test_is_overloaded_text_empty_string_false():
@@ -245,6 +276,13 @@ def test_handle_usage_limit_no_match_returns_false_without_side_effects():
     assert handled is False
     assert ts._state.usage_limit_hit is False
     process.terminate.assert_not_called()
+
+
+def test_usage_limit_recovery_never_sends_an_attention_notification(monkeypatch):
+    notifier = Mock()
+    monkeypatch.setattr(ts, "notify_attention", notifier)
+    assert ts._handle_usage_limit("usage limit reached", Mock(), "label", tb.CLAUDE) is True
+    notifier.assert_not_called()
 
 
 def test_handle_auth_error_sets_friendly_message():

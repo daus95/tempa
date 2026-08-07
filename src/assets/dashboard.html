@@ -419,6 +419,33 @@
           </div>
         </div>
         <div class="settings-group">
+          <h3>Email alerts</h3>
+          <p class="settings-field-desc">Email is sent only when Tempa needs a human. Automatic resume and recovery paths never send alerts.</p>
+          <div class="settings-field">
+            <label class="settings-switch-row" for="settingsEmailEnabled"><span class="settings-switch"><input type="checkbox" id="settingsEmailEnabled"><span class="settings-switch-track"><span class="settings-switch-thumb"></span></span></span><span>Enable email alerts</span></label>
+          </div>
+          <div class="settings-field">
+            <label for="settingsEmailProvider">Email provider</label>
+            <select id="settingsEmailProvider"><option value="gmail">Gmail</option><option value="office365">Microsoft 365 / Office 365</option><option value="custom">Custom SMTP</option></select>
+            <p class="settings-field-desc" id="settingsEmailProviderGuidance"></p>
+          </div>
+          <div class="settings-field"><label for="settingsEmailHost">SMTP host</label><input id="settingsEmailHost" type="text" placeholder="smtp.example.com" autocomplete="off"></div>
+          <div class="settings-field"><label for="settingsEmailPort">SMTP port</label><input id="settingsEmailPort" type="number" min="1" max="65535"></div>
+          <div class="settings-field"><label for="settingsEmailSecurity">SMTP security</label><select id="settingsEmailSecurity"><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None</option></select></div>
+          <div class="settings-field"><label for="settingsEmailUsername">SMTP username</label><input id="settingsEmailUsername" type="text" placeholder="you@example.com" autocomplete="username"></div>
+          <div class="settings-field"><label for="settingsEmailPassword">SMTP password or app password</label><input id="settingsEmailPassword" type="password" placeholder="Enter password" autocomplete="current-password"><p class="settings-field-desc">Stored locally in this workspace’s <code>.tempa/config.json</code>; do not commit or share that file.</p></div>
+          <div class="settings-field"><label for="settingsEmailFrom">From</label><input id="settingsEmailFrom" type="email" placeholder="tempa@example.com" autocomplete="email"></div>
+          <div class="settings-field"><label for="settingsEmailRecipients">Recipients</label><input id="settingsEmailRecipients" type="text" placeholder="owner@example.com, team@example.com"><p class="settings-field-desc">Comma-separated email addresses.</p></div>
+          <div class="settings-field">
+            <label>Alert events</label>
+            <p class="settings-field-desc">Choose exactly which situations should email you.</p>
+            <div class="settings-event-actions"><button type="button" class="clarify-run-btn secondary" id="settingsEmailSelectAllBtn">Select all</button><button type="button" class="clarify-run-btn secondary" id="settingsEmailClearAllBtn">Clear all</button></div>
+            <div class="settings-checkbox-group" id="settingsEmailEventList"></div>
+          </div>
+          <button type="button" class="clarify-run-btn secondary" id="settingsTestEmailBtn">Send Test Email</button>
+          <span class="settings-save-status" id="settingsTestEmailStatus"></span>
+        </div>
+        <div class="settings-group">
           <h3>Retries &amp; Timing</h3>
           <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work. These changes take effect on any already-running session or agent runner — no restart needed.</p>
           <div class="settings-field">

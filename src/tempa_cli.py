@@ -66,6 +66,7 @@ from tempa_maintenance import (
     run_implement_clear,
     run_plan_clear,
 )
+from tempa_notifications import send_test_email
 
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages
 if hasattr(sys.stdout, "reconfigure"):
@@ -112,6 +113,7 @@ USAGE
   tempa show-principles      Show the architecture principles applied to every stage's prompt
                                   (optional; set them in the dashboard's Architecture Principles page)
   tempa test                 Permission test (verifies the implement stage's backend CLI runs)
+  tempa notifications test   Send a test email using the configured SMTP settings
   tempa --help               Show this help
 
   -- Create Spec & Clarification --
@@ -281,6 +283,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("show-efforts", parents=[common], add_help=False)
     sub.add_parser("show-principles", parents=[common], add_help=False)
     sub.add_parser("test", parents=[common], add_help=False)
+    p = sub.add_parser("notifications", parents=[common], add_help=False)
+    p.add_argument("action", choices=("test",))
     sub.add_parser("status", parents=[common], add_help=False)
     sub.add_parser("version", parents=[common], add_help=False)
     sub.add_parser("check-update", parents=[common], add_help=False)
@@ -403,6 +407,11 @@ def run() -> None:
         print_principles()
     elif cli_args.command == "test":
         run_test()
+    elif cli_args.command == "notifications":
+        ok, message = send_test_email()
+        print(message)
+        if not ok:
+            sys.exit(1)
     elif cli_args.command == "version":
         print_version()
     elif cli_args.command == "check-update":

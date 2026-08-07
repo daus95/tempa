@@ -30,6 +30,7 @@ from tempa_config import (
 )
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
+from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
     build_apply_clarification_prompt,
     build_auto_answer_prompt,
@@ -107,6 +108,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     the markdown. `skip_minor` instructs the evaluation pass to skip minor findings
     entirely (config.json's "skip_minor_findings" / CLI --skip-minor)."""
     _init_process_log()
+    flush_pending_notifications()
 
     config = load_config()
     sources = get_sources(config)
@@ -172,6 +174,15 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
         print("  2. Apply the answers to the PRD/spec:                      tempa clarify --apply", flush=True)
         print("  Then repeat tempa clarify to verify.", flush=True)
 
+    if critical or major:
+        notify_attention(
+            AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED,
+            "Clarification", "Clarification answers are required",
+            "Review and answer the reported critical/major findings, then apply the answers.",
+            log_path=report_files[0] if report_files else None,
+            details={"critical": critical, "major": major},
+        )
+
     if not noui and report_files:
         saved = run_dashboard(_resolve_prd_dir(config), clar_dir, initial_view="clarification")
         if saved:
@@ -185,6 +196,7 @@ def run_clarify_answer() -> None:
     (one pass). Does not re-evaluate / look for new findings. If every finding already has
     an answer, report that there is nothing left to answer."""
     _init_process_log()
+    flush_pending_notifications()
 
     config = load_config()
     sources = get_sources(config)
@@ -352,6 +364,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     """`skip_minor` instructs every evaluate pass in the loop to skip minor findings
     entirely (config.json's "skip_minor_findings" / CLI --skip-minor)."""
     _init_process_log()
+    flush_pending_notifications()
 
     config = load_config()
     sources = get_sources(config)
@@ -374,6 +387,11 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | max_runs={max_run}")
 
     if not _resolve_clarification_backlog(config, clar_dir):
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            "Clarification backlog apply failed",
+            "Review the apply session log and resolve the failure before continuing.",
+        )
         sys.exit(1)
 
     # Reset the finalize-only round counter to 0 for every fresh `clarify --finalize`
@@ -408,6 +426,11 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             sys.exit(3)
         if not success:
             log(f"Clarification run #{run_number} failed — stopping the loop.")
+            notify_attention(
+                AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+                f"Clarification round {run_number} failed",
+                "Review the clarification session log and resolve the failure before continuing.",
+            )
             sys.exit(1)
 
         config = load_config()
@@ -451,6 +474,12 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
                 f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
                 "major finding(s) remain and likely need a human decision (see `tempa answer`).")
+            notify_attention(
+                AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
+                "Clarification needs human answers",
+                "Review and answer the remaining findings before continuing finalization.",
+                details={"critical": critical, "major": major},
+            )
             sys.exit(1)
 
         config = load_config()
@@ -466,11 +495,23 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
         if not _run_apply_step(config, resume_session_id=resume_sid):
             log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
+            notify_attention(
+                AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+                f"Clarification apply round {run_number} failed",
+                "Review the apply session log and resolve the failure before continuing.",
+                details={"round": run_number},
+            )
             sys.exit(1)
 
         log("Resolutions applied. Running re-evaluation...")
 
     log(f"Clarify (finalize) reached the {max_run}-run limit. Stopping.")
+    notify_attention(
+        AttentionEventType.CLARIFICATION_LIMIT_REACHED, "Clarification",
+        "Finalized clarification reached its run limit",
+        "Review the remaining findings and resolve them manually before running another finalization pass.",
+        details={"max_clarification_run": max_run},
+    )
     sys.exit(1)
 
 
@@ -577,6 +618,11 @@ def _ask_continue_clarification() -> bool:
     Returns False (skipping the prompt entirely) when stdin is not a TTY."""
     if not sys.stdin.isatty():
         return False
+    notify_attention(
+        AttentionEventType.CONFIRMATION_REQUIRED, "Clarification",
+        "Clarification is waiting for confirmation",
+        "Return to the terminal and answer whether to run another clarification round.",
+    )
     try:
         answer = input("Run another clarification round now? [y/N]: ").strip().lower()
     except EOFError:

@@ -8,7 +8,23 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Optional email alerts for human-attention states.** Configure Gmail, Microsoft 365, or
+  custom SMTP in Dashboard Settings, with credentials saved locally in the workspace or
+  supplied through environment variables. Select which events should notify you and verify
+  delivery from the dashboard or with `tempa notifications test`. Alerts cover authentication
+  failures, permanent workflow failures, safety limits, unanswered critical/major clarification
+  findings, verification failures, and confirmation waits, while automatic recovery paths stay
+  silent. Events are deduplicated in a durable per-workspace outbox and failed deliveries are
+  retried by a later Tempa run.
+
 ### Fixed
+
+- Codex CLI sessions no longer report a false authentication failure when successful
+  command output contains authentication-related application text such as an OpenAPI
+  `#/components/responses/Unauthorized` reference. Failure markers are now evaluated only
+  for plain diagnostic output and structured backend failure events.
 
 - **A finding resolved during `clarify --finalize` stayed permanently "Unanswered" in the
   dashboard, even after finalize succeeded.** When apply had no recorded "Your answer" for a

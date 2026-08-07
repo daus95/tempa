@@ -217,6 +217,14 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),
   settingsImplementRequirementWarning = $("settingsImplementRequirementWarning"),
+  settingsEmailEnabled = $("settingsEmailEnabled"), settingsEmailHost = $("settingsEmailHost"),
+  settingsEmailPort = $("settingsEmailPort"), settingsEmailSecurity = $("settingsEmailSecurity"),
+  settingsEmailProvider = $("settingsEmailProvider"), settingsEmailProviderGuidance = $("settingsEmailProviderGuidance"),
+  settingsEmailUsername = $("settingsEmailUsername"), settingsEmailPassword = $("settingsEmailPassword"),
+  settingsEmailFrom = $("settingsEmailFrom"), settingsEmailRecipients = $("settingsEmailRecipients"),
+  settingsEmailEventList = $("settingsEmailEventList"), settingsEmailSelectAllBtn = $("settingsEmailSelectAllBtn"),
+  settingsEmailClearAllBtn = $("settingsEmailClearAllBtn"), settingsTestEmailBtn = $("settingsTestEmailBtn"),
+  settingsTestEmailStatus = $("settingsTestEmailStatus"),
   settingsUsageLimitRetryWaitMin = $("settingsUsageLimitRetryWaitMin"),
   settingsUsageLimitHeartbeatMin = $("settingsUsageLimitHeartbeatMin"),
   settingsServerOverloadRetryWaitMin = $("settingsServerOverloadRetryWaitMin"),
@@ -1594,6 +1602,69 @@ const CODEX_MODEL_REASONING_LEVELS = {
 };
 const CODEX_DEFAULT_EFFORT_LEVELS = [...CODEX_UNIVERSAL_LEVELS, "low", "medium", "high", "xhigh"];
 
+const SMTP_PROVIDER_PRESETS = {
+  gmail: {
+    host: "smtp.gmail.com", port: 587, security: "starttls",
+    guidance: "Use your Gmail address as the username. Enable 2-Step Verification, then <a href=\"https://myaccount.google.com/apppasswords\" target=\"_blank\" rel=\"noopener\">open Google App Passwords</a>, enter <strong>Tempa</strong> as the app name, and copy the generated 16-character password here. Your normal Google password will not work.",
+  },
+  office365: {
+    host: "smtp.office365.com", port: 587, security: "starttls",
+    guidance: "Use your Microsoft 365 email address as the username. <a href=\"https://mysignins.microsoft.com/security-info\" target=\"_blank\" rel=\"noopener\">Open Microsoft Security info</a>, choose <strong>Add method</strong> → <strong>App password</strong>, name it <strong>Tempa</strong>, then copy the generated password here. If App password is unavailable, ask your Microsoft 365 administrator to enable it and Authenticated SMTP for the mailbox.",
+  },
+  custom: {
+    guidance: "Enter the SMTP host, port, security method, username, and password supplied by your email provider.",
+  },
+};
+
+function updateSmtpProvider(applyPreset) {
+  const preset = SMTP_PROVIDER_PRESETS[settingsEmailProvider.value] || SMTP_PROVIDER_PRESETS.custom;
+  settingsEmailProviderGuidance.innerHTML = preset.guidance;
+  if (applyPreset && preset.host) {
+    settingsEmailHost.value = preset.host;
+    settingsEmailPort.value = preset.port;
+    settingsEmailSecurity.value = preset.security;
+  }
+}
+
+const EMAIL_ALERT_EVENTS = [
+  ["authentication_required", "Authentication required", "The configured AI CLI login or API key must be renewed."],
+  ["implementation_failed", "Implementation failed", "An epic stopped on a non-retryable implementation failure."],
+  ["plan_failed", "Planning failed", "Tempa could not generate or review the implementation plan."],
+  ["session_limit_reached", "Implementation run limit reached", "An epic reached the configured anti-loop session limit."],
+  ["qa_limit_reached", "QA run limit reached", "QA reached its configured limit and was skipped; review is required."],
+  ["clarification_answers_required", "Clarification answers required", "Critical or major specification findings need a human decision."],
+  ["clarification_limit_reached", "Clarification run limit reached", "Finalized clarification stopped with unresolved findings."],
+  ["clarification_failed", "Clarification failed", "A non-retryable evaluation or apply pass stopped."],
+  ["confirmation_required", "Confirmation required", "The terminal is waiting for your choice to run another clarification round."],
+  ["verification_failed", "Verification failed", "An epic verification failed or did not produce its report."],
+  ["backend_test_failed", "Backend test failed", "The configured AI CLI permission test did not complete."],
+];
+
+function renderEmailEventChoices(selectedEvents) {
+  const selected = new Set(selectedEvents || []);
+  settingsEmailEventList.innerHTML = "";
+  for (const [value, name, description] of EMAIL_ALERT_EVENTS) {
+    const row = document.createElement("label");
+    row.className = "settings-checkbox-row";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "settingsEmailEvent";
+    input.value = value;
+    input.checked = selected.has(value);
+    row.title = description;
+    input.title = description;
+    const copy = document.createElement("span");
+    copy.className = "settings-checkbox-name";
+    copy.textContent = name;
+    row.append(input, copy);
+    settingsEmailEventList.appendChild(row);
+  }
+}
+
+function selectedEmailEvents() {
+  return [...settingsEmailEventList.querySelectorAll('input[name="settingsEmailEvent"]:checked')].map(input => input.value);
+}
+
 function getReasoningEffortChoices(backendName, model) {
   if (backendName === "codex") {
     return CODEX_MODEL_REASONING_LEVELS[(model || "").trim().toLowerCase()] || CODEX_DEFAULT_EFFORT_LEVELS;
@@ -1721,6 +1792,18 @@ function fillSettingsForm(config) {
   for (const input of settingsImplementRequirementInputs) input.checked = input.value === requirement;
   updateImplementRequirementWarning(requirement);
   lastImplementRequirement = requirement;
+  const email = (config.notifications || {}).email || {};
+  settingsEmailEnabled.checked = !!email.enabled;
+  settingsEmailProvider.value = email.provider || "custom";
+  settingsEmailHost.value = email.smtp_host || "";
+  settingsEmailPort.value = email.smtp_port || 587;
+  settingsEmailSecurity.value = email.security || "starttls";
+  settingsEmailUsername.value = email.smtp_username || "";
+  settingsEmailPassword.value = email.smtp_password || "";
+  settingsEmailFrom.value = email.from || "";
+  settingsEmailRecipients.value = (email.recipients || []).join(", ");
+  renderEmailEventChoices(email.events || []);
+  updateSmtpProvider(false);
   settingsUsageLimitRetryWaitMin.value = Math.round((config.usage_limit_retry_wait_sec ?? 1800) / 60);
   settingsUsageLimitHeartbeatMin.value = Math.round((config.usage_limit_heartbeat_sec ?? 300) / 60);
   settingsServerOverloadRetryWaitMin.value = Math.round((config.server_overloaded_retry_wait_sec ?? 300) / 60);
@@ -1856,6 +1939,15 @@ settingsSaveBtn.addEventListener("click", async () => {
         max_clarification_run: settingsMaxClarificationRun.value,
         allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
         implementation_start_requirement: selectedImplementRequirement(),
+        notifications: { email: {
+          enabled: settingsEmailEnabled.checked, provider: settingsEmailProvider.value,
+          smtp_host: settingsEmailHost.value,
+          smtp_port: settingsEmailPort.value, security: settingsEmailSecurity.value,
+          smtp_username: settingsEmailUsername.value, smtp_password: settingsEmailPassword.value,
+          from: settingsEmailFrom.value,
+          recipients: settingsEmailRecipients.value.split(",").map(v => v.trim()).filter(Boolean),
+          events: selectedEmailEvents(),
+        } },
         usage_limit_retry_wait_sec: Number(settingsUsageLimitRetryWaitMin.value) * 60,
         usage_limit_heartbeat_sec: Number(settingsUsageLimitHeartbeatMin.value) * 60,
         server_overloaded_retry_wait_sec: Number(settingsServerOverloadRetryWaitMin.value) * 60,
@@ -1885,6 +1977,27 @@ settingsSaveBtn.addEventListener("click", async () => {
     settingsSaveBtn.disabled = false;
   }
 });
+
+settingsTestEmailBtn.addEventListener("click", async () => {
+  settingsTestEmailBtn.disabled = true;
+  settingsTestEmailStatus.textContent = "Sending…";
+  settingsTestEmailStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/notifications/test-email", { method: "POST" });
+    const data = await res.json();
+    settingsTestEmailStatus.textContent = data.message || (data.ok ? "Test email sent." : "Test email failed.");
+    settingsTestEmailStatus.classList.toggle("err", !data.ok);
+  } catch (e) {
+    settingsTestEmailStatus.textContent = "Network error sending test email.";
+    settingsTestEmailStatus.classList.add("err");
+  } finally {
+    settingsTestEmailBtn.disabled = false;
+  }
+});
+
+settingsEmailProvider.addEventListener("change", () => updateSmtpProvider(true));
+settingsEmailSelectAllBtn.addEventListener("click", () => renderEmailEventChoices(EMAIL_ALERT_EVENTS.map(([value]) => value)));
+settingsEmailClearAllBtn.addEventListener("click", () => renderEmailEventChoices([]));
 
 // Explain the meaning and consequences before letting the user actually turn this on —
 // reverts the switch if they back out. The warning banner stays visible below the field
