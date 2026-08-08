@@ -25,6 +25,7 @@ def reset_runner_state():
     _state.usage_limit_hit = False
     _state.auth_error_hit = False
     _state.server_overloaded_hit = False
+    _state.backend_stuck_after_done_hit = False
     _state.running_thread = None
     _state.running_index = None
 
@@ -120,6 +121,30 @@ def test_main_plain_session_failure_keeps_failed_status(isolate_tempa_paths, mon
     assert exc.value.code == 1
     assert seen["waits"] == []
     assert tempa_config.load_config()["epic"][0]["status"] == "failed"
+
+
+def test_main_resumes_automatically_after_backend_stuck_after_done_hit(isolate_tempa_paths, monkeypatch):
+    # Mirrors the overload wait-then-retry test above: not a real failure, so main() clears
+    # the flag and keeps polling instead of stopping the runner.
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+    seen = {"polls": 0}
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        seen["polls"] += 1
+        if seen["polls"] == 1:
+            _state.backend_stuck_after_done_hit = True
+        else:
+            _state.all_done = True
+        _state.stop_event.set()
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert exc.value.code == 0
+    assert seen["polls"] == 2  # the retry actually got to poll again
+    assert _state.backend_stuck_after_done_hit is False
 
 
 # ---------------------------------------------------------------------------

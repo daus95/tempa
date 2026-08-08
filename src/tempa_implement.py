@@ -473,6 +473,19 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             wait_out_server_overload("Implementation", overload_retries)
             _reset_failed_before_retry("Implementation")
             continue
+        if _state.backend_stuck_after_done_hit:
+            # Not a real failure either: the backend CLI had already reached "[Done]" — its
+            # own signal that the turn (and whatever config.json updates it makes) is
+            # complete — before the process itself got stuck purely in unrelated cleanup and
+            # had to be force-terminated (see the more specific message already logged by
+            # _terminate_if_stuck_after_done, which names what it was doing). The epic/QA
+            # state on disk is exactly what that session left it as, so resuming immediately
+            # continues normally rather than starting over.
+            log("Agent runner: resuming automatically after force-terminating a backend "
+                "process stuck in its own post-turn cleanup (see the message above).")
+            _state.backend_stuck_after_done_hit = False
+            _state.stop_event.clear()
+            continue
         if _state.all_done:
             log("All epics done. Agent runner stopped successfully.")
             sys.exit(0)

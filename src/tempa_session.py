@@ -352,6 +352,50 @@ def _read_process_stdout(process: subprocess.Popen, drain_grace_sec: float = _ST
         yield raw_line
 
 
+# How long to let a backend CLI take to actually exit after it has already signaled its
+# turn is complete (a "[Done] ..." readable line, per each backend's parse_line) before
+# assuming it's stuck and force-terminating it. Seen live: codex tried, as its very last
+# action, to stop a background test process it had spawned; that cleanup command was
+# rejected by its own sandbox policy, and the process itself never exited afterward — an
+# otherwise fully finished QA session (report written, config.json already updated) sat
+# "Running..." in the dashboard for 17+ minutes with nothing left to actually wait for.
+_POST_DONE_EXIT_GRACE_SEC = 120.0
+
+
+def _terminate_if_stuck_after_done(
+    process: subprocess.Popen,
+    done_event: threading.Event,
+    label: str,
+    grace_sec: float = _POST_DONE_EXIT_GRACE_SEC,
+    poll_interval: float = 0.5,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> None:
+    """Background watchdog (run as a daemon thread alongside `_stream_backend_process`'s own
+    read loop): once the backend has signaled its turn is complete (`done_event` set), give
+    it `grace_sec` to exit the process on its own — a CLI can reasonably take a few seconds
+    to flush/clean up — and force-terminate it if it hasn't, instead of leaving Tempa (and
+    the dashboard) waiting on a process that may never exit by itself. Returns without doing
+    anything if the process exits on its own at any point, whether or not it ever signaled
+    `[Done]` first — there's nothing to fix in that case."""
+    while process.poll() is None and not done_event.is_set():
+        sleep_fn(poll_interval)
+    if process.poll() is not None:
+        return
+    sleep_fn(grace_sec)
+    if process.poll() is not None:
+        return
+    log(
+        f"[{label}] finished its turn {grace_sec:.0f}s ago but the backend CLI process itself "
+        "never exited — likely stuck in its own post-turn cleanup (e.g. trying to stop "
+        "something it spawned). Its actual output up to that point is unaffected; "
+        "force-terminating the process instead of waiting on it indefinitely."
+    )
+    _state.backend_stuck_after_done_hit = True
+    _state.stop_event.set()
+    with contextlib.suppress(Exception):
+        process.terminate()
+
+
 def _stream_backend_process(
     backend: Backend,
     cmd: list[str],
@@ -383,6 +427,11 @@ def _stream_backend_process(
             process.stdin.write(stdin_text)
         process.stdin.close()
 
+        done_event = threading.Event()
+        threading.Thread(
+            target=_terminate_if_stuck_after_done, args=(process, done_event, label), daemon=True,
+        ).start()
+
         for raw_line in _read_process_stdout(process):
             row_count[0] += 1
             line = raw_line.strip()
@@ -409,6 +458,8 @@ def _stream_backend_process(
                 if readable:
                     log_file.write(readable + "\n")
                     log_file.flush()
+                    if readable.startswith("[Done]"):
+                        done_event.set()
                 if on_json_event:
                     on_json_event(data)
             else:
@@ -691,14 +742,19 @@ def run_session(
     )
 
     with _state.lock:
-        # A usage-limit, auth-error, or server-overload stop is not a real epic failure:
-        # leave status untouched so the epic can be resumed once the limit resets / auth is
-        # fixed / the backend's API recovers.
+        # A usage-limit, auth-error, server-overload, or stuck-after-done stop is not a real
+        # epic failure: leave status untouched so the epic can be resumed once the limit
+        # resets / auth is fixed / the backend's API recovers / next time around. The
+        # stuck-after-done case in particular already did its real work (it had reached
+        # "[Done]" — its own signal that the turn, and whatever config.json updates it makes,
+        # is complete) before getting stuck purely in unrelated process cleanup; the forced
+        # termination's non-zero exit code doesn't mean the task itself failed.
         if (
             exit_code != 0
             and not _state.usage_limit_hit
             and not _state.auth_error_hit
             and not _state.server_overloaded_hit
+            and not _state.backend_stuck_after_done_hit
         ):
             # Only mark failed — "done"/"pending" is set by the AI session itself
             config = load_config()

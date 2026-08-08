@@ -31,12 +31,14 @@ def reset_runner_state():
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
     ts._state.server_overloaded_hit = False
+    ts._state.backend_stuck_after_done_hit = False
     ts._state.stop_event.clear()
     yield
     ts._state.usage_limit_hit = False
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
     ts._state.server_overloaded_hit = False
+    ts._state.backend_stuck_after_done_hit = False
     ts._state.stop_event.clear()
 
 
@@ -723,3 +725,89 @@ def test_reason_with_counterpart_context_unchanged_when_no_target_named():
     epics = _epics(("EPIC-16", "failed"))
     result = ts._reason_with_counterpart_context("some reason", epics, None)
     assert result == "some reason"
+
+
+# ---------------------------------------------------------------------------
+# _terminate_if_stuck_after_done
+# ---------------------------------------------------------------------------
+
+class _FakePollingProcess:
+    """Stand-in for subprocess.Popen whose poll() returns None (still running) until
+    `exit_after_calls` calls have been made, then returns a fixed exit code -- lets a test
+    control exactly when the "process" appears to exit relative to done_event/sleep calls."""
+
+    def __init__(self, exit_after_calls=None):
+        self._calls = 0
+        self._exit_after_calls = exit_after_calls
+        self.terminated = False
+
+    def poll(self):
+        self._calls += 1
+        if self._exit_after_calls is not None and self._calls >= self._exit_after_calls:
+            return 0
+        return None
+
+    def terminate(self):
+        self.terminated = True
+
+
+def test_terminate_if_stuck_after_done_terminates_when_process_never_exits():
+    process = _FakePollingProcess(exit_after_calls=None)  # never exits on its own
+    done_event = threading.Event()
+    done_event.set()
+    sleeps = []
+
+    ts._terminate_if_stuck_after_done(
+        process, done_event, "Session [e1]", grace_sec=42, sleep_fn=sleeps.append,
+    )
+
+    assert process.terminated is True
+    assert ts._state.backend_stuck_after_done_hit is True
+    assert ts._state.stop_event.is_set()
+    assert 42 in sleeps
+
+
+def test_terminate_if_stuck_after_done_does_nothing_if_process_already_exited():
+    process = _FakePollingProcess(exit_after_calls=1)  # already exited by the first poll
+    done_event = threading.Event()
+    done_event.set()
+
+    ts._terminate_if_stuck_after_done(process, done_event, "Session [e1]", sleep_fn=lambda s: None)
+
+    assert process.terminated is False
+    assert ts._state.backend_stuck_after_done_hit is False
+    assert not ts._state.stop_event.is_set()
+
+
+def test_terminate_if_stuck_after_done_does_nothing_if_process_exits_during_grace_period():
+    # Exits by the time the post-grace-period check happens (2nd poll call), even though it
+    # hadn't exited yet at the pre-grace check (1st poll call).
+    process = _FakePollingProcess(exit_after_calls=2)
+    done_event = threading.Event()
+    done_event.set()
+
+    ts._terminate_if_stuck_after_done(process, done_event, "Session [e1]", sleep_fn=lambda s: None)
+
+    assert process.terminated is False
+    assert ts._state.backend_stuck_after_done_hit is False
+
+
+def test_terminate_if_stuck_after_done_waits_for_done_event_before_grace_period():
+    # The process is still running and done_event isn't set yet -- the watchdog must keep
+    # polling (not immediately terminate) until either happens.
+    process = _FakePollingProcess(exit_after_calls=None)
+    done_event = threading.Event()
+    poll_sleeps = []
+
+    def fake_sleep(seconds):
+        poll_sleeps.append(seconds)
+        if len(poll_sleeps) >= 3:
+            done_event.set()  # let the wait-for-done loop finish after a few polls
+
+    ts._terminate_if_stuck_after_done(
+        process, done_event, "Session [e1]", grace_sec=5, poll_interval=0.1, sleep_fn=fake_sleep,
+    )
+
+    assert process.terminated is True
+    assert 0.1 in poll_sleeps  # the wait-for-done polling actually happened
+    assert 5 in poll_sleeps  # then the grace-period sleep
