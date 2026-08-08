@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-09
+
 ### Added
 
 - **Session/QA log filenames in the Log tab are now clickable.** Every "log: `<filename>`"
