@@ -10,6 +10,18 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **A session could sit "Running..." forever even after the backend CLI had fully finished its
+  work**, this time because the CLI process itself never exited — not a pipe/handle issue like
+  the v0.5.2/v0.5.3 hangs. Seen live: a QA session completed (report written, config.json
+  already updated) and then, as its very last action, tried to stop a background test process
+  it had spawned; that cleanup command was rejected by the CLI's own sandbox policy, and the
+  process itself never returned, leaving an otherwise fully finished session stuck for 17+
+  minutes. Tempa now runs a watchdog once a backend signals its turn is complete: if the
+  process hasn't exited 2 minutes later, it's force-terminated instead of waited on
+  indefinitely. This isn't treated as a real failure — the epic/QA state already reflects
+  everything that session actually did — so `tempa implement` logs specifically what happened
+  and resumes automatically, the same way it already does for a transient backend overload.
+
 - **The cross-epic no-forward-progress guard and automatic reorder added in v0.5.4/v0.5.5 had
   no documentation of its own** — only CHANGELOG entries and a passing mention in the Recovery
   section. `docs/start-implementation.md` gains a "Cross-Epic Dependencies (No-Forward-Progress
