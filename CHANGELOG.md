@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-08
+
 ### Fixed
 
 - A session could get stuck reporting "Running..." forever with a frozen row count, even
