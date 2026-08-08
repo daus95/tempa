@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dashboard_clarify_parse import _clarify_files_overview
 from dashboard_config import _load_clarify_applied_hashes, _load_dashboard_config
+from tempa_session import _read_process_stdout
 
 
 def _epic_sessions() -> list:
@@ -175,7 +176,7 @@ def _start_clarify_run(server, mode: str) -> bool:
             # here), so one PID is all Stop ever needs to kill.
             with run["lock"]:
                 run["process"] = process
-            for raw_line in process.stdout:
+            for raw_line in _read_process_stdout(process):
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -334,7 +335,7 @@ def _start_implement_run(server) -> bool:
             # processes is live at the time (see _stop_implement_run).
             with run["lock"]:
                 run["process"] = process
-            for raw_line in process.stdout:
+            for raw_line in _read_process_stdout(process):
                 line = raw_line.strip()
                 if not line:
                     continue
