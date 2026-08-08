@@ -575,6 +575,16 @@ on that stale status even though nothing was actually broken. A **real** failure
 the runner and still keeps its `failed` status, so it stays visible for you to look at; in
 that case fix the cause and run `tempa implement --reset-failed` yourself before continuing.
 
+**A plan that schedules an epic before something it actually depends on doesn't get stuck
+either.** If an epic keeps resuming without completing another feature, Tempa asks the
+backend CLI which specific epic it's blocked on and, when it's safe to (the named epic
+exists, isn't already done, and reordering it wouldn't just reverse an earlier move), moves
+that dependency ahead of the stuck epic in the plan automatically — so the scheduler works on
+the real blocker next instead of endlessly re-resuming an epic that can't proceed. When it
+can't fix this on its own (most notably a genuine circular dependency between two epics), the
+epic is marked `failed` with the session's own explanation shown right on the dashboard's
+Status tab and in `tempa status`, for a human to resolve.
+
 Full details (the `--replan`/`--features` flags, work priority, monitoring progress,
 recovering from problems, manual verification): see
 [docs/start-implementation.md](docs/start-implementation.md).

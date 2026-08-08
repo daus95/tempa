@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The cross-epic no-forward-progress guard and automatic reorder added in v0.5.4/v0.5.5 had
+  no documentation of its own** — only CHANGELOG entries and a passing mention in the Recovery
+  section. `docs/start-implementation.md` gains a "Cross-Epic Dependencies (No-Forward-Progress
+  Guard)" section explaining stall detection, the `blocked_by_epic` reporting convention, the
+  automatic reorder and the safety conditions that refuse it (unknown epic, already done,
+  self-reference, circular reversal), and how the circular case is deliberately left for a
+  human decision instead of an automatic restructuring attempt. README's implementation step
+  gets a short summary pointing there.
+
 ## [0.5.5] - 2026-08-09
 
 ### Fixed
