@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Session/QA log filenames in the Log tab are now clickable.** Every "log: `<filename>`"
+  reference the Clarify/Implement Log tabs already print (from each session's own startup
+  banner line) renders as a link; clicking it opens the file's content in a modal — large by
+  default and toggleable to fullscreen, since a session log can run past 400KB — instead of
+  needing to go find the file on disk. Served by a new `GET /api/log-file?name=<filename>`
+  endpoint, confined to `.tempa/logs/` (the same path-traversal guard already used for spec/
+  clarification files) and capped at 5MB (keeping the tail, the most recently written and
+  most diagnostically relevant part) for the rare pathologically large file.
+
 ### Fixed
 
 - **A session could sit "Running..." forever even after the backend CLI had fully finished its

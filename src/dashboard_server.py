@@ -59,6 +59,13 @@ else:
     _pick_folder_dialog = _open_and_focus_folder = None
 
 
+# A session/QA log can legitimately be large (some real ones run past 400KB), but there's
+# no reason to ever ship more than this much text into the browser for one modal view — cap
+# it and keep the tail (the most recently written, most diagnostically relevant part),
+# matching the same tail-first philosophy as tempa_logging._print_log_tail.
+LOG_FILE_MAX_CHARS = 5_000_000
+
+
 def _backend_status() -> dict:
     """Per-CLI-backend readiness (installed + workspace-writable) for whichever workspace
     is currently active. Shared by /api/tree and /api/config so the writability probe
@@ -184,6 +191,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "content": tempa_config.read_principles()})
         elif route == "/api/update/status":
             self._handle_update_status()
+        elif route == "/api/log-file":
+            self._handle_log_file(parse_qs(parsed.query))
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -248,6 +257,29 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             "ok": True, "path": rel, "name": target.name,
             "summary": summary, "html": _render_blocks_html(blocks),
             "answered": answered, "total": len(items),
+        })
+
+    def _handle_log_file(self, query: dict) -> None:
+        """Serve one session/QA/process log file's content by bare filename (no
+        subdirectories — these are all flat files directly under .tempa/logs/) for the Log
+        tab's "log: <filename>" links to open in a viewer modal. `_resolve_within` confines
+        this to get_logs_dir() the same way spec/clarify file reads are confined to their own
+        roots, so a crafted name can't read anything outside the logs folder."""
+        name = (query.get("name", [""])[0])
+        target = _resolve_within(tempa_config.get_logs_dir(), name)
+        if target is None or target.suffix.lower() != ".txt" or not target.is_file():
+            self._send_json(404, {"ok": False, "error": "Log file not found."})
+            return
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not read file: {e}"})
+            return
+        truncated = len(content) > LOG_FILE_MAX_CHARS
+        if truncated:
+            content = content[-LOG_FILE_MAX_CHARS:]
+        self._send_json(200, {
+            "ok": True, "name": target.name, "content": content, "truncated": truncated,
         })
 
     def _handle_clarify_run_status(self, query: dict) -> None:
