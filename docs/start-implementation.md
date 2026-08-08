@@ -104,6 +104,59 @@ config.json during the session; the harness only marks it `failed` when a sessio
 behind by an overload that *wasn't* recognized is reset back to `pending` before the
 automatic retry, see the 529 note above).
 
+## Cross-Epic Dependencies (No-Forward-Progress Guard)
+
+Epics are implemented in plan order — normally that's fine, since later epics build on
+earlier ones. But if the plan schedules an epic before something it actually depends on (a
+feature needs functionality only a *later* epic provides), the backend CLI correctly refuses
+to work around the architecture violation, explains why, and exits cleanly (code 0) every
+time it's resumed — which looks identical to genuine, if slow, progress unless something is
+watching for it.
+
+**Detecting a stall.** After every resumed session that exits 0, Tempa compares
+`completed_features` before and after. If `implement_no_progress_rounds` (default `2`,
+`config.json`) resumed sessions in a row complete zero additional features, the epic is
+treated as stalled rather than still working.
+
+**Reporting the blocker.** The implementation prompt asks the agent to record which specific
+epic it's blocked on, by setting `"blocked_by_epic"` on its own `config.json` entry — e.g.
+`"blocked_by_epic": "EPIC-17"` — whenever it determines a feature can't proceed without
+another, not-yet-implemented epic's work. It's only set when the agent is confident which
+epic owns the missing dependency.
+
+**Automatic recovery.** Once the stall limit is reached, Tempa tries to fix the plan's
+ordering itself: it moves the named epic to immediately before the stuck one, so the
+scheduler works on the real dependency next instead of endlessly re-resuming the epic that
+can't proceed. This is refused (falling through to the failure path below) when the move
+isn't safe:
+
+- the named epic doesn't exist in the plan,
+- it's already marked `done` (so it's probably not the real blocker anymore),
+- it's already scheduled before the stuck epic (the reorder already happened, but the block
+  persists regardless),
+- an epic names itself, or
+- it would reverse an earlier move in the opposite direction — a likely **circular
+  dependency** between the two epics, which reordering alone can never resolve.
+
+A successful reorder resets the epic back to `pending` (dropping out of the "resume any
+`on_progress` epic first" priority — see Epic Status Lifecycle above — so the promoted
+dependency actually goes next) and logs what happened; a new `implementation_auto_reordered`
+email alert event fires too (dashboard Settings → notifications), purely informational.
+
+This operates at the epic level only: the whole named epic gets fully implemented (every
+feature in it) before the stuck epic resumes, even if only one of its features was actually
+the dependency — Tempa doesn't interleave individual features across epics.
+
+**When it can't fix itself.** If the reorder is refused, the epic is marked `failed` instead,
+with the session's own explanation captured as `blocked_reason` — shown on the dashboard's
+Status tab and in `tempa status`, not just left in a log file. For the circular case
+specifically, `blocked_reason` folds in *both* epics' own last-reported explanations, since a
+human deciding how to resolve it needs both sides in one place. A genuine circular dependency
+between two epics is a plan design problem — no reordering scheme can satisfy "A before B"
+and "B before A" at the same time — so it's deliberately left for a human decision (adjust the
+epics/features in the plan) rather than an automatic restructuring attempt; see
+[Recovery](#recovery-if-something-goes-wrong) below once it's resolved.
+
 ## Monitor
 
 ```bash
@@ -122,14 +175,12 @@ tempa implement --reset-failed   # all failed epics → pending (run this after 
 tempa implement --reset-qa       # force re-QA for every done epic
 ```
 
-`--reset-failed` also covers an epic that hit `max_session_run` or the no-forward-progress guard
-(`implement_no_progress_rounds`, e.g. resumed several times in a row without completing another
-feature) — both mark the epic `failed` now instead of leaving it stuck in `on_progress` forever
+`--reset-failed` also covers an epic that hit `max_session_run` or the no-forward-progress
+guard (see [Cross-Epic Dependencies](#cross-epic-dependencies-no-forward-progress-guard)
+above) — both mark the epic `failed` now instead of leaving it stuck in `on_progress` forever
 with no self-service way out. It clears the epic's run/stall counters too (`total_run`,
 `qa_total_run`, `no_progress_rounds`), not just its status, so the reset is a genuine clean
-slate rather than one that immediately re-trips the same limit on the very next attempt. The
-epic's card in the dashboard's Status tab (and `tempa status`) shows `blocked_reason` when the
-no-forward-progress guard is what marked it failed, explaining why in the session's own words.
+slate rather than one that immediately re-trips the same limit on the very next attempt.
 
 ```bash
 tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)
