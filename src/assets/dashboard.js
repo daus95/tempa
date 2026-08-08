@@ -197,6 +197,9 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   modalTitle = $("modalTitle"), modalMessage = $("modalMessage"),
   modalInput = $("modalInput"), modalCancelBtn = $("modalCancelBtn"), modalOkBtn = $("modalOkBtn"),
   modalExtraBtn = $("modalExtraBtn"),
+  logFileModalOverlay = $("logFileModalOverlay"), logFileModalBox = $("logFileModalBox"),
+  logFileModalTitle = $("logFileModalTitle"), logFileModalBody = $("logFileModalBody"),
+  logFileModalFullscreenBtn = $("logFileModalFullscreenBtn"), logFileModalCloseBtn = $("logFileModalCloseBtn"),
   settingsModelClarify = $("settingsModelClarify"), settingsModelClarifyApply = $("settingsModelClarifyApply"),
   settingsModelPlan = $("settingsModelPlan"),
   settingsModelImplement = $("settingsModelImplement"),
@@ -353,6 +356,54 @@ modalInput.addEventListener("keydown", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !modalOverlay.classList.contains("hidden")) closeModal(modalIsPrompt ? null : false);
+});
+
+// ---------------------------------------------------------------------------
+// Log file viewer modal — opened from a "log: <filename>" link in the Log tab (clarify or
+// implement run) via linkifyLogFilenames/appendClarifyLogRow above. Large by design (a
+// session log can run past 400KB) and toggleable to fullscreen, unlike the small
+// confirm/prompt modal above.
+// ---------------------------------------------------------------------------
+function closeLogFileModal() {
+  logFileModalOverlay.classList.add("hidden");
+  logFileModalBox.classList.remove("fullscreen");
+  logFileModalFullscreenBtn.innerHTML = iconSvg("maximize-2");
+}
+
+async function openLogFileModal(name) {
+  logFileModalTitle.textContent = name;
+  logFileModalBody.innerHTML = '<div class="log-file-modal-status">Loading…</div>';
+  logFileModalOverlay.classList.remove("hidden");
+  try {
+    const res = await fetch("/api/log-file?name=" + encodeURIComponent(name));
+    const data = await res.json();
+    if (!data.ok) {
+      logFileModalBody.innerHTML = `<div class="log-file-modal-status">${escapeHtml(data.error || "Could not open file.")}</div>`;
+      return;
+    }
+    const truncatedNote = data.truncated
+      ? '<div class="log-file-modal-truncated">This file is large — showing only the most recent portion.</div>'
+      : "";
+    logFileModalBody.innerHTML = truncatedNote + `<pre>${escapeHtml(data.content)}</pre>`;
+  } catch (e) {
+    logFileModalBody.innerHTML = '<div class="log-file-modal-status">Network error opening file.</div>';
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const link = e.target.closest(".log-file-link");
+  if (link) { e.preventDefault(); openLogFileModal(link.dataset.logFile); }
+});
+logFileModalCloseBtn.addEventListener("click", closeLogFileModal);
+logFileModalFullscreenBtn.addEventListener("click", () => {
+  const isFullscreen = logFileModalBox.classList.toggle("fullscreen");
+  logFileModalFullscreenBtn.innerHTML = iconSvg(isFullscreen ? "minimize-2" : "maximize-2");
+});
+logFileModalOverlay.addEventListener("click", (e) => {
+  if (e.target === logFileModalOverlay) closeLogFileModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !logFileModalOverlay.classList.contains("hidden")) closeLogFileModal();
 });
 
 // ---------------------------------------------------------------------------
@@ -1172,6 +1223,20 @@ function formatClarifyLogLine(text) {
   return { cls: "plain", icon: "circle-dashed", time, msg };
 }
 
+// Matches the bare filenames tempa_session._run_backend_session's own banner line always
+// names (e.g. "... | log: session_EPIC-17_20260809_044718.txt") — every session/QA/process
+// log Tempa writes follows this <prefix>_<name>_<timestamp>.txt shape with no path
+// separators, so this alone is enough to find them inside an already-escaped log message
+// without matching anything else.
+const LOG_FILENAME_RE = /\b((?:session|qa|process)_[\w-]+\.txt)\b/g;
+
+function linkifyLogFilenames(escapedMsg) {
+  return escapedMsg.replace(
+    LOG_FILENAME_RE,
+    (name) => `<a href="#" class="log-file-link" data-log-file="${name}">${name}</a>`,
+  );
+}
+
 function appendClarifyLogRow(text) {
   const f = formatClarifyLogLine(text);
   const row = document.createElement("div");
@@ -1179,7 +1244,7 @@ function appendClarifyLogRow(text) {
   row.innerHTML =
     (f.time ? `<span class="clarify-log-time">${escapeHtml(f.time)}</span>` : "") +
     `<span class="clarify-log-icon">${iconSvg(f.icon, f.cls === "progress" ? "icon-spin" : "")}</span>` +
-    `<span class="clarify-log-msg">${escapeHtml(f.msg)}</span>`;
+    `<span class="clarify-log-msg">${linkifyLogFilenames(escapeHtml(f.msg))}</span>`;
   return row;
 }
 
