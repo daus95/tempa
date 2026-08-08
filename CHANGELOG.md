@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-08-09
+
 ### Added
 
 - **`tempa implement` now detects and auto-recovers from an epic blocked on a not-yet-implemented
