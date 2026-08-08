@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-08-09
+
 ### Fixed
 
 - **An epic that hit `max_session_run` was left stuck in `on_progress` forever with no
