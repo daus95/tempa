@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- A session could get stuck reporting "Running..." forever with a frozen row count, even
+  though the backend CLI had already finished and its log already ended with `[Done]`.
+  On Windows, a grandchild process the CLI spawns (a build tool, a leftover `dotnet run`
+  server left listening for the rest of the session, etc.) can inherit and hold open the
+  CLI's stdout pipe, so waiting on that pipe to reach EOF never completed. Tempa now stops
+  waiting on the pipe shortly after the backend process itself has exited if nothing more
+  is buffered, instead of blocking forever.
+
 ## [0.5.1] - 2026-08-08
 
 ### Added

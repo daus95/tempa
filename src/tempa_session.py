@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import queue
 import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -311,6 +312,46 @@ def prepare_backend_invocation(
     return backend.build_cmd(exe, model, resume_session_id, None, reasoning_effort), full_prompt
 
 
+# On Windows, a pipe's write handle is inheritable by default, so a grandchild the backend
+# CLI spawns (a build tool, a leftover `dotnet run` server left listening for the rest of
+# the session, etc.) can hold our stdout pipe open even after the CLI process itself has
+# exited and finished printing its `[Done]` line. Without a bound, `for line in
+# process.stdout` then blocks forever, and a session sits reported as "Running..." with a
+# frozen row count. Once the process itself has exited, only wait this long for any
+# already-buffered output before giving up on the pipe.
+_STDOUT_DRAIN_GRACE_SEC = 3.0
+
+
+def _read_process_stdout(process: subprocess.Popen, drain_grace_sec: float = _STDOUT_DRAIN_GRACE_SEC) -> Iterator[str]:
+    """Yield lines from `process.stdout`, but stop waiting once `process` has exited and
+    `drain_grace_sec` has passed with nothing more buffered — instead of blocking forever
+    on a pipe a lingering grandchild process is still holding open (see
+    `_STDOUT_DRAIN_GRACE_SEC`)."""
+    line_queue: queue.Queue[str | None] = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for raw_line in process.stdout:
+                line_queue.put(raw_line)
+        finally:
+            line_queue.put(None)
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    process_exited = False
+    while True:
+        try:
+            raw_line = line_queue.get(timeout=drain_grace_sec if process_exited else 0.5)
+        except queue.Empty:
+            if process_exited:
+                return  # grace period elapsed with nothing more buffered — give up on the pipe
+            process_exited = process.poll() is not None
+            continue
+        if raw_line is None:
+            return  # pipe closed normally
+        yield raw_line
+
+
 def _stream_backend_process(
     backend: Backend,
     cmd: list[str],
@@ -342,7 +383,7 @@ def _stream_backend_process(
             process.stdin.write(stdin_text)
         process.stdin.close()
 
-        for raw_line in process.stdout:
+        for raw_line in _read_process_stdout(process):
             row_count[0] += 1
             line = raw_line.strip()
             data = None

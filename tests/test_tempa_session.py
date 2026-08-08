@@ -5,11 +5,15 @@ delivery), and session-result logging. Per-backend argv/parsing specifics (claud
 copilot/codex) are tested in test_tempa_backend.py. Functions that actually spawn a
 subprocess (_stream_backend_process, _run_backend_session, run_session, etc.) are
 explicitly out of scope, except prepare_backend_invocation, which never spawns
-anything — it only resolves an executable and (for file_ref backends) writes a file."""
+anything — it only resolves an executable and (for file_ref backends) writes a file.
+_read_process_stdout is also in scope: it takes a `process`-like object as a plain
+parameter rather than spawning one, so it's exercised here against fakes."""
 
 from __future__ import annotations
 
 import json
+import threading
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -467,3 +471,98 @@ def test_wait_out_server_overload_clears_state():
     ts.wait_out_server_overload("Thing", 1)
     assert ts._state.server_overloaded_hit is False
     assert not ts._state.stop_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# _read_process_stdout
+# ---------------------------------------------------------------------------
+
+class _FakeHangingProcess:
+    """Stand-in for subprocess.Popen: `stdout` yields a fixed set of lines and then never
+    raises StopIteration — like a real OS pipe a lingering grandchild process still holds
+    open — while `poll()` reports the process itself has already exited once `mark_exited`
+    is called."""
+
+    def __init__(self, lines):
+        self._lines = list(lines)
+        self._exited = threading.Event()
+
+    def mark_exited(self):
+        self._exited.set()
+
+    def poll(self):
+        return 0 if self._exited.is_set() else None
+
+    @property
+    def stdout(self):
+        yield from self._lines
+        threading.Event().wait(60)  # never reaches EOF on its own
+
+
+class _FakeFinitePipeProcess:
+    """Stand-in for subprocess.Popen whose stdout pipe closes normally (raises
+    StopIteration) right after its last line, as a real short-lived process would."""
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def poll(self):
+        return 0
+
+    @property
+    def stdout(self):
+        return iter(self._lines)
+
+
+def test_read_process_stdout_stops_after_grace_period_once_process_exited():
+    # Regression for a real hang: a backend CLI on Windows can leave a grandchild process
+    # (e.g. a build tool, a leftover `dotnet run` server) holding its stdout pipe open even
+    # after the CLI itself exited and finished printing everything — without a bound,
+    # iterating `process.stdout` blocks forever.
+    process = _FakeHangingProcess(["line one\n", "line two\n"])
+    lines = []
+
+    def consume():
+        for raw_line in ts._read_process_stdout(process, drain_grace_sec=0.05):
+            lines.append(raw_line)
+            if len(lines) == len(process._lines):
+                process.mark_exited()
+
+    thread = threading.Thread(target=consume, daemon=True)
+    thread.start()
+    thread.join(timeout=5.0)
+
+    assert not thread.is_alive(), "must give up on a pipe that never reaches EOF once the process has exited"
+    assert lines == ["line one\n", "line two\n"]
+
+
+def test_read_process_stdout_keeps_waiting_while_process_has_not_exited():
+    # No grandchild involved — the process is just still running. Even past the grace
+    # period, a pipe that hasn't exited yet must not be abandoned early.
+    process = _FakeHangingProcess(["only line\n"])
+    lines = []
+
+    def consume():
+        for raw_line in ts._read_process_stdout(process, drain_grace_sec=0.05):
+            lines.append(raw_line)
+
+    thread = threading.Thread(target=consume, daemon=True)
+    thread.start()
+    thread.join(timeout=0.3)
+
+    assert thread.is_alive(), "must keep waiting on the pipe while the process itself hasn't exited"
+    assert lines == ["only line\n"]
+
+    process.mark_exited()  # let the background thread wind down instead of spinning forever
+    thread.join(timeout=2.0)
+
+
+def test_read_process_stdout_returns_promptly_on_a_normal_pipe_close():
+    process = _FakeFinitePipeProcess(["a\n", "b\n"])
+
+    start = time.monotonic()
+    result = list(ts._read_process_stdout(process, drain_grace_sec=5.0))
+    elapsed = time.monotonic() - start
+
+    assert result == ["a\n", "b\n"]
+    assert elapsed < 1.0, "a normal EOF must not wait out the full drain grace period"
