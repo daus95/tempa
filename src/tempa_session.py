@@ -544,6 +544,8 @@ def _try_reorder_for_dependency(config: dict, stuck_index: int, blocked_by_epic:
     opposite direction (a likely circular dependency between the two epics)."""
     epics = config["epic"]
     stuck_name = epics[stuck_index].get("epic_name")
+    if blocked_by_epic == stuck_name:
+        return "an epic can't be blocked on itself"
     target_index = next((i for i, e in enumerate(epics) if e.get("epic_name") == blocked_by_epic), None)
     if target_index is None:
         return f"'{blocked_by_epic}' is not a known epic in this plan"
@@ -557,6 +559,18 @@ def _try_reorder_for_dependency(config: dict, stuck_index: int, blocked_by_epic:
     history.append([blocked_by_epic, stuck_name])
     epics.insert(stuck_index, epics.pop(target_index))
     return None
+
+
+def _reason_with_counterpart_context(reason: str, epics: list[dict], blocked_by_epic: str | None) -> str:
+    """Append the counterpart epic's own last `blocked_reason` (if it has one) to `reason` —
+    so a human deciding what to do about a stuck epic that couldn't be auto-reordered (most
+    notably the circular-reversal refusal, where each epic is blocked on the other) sees both
+    epics' own explanations in one place instead of having to go dig up the other one
+    separately."""
+    counterpart = next((e for e in epics if e.get("epic_name") == blocked_by_epic), None) if blocked_by_epic else None
+    if counterpart and counterpart.get("blocked_reason"):
+        return f"{reason}\n\nFor context, '{blocked_by_epic}' itself previously reported being blocked:\n{counterpart['blocked_reason']}"
+    return reason
 
 
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
@@ -727,6 +741,8 @@ def run_session(
                             details={"reason": reason, "blocked_by_epic": blocked_by_epic},
                         )
                     else:
+                        reason = _reason_with_counterpart_context(reason, config["epic"], blocked_by_epic)
+                        epic["blocked_reason"] = reason
                         epic["status"] = "failed"
                         save_config(config)
                         log(

@@ -18,10 +18,14 @@ once the first tagged release is cut.
   `implement_no_progress_rounds` (default `2`) resumed sessions in a row make no forward
   progress, Tempa automatically moves the named dependency ahead of the stuck epic in the plan
   so the scheduler works on it next — with guardrails against nonsense targets (unknown epic,
-  already done) and circular reversals. If it can't safely auto-fix it, the epic is marked
-  `failed` with the session's own explanation captured as `blocked_reason` and shown right on
-  the dashboard's Status tab and in `tempa status` (not just buried in a log file), plus a new
-  `implementation_auto_reordered` email alert event for the auto-fixed case.
+  already done, an epic naming itself) and circular reversals (each epic reporting it's blocked
+  on the other). If it can't safely auto-fix it, the epic is marked `failed` with the session's
+  own explanation captured as `blocked_reason` — folding in the other epic's own last-reported
+  reason too when a circular reversal is what blocked the auto-fix, so a human deciding what to
+  do sees both sides in one place — shown right on the dashboard's Status tab and in
+  `tempa status` (not just buried in a log file), plus a new `implementation_auto_reordered`
+  email alert event for the auto-fixed case.
+
 ## [0.5.3] - 2026-08-09
 
 ### Fixed

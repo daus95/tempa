@@ -643,6 +643,14 @@ def test_try_reorder_for_dependency_moves_target_before_stuck_epic():
     assert config["epic_reorder_history"] == [["EPIC-17", "EPIC-16"]]
 
 
+def test_try_reorder_for_dependency_refuses_self_reference():
+    config = {"epic": _epics(("EPIC-16", "on_progress"))}
+    result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-16")
+    assert result is not None and "can't be blocked on itself" in result
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-16"]
+    assert "epic_reorder_history" not in config
+
+
 def test_try_reorder_for_dependency_refuses_unknown_epic():
     config = {"epic": _epics(("EPIC-16", "on_progress"))}
     result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-99")
@@ -672,3 +680,30 @@ def test_try_reorder_for_dependency_refuses_circular_reversal():
     }
     result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-16")
     assert result is not None and "circular dependency" in result
+
+
+# ---------------------------------------------------------------------------
+# _reason_with_counterpart_context
+# ---------------------------------------------------------------------------
+
+def test_reason_with_counterpart_context_appends_when_counterpart_has_a_reason():
+    epics = _epics(("EPIC-16", "failed"), ("EPIC-17", "failed"))
+    epics[1]["blocked_reason"] = "needs something from EPIC-16"
+    result = ts._reason_with_counterpart_context("needs something from EPIC-17", epics, "EPIC-17")
+    assert result == (
+        "needs something from EPIC-17\n\n"
+        "For context, 'EPIC-17' itself previously reported being blocked:\n"
+        "needs something from EPIC-16"
+    )
+
+
+def test_reason_with_counterpart_context_unchanged_when_counterpart_has_no_reason():
+    epics = _epics(("EPIC-16", "failed"), ("EPIC-17", "pending"))
+    result = ts._reason_with_counterpart_context("needs something from EPIC-17", epics, "EPIC-17")
+    assert result == "needs something from EPIC-17"
+
+
+def test_reason_with_counterpart_context_unchanged_when_no_target_named():
+    epics = _epics(("EPIC-16", "failed"))
+    result = ts._reason_with_counterpart_context("some reason", epics, None)
+    assert result == "some reason"
