@@ -199,8 +199,24 @@ def build_session_prompt(
             f"    the agent runner will keep restarting this session endlessly.\n"
         )
 
+    dependency_block = (
+        f"MANDATORY RULE — IF A FEATURE IS BLOCKED BY A DIFFERENT, NOT-YET-IMPLEMENTED EPIC:\n"
+        f"If a feature genuinely cannot be completed because it depends on functionality owned\n"
+        f"by a DIFFERENT epic that hasn't been implemented yet (an out-of-order dependency — not\n"
+        f"a bug in this epic's own code, and not something a workaround should paper over):\n"
+        f"  1. Explain the blocker clearly in your final response, as you already would.\n"
+        f"  2. READ {get_config_path()} then EDIT: on the entry with \"epic_name\": \"{epic}\",\n"
+        f"     set \"blocked_by_epic\" to the exact epic_name of the epic that must be\n"
+        f"     implemented first (e.g. \"EPIC-17\"). Only set this when you are confident which\n"
+        f"     specific epic owns the missing dependency — leave it unset if you are unsure.\n"
+        f"Do NOT violate the architecture just to make progress on this epic.\n"
+    )
+
     qa_report_section = _build_qa_report_section(config, epic)
-    prompt = build_prompt(template, params) + "\n\n" + features_block + qa_report_section + config_rule + "\n" + config_path_note
+    prompt = (
+        build_prompt(template, params) + "\n\n" + features_block + qa_report_section
+        + config_rule + "\n" + dependency_block + "\n" + config_path_note
+    )
 
     return prompt
 

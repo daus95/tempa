@@ -566,3 +566,109 @@ def test_read_process_stdout_returns_promptly_on_a_normal_pipe_close():
 
     assert result == ["a\n", "b\n"]
     assert elapsed < 1.0, "a normal EOF must not wait out the full drain grace period"
+
+
+# ---------------------------------------------------------------------------
+# _update_no_progress_tracking
+# ---------------------------------------------------------------------------
+
+def test_update_no_progress_tracking_resets_counter_on_progress():
+    epic = {"completed_features": 3, "no_progress_rounds": 1}
+    stalled = ts._update_no_progress_tracking(epic, completed_before=2, limit=2)
+    assert stalled is False
+    assert epic["no_progress_rounds"] == 0
+
+
+def test_update_no_progress_tracking_increments_counter_when_stalled():
+    epic = {"completed_features": 1, "no_progress_rounds": 0}
+    stalled = ts._update_no_progress_tracking(epic, completed_before=1, limit=2)
+    assert stalled is False
+    assert epic["no_progress_rounds"] == 1
+
+
+def test_update_no_progress_tracking_reaches_limit():
+    epic = {"completed_features": 1, "no_progress_rounds": 1}
+    stalled = ts._update_no_progress_tracking(epic, completed_before=1, limit=2)
+    assert stalled is True
+    assert epic["no_progress_rounds"] == 2
+
+
+def test_update_no_progress_tracking_starts_from_zero_when_absent():
+    epic = {"completed_features": 1}
+    stalled = ts._update_no_progress_tracking(epic, completed_before=1, limit=1)
+    assert stalled is True
+    assert epic["no_progress_rounds"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _last_meaningful_log_lines
+# ---------------------------------------------------------------------------
+
+def test_last_meaningful_log_lines_drops_done_accounting_line(tmp_path):
+    log_path = tmp_path / "session.txt"
+    log_path.write_text("line one\nline two\n[Done] input=123 output=45\n", encoding="utf-8")
+    assert ts._last_meaningful_log_lines(log_path) == "line one\nline two"
+
+
+def test_last_meaningful_log_lines_skips_blank_lines(tmp_path):
+    log_path = tmp_path / "session.txt"
+    log_path.write_text("line one\n\n\nline two\n", encoding="utf-8")
+    assert ts._last_meaningful_log_lines(log_path) == "line one\nline two"
+
+
+def test_last_meaningful_log_lines_caps_to_max_lines(tmp_path):
+    log_path = tmp_path / "session.txt"
+    log_path.write_text("\n".join(f"line {i}" for i in range(10)), encoding="utf-8")
+    result = ts._last_meaningful_log_lines(log_path, max_lines=3)
+    assert result == "line 7\nline 8\nline 9"
+
+
+def test_last_meaningful_log_lines_missing_file_returns_empty(tmp_path):
+    assert ts._last_meaningful_log_lines(tmp_path / "missing.txt") == ""
+
+
+# ---------------------------------------------------------------------------
+# _try_reorder_for_dependency
+# ---------------------------------------------------------------------------
+
+def _epics(*names_and_statuses):
+    return [{"epic_name": n, "status": s} for n, s in names_and_statuses]
+
+
+def test_try_reorder_for_dependency_moves_target_before_stuck_epic():
+    config = {"epic": _epics(("EPIC-16", "on_progress"), ("EPIC-17", "pending"), ("EPIC-18", "pending"))}
+    result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-17")
+    assert result is None
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-17", "EPIC-16", "EPIC-18"]
+    assert config["epic_reorder_history"] == [["EPIC-17", "EPIC-16"]]
+
+
+def test_try_reorder_for_dependency_refuses_unknown_epic():
+    config = {"epic": _epics(("EPIC-16", "on_progress"))}
+    result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-99")
+    assert result is not None and "not a known epic" in result
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-16"]
+
+
+def test_try_reorder_for_dependency_refuses_already_done_target():
+    config = {"epic": _epics(("EPIC-16", "on_progress"), ("EPIC-17", "done"))}
+    result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-17")
+    assert result is not None and "already done" in result
+
+
+def test_try_reorder_for_dependency_refuses_target_already_before_stuck_epic():
+    config = {"epic": _epics(("EPIC-17", "pending"), ("EPIC-16", "on_progress"))}
+    result = ts._try_reorder_for_dependency(config, stuck_index=1, blocked_by_epic="EPIC-17")
+    assert result is not None and "already scheduled before" in result
+
+
+def test_try_reorder_for_dependency_refuses_circular_reversal():
+    # EPIC-17 was already moved ahead of EPIC-16 once (history reflects that). Now EPIC-17
+    # itself stalls claiming the reverse ("blocked on EPIC-16") — moving EPIC-16 back ahead
+    # of EPIC-17 would just undo the first move, a likely circular dependency, so refuse.
+    config = {
+        "epic": _epics(("EPIC-17", "pending"), ("EPIC-16", "on_progress")),
+        "epic_reorder_history": [["EPIC-17", "EPIC-16"]],
+    }
+    result = ts._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-16")
+    assert result is not None and "circular dependency" in result

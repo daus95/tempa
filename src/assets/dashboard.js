@@ -1370,6 +1370,13 @@ function renderImplementStatus() {
     const features = (epic.features || []).map((f) =>
       `<div class="impl-feature-row"><span>${featureStatusIcon(f.status)}</span><span>${escapeHtml(f.id)} — ${escapeHtml(f.name)}</span></div>`
     ).join("");
+    // A "failed" epic that still carries blocked_reason means the no-progress guard gave up
+    // trying to fix it automatically (see _try_reorder_for_dependency in tempa_session.py) —
+    // surface its own explanation right on the card instead of leaving the user to go dig
+    // through the log, since that's the one thing they actually need to act on.
+    const blockedReason = epic.status === "failed" && epic.blocked_reason
+      ? `<div class="impl-epic-blocked-reason">⚠ Blocked — no progress across resumed sessions:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
+      : "";
     card.innerHTML =
       `<div class="impl-epic-header">` +
         `<span class="impl-epic-icon">${epicStatusIcon(epic.status)}</span>` +
@@ -1379,6 +1386,7 @@ function renderImplementStatus() {
         `<span class="impl-epic-lastrun">last run: ${lastRun}</span>` +
         qaTag +
       `</div>` +
+      blockedReason +
       `<div class="impl-feature-list">${features}</div>`;
     implStatusBody.appendChild(card);
   }
@@ -1629,6 +1637,7 @@ function updateSmtpProvider(applyPreset) {
 const EMAIL_ALERT_EVENTS = [
   ["authentication_required", "Authentication required", "The configured AI CLI login or API key must be renewed."],
   ["implementation_failed", "Implementation failed", "An epic stopped on a non-retryable implementation failure."],
+  ["implementation_auto_reordered", "Implementation auto-reordered", "An epic was stuck waiting on a not-yet-implemented epic and Tempa reordered the plan automatically — informational, no action needed unless it recurs."],
   ["plan_failed", "Planning failed", "Tempa could not generate or review the implementation plan."],
   ["session_limit_reached", "Implementation run limit reached", "An epic reached the configured anti-loop session limit."],
   ["qa_limit_reached", "QA run limit reached", "QA reached its configured limit and was skipped; review is required."],

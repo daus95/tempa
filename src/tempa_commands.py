@@ -566,6 +566,9 @@ def print_status() -> None:
         if status == "done":
             qa_tag = "  [QA ok]" if s.get("qa_passed", False) else "  [QA --]"
         print(f"{icon} {epic:<10} {status:<16} {completed_f}/{total_f} features   last run: {last_run}{qa_tag}")
+        if status == "failed" and s.get("blocked_reason"):
+            reason = s["blocked_reason"].replace("\n", "\n      ")
+            print(f"   ⚠ Blocked — no progress across resumed sessions:\n      {reason}")
 
         feat_icons = {"done": "✅", "failed": "❌", "require_fixing": "🔧"}
         for feat in s.get("features", []):

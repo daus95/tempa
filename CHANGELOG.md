@@ -8,6 +8,20 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`tempa implement` now detects and auto-recovers from an epic blocked on a not-yet-implemented
+  dependency owned by a different epic**, instead of silently re-resuming it every poll interval
+  until it burns through the full `max_session_run` limit (each wasted resume can cost tens of
+  millions of tokens). The backend CLI is now asked to record `"blocked_by_epic"` on the epic
+  when it determines a feature genuinely can't proceed without another epic's work. After
+  `implement_no_progress_rounds` (default `2`) resumed sessions in a row make no forward
+  progress, Tempa automatically moves the named dependency ahead of the stuck epic in the plan
+  so the scheduler works on it next — with guardrails against nonsense targets (unknown epic,
+  already done) and circular reversals. If it can't safely auto-fix it, the epic is marked
+  `failed` with the session's own explanation captured as `blocked_reason` and shown right on
+  the dashboard's Status tab and in `tempa status` (not just buried in a log file), plus a new
+  `implementation_auto_reordered` email alert event for the auto-fixed case.
 ## [0.5.3] - 2026-08-09
 
 ### Fixed

@@ -223,6 +223,7 @@ DEFAULT_CONFIG = {
     "max_session_run": 30,
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 2,
+    "implement_no_progress_rounds": 2,
     "usage_limit_retry_wait_sec": 1800,
     "usage_limit_heartbeat_sec": 300,
     "server_overloaded_retry_wait_sec": 300,

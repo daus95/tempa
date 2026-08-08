@@ -26,6 +26,7 @@ from tempa_logging import log
 class AttentionEventType(StrEnum):
     AUTHENTICATION_REQUIRED = "authentication_required"
     IMPLEMENTATION_FAILED = "implementation_failed"
+    IMPLEMENTATION_AUTO_REORDERED = "implementation_auto_reordered"
     PLAN_FAILED = "plan_failed"
     SESSION_LIMIT_REACHED = "session_limit_reached"
     QA_LIMIT_REACHED = "qa_limit_reached"
