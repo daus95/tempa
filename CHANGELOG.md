@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- The dashboard's own "Start Implementation"/"Start Clarification" runs could still get
+  stuck reporting "Running..." forever, even after v0.5.2 fixed the same hang one layer
+  down. The dashboard spawns `tempa.py implement`/`tempa.py clarify` as a child process and
+  reads its console output line-by-line to drive the live log/progress panel — that read
+  had the identical unbounded-wait-on-a-closed-pipe bug v0.5.2 fixed for the backend CLI
+  itself, just one process layer further out, so a lingering grandchild process (e.g. a
+  leftover `dotnet run` API host) could still hang it. Both dashboard-side reads now reuse
+  the same bounded pipe reader.
+
 ## [0.5.2] - 2026-08-08
 
 ### Fixed
