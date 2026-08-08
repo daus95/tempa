@@ -266,14 +266,22 @@ def run_clear_all() -> None:
 
 
 def reset_failed_epics(config: dict) -> list[str]:
-    """Flip every `failed` epic in `config` back to `pending` (dropping its stored session
-    id, so the next attempt starts a fresh session) and return the labels that were reset —
-    the caller still has to save_config. Empty list = nothing was failed.
+    """Flip every `failed` epic in `config` back to `pending` for a genuine clean-slate retry
+    — dropping its stored session id (so the next attempt starts a fresh session) AND its
+    run/stall counters (total_run, qa_total_run, no_progress_rounds, blocked_reason,
+    blocked_by_epic) — and return the labels that were reset — the caller still has to
+    save_config. Empty list = nothing was failed.
+
+    Without clearing those counters too, a "reset" epic that hit max_session_run or the
+    no-forward-progress guard (see _validate_and_increment_run / _update_no_progress_tracking
+    in tempa_session.py) would just immediately re-trip the exact same limit on its very next
+    attempt, making --reset-failed look like it worked while actually being a dead end.
 
     Shared by two callers: the `implement --reset-failed` command (_reset_failed_epics
     below) and implement's automatic retry after a transient backend overload
     (tempa_implement._reset_failed_before_retry), which has to clear a leftover `failed`
-    status itself or check_and_run would refuse to resume anything at all."""
+    status itself or check_and_run would refuse to resume anything at all — a clean slate is
+    just as correct there, since an overload-caused "failure" isn't a real one either."""
     reset: list[str] = []
     for i, session in enumerate(config.get("epic") or []):
         if session.get("status") == "failed":
@@ -282,6 +290,11 @@ def reset_failed_epics(config: dict) -> list[str]:
             session.pop("claude_session_id", None)
             session.pop("session_id", None)
             session.pop("session_backend", None)
+            session["total_run"] = 0
+            session["qa_total_run"] = 0
+            session["no_progress_rounds"] = 0
+            session.pop("blocked_reason", None)
+            session.pop("blocked_by_epic", None)
     return reset
 
 

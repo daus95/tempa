@@ -225,3 +225,29 @@ def test_check_and_run_resumes_stale_on_progress_epic(isolate_tempa_paths, monke
     }]})
     seen = _run_check_and_run_capturing_resume(monkeypatch)
     assert seen["resume_session_id"] == "sess-777"
+
+
+# ---------------------------------------------------------------------------
+# _validate_and_increment_run
+# ---------------------------------------------------------------------------
+
+def test_validate_and_increment_run_increments_below_limit():
+    config = {"max_session_run": 30, "epic": [{"epic_name": "e1", "status": "on_progress", "total_run": 5}]}
+    result = ti._validate_and_increment_run(config, 0, "e1")
+    assert result is True
+    assert config["epic"][0]["total_run"] == 6
+    assert config["epic"][0]["status"] == "on_progress"
+
+
+def test_validate_and_increment_run_marks_epic_failed_and_persists_when_limit_reached(isolate_tempa_paths):
+    # Regression: hitting the limit used to leave the epic stuck in on_progress forever with
+    # no self-service recovery -- `tempa implement --reset-failed` only resets epics whose
+    # status is already "failed". Marking it failed here (and persisting via save_config,
+    # since the caller raises SystemExit right after without saving anything itself) is what
+    # makes the next --reset-failed (or another click of Continue Implementation, which runs
+    # that automatically) actually able to reset and retry it.
+    config = {"max_session_run": 30, "epic": [{"epic_name": "e1", "status": "on_progress", "total_run": 30}]}
+    result = ti._validate_and_increment_run(config, 0, "e1")
+    assert result is False
+    assert config["epic"][0]["status"] == "failed"
+    assert tempa_config.load_config()["epic"][0]["status"] == "failed"

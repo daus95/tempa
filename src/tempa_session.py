@@ -520,9 +520,22 @@ def _update_no_progress_tracking(epic: dict, completed_before: int, limit: int) 
     `limit` resumed sessions in a row finished (exit code 0) without completing another
     feature, which almost always means the epic is blocked on something outside itself (e.g.
     a dependency owned by a not-yet-implemented epic) rather than genuinely still working.
+
+    Also resets `epic["total_run"]` (the max_session_run anti-loop counter) back to 0 on real
+    progress — without this, a long-running epic that legitimately needs many resumes across
+    its natural lifecycle (many features_per_session batches, several QA fix-rounds) keeps
+    accumulating toward that lifetime cap for reasons that have nothing to do with being stuck,
+    and can eventually hit it despite never having actually stalled — at which point it's left
+    permanently stuck in `on_progress` (see _validate_and_increment_run) with no recovery, since
+    `no_progress_rounds` never got a chance to reach `limit` and trigger the fix/failure path
+    below in run_session. Resetting both together on progress means `no_progress_rounds`
+    (this epic's own, much lower threshold) always has the chance to catch a genuine stall
+    first, making max_session_run a redundant, higher backstop instead of a competing trap.
+
     Mutates `epic` in place, mirroring how `total_run` is already tracked directly on it."""
     if epic.get("completed_features", 0) > completed_before:
         epic["no_progress_rounds"] = 0
+        epic["total_run"] = 0
         return False
     epic["no_progress_rounds"] = epic.get("no_progress_rounds", 0) + 1
     return epic["no_progress_rounds"] >= limit

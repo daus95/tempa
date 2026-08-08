@@ -120,6 +120,18 @@ tempa implement --reset-failed   # all failed epics → pending (run this after 
                                  #   any failure when you click Continue Implementation on the
                                  #   dashboard — see above)
 tempa implement --reset-qa       # force re-QA for every done epic
+```
+
+`--reset-failed` also covers an epic that hit `max_session_run` or the no-forward-progress guard
+(`implement_no_progress_rounds`, e.g. resumed several times in a row without completing another
+feature) — both mark the epic `failed` now instead of leaving it stuck in `on_progress` forever
+with no self-service way out. It clears the epic's run/stall counters too (`total_run`,
+`qa_total_run`, `no_progress_rounds`), not just its status, so the reset is a genuine clean
+slate rather than one that immediately re-trips the same limit on the very next attempt. The
+epic's card in the dashboard's Status tab (and `tempa status`) shows `blocked_reason` when the
+no-forward-progress guard is what marked it failed, explaining why in the session's own words.
+
+```bash
 tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)
 tempa implement --clear-plan # clear plan: wipes .tempa/specs/pbi contents + empties the "epic" array
 tempa clarify --clear        # clear clarifications: deletes files in .tempa/specs/clarifications (except claude.md)

@@ -579,6 +579,22 @@ def test_update_no_progress_tracking_resets_counter_on_progress():
     assert epic["no_progress_rounds"] == 0
 
 
+def test_update_no_progress_tracking_also_resets_total_run_on_progress():
+    # Regression: a long-running epic that legitimately needs many resumes across its
+    # natural lifecycle (many features_per_session batches, several QA fix-rounds) must not
+    # keep accumulating toward max_session_run for reasons unrelated to being stuck — every
+    # real forward-progress round resets that lifetime counter too, not just no_progress_rounds.
+    epic = {"completed_features": 3, "no_progress_rounds": 1, "total_run": 29}
+    ts._update_no_progress_tracking(epic, completed_before=2, limit=2)
+    assert epic["total_run"] == 0
+
+
+def test_update_no_progress_tracking_leaves_total_run_untouched_when_stalled():
+    epic = {"completed_features": 1, "no_progress_rounds": 0, "total_run": 29}
+    ts._update_no_progress_tracking(epic, completed_before=1, limit=2)
+    assert epic["total_run"] == 29
+
+
 def test_update_no_progress_tracking_increments_counter_when_stalled():
     epic = {"completed_features": 1, "no_progress_rounds": 0}
     stalled = ts._update_no_progress_tracking(epic, completed_before=1, limit=2)
