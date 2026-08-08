@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-08
+
 ### Added
 
 - **Optional email alerts for human-attention states.** Configure Gmail, Microsoft 365, or
@@ -497,7 +499,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/daus95/tempa/compare/v0.5.0...v0.5.1
 [0.4.4]: https://github.com/daus95/tempa/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/daus95/tempa/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/daus95/tempa/compare/v0.4.1...v0.4.2
