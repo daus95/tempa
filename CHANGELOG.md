@@ -8,6 +8,26 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An epic that hit `max_session_run` was left stuck in `on_progress` forever with no
+  self-service way out** — `--reset-failed` only resets epics already marked `failed`, so
+  neither it nor another click of Continue Implementation could do anything once the limit
+  was reached. It's now marked `failed` (like any other implementation stop), so the existing,
+  already-familiar reset flow actually works. `--reset-failed` also now clears the epic's
+  run/stall counters (`total_run`, `qa_total_run`, `no_progress_rounds`, `blocked_reason`,
+  `blocked_by_epic`), not just its status — without that, a "reset" epic would immediately
+  re-trip the exact same limit on its very next attempt, making the reset look like it worked
+  while actually being a dead end.
+- A long-running epic that legitimately needs many resumes across its natural lifecycle (many
+  `features_per_session` batches, several QA fix-rounds) could accumulate toward
+  `max_session_run` for reasons that have nothing to do with being stuck, and eventually hit it
+  despite never having actually stalled. `total_run` now resets to 0 on every round that
+  completes another feature, mirroring `no_progress_rounds` — so the (much lower,
+  `implement_no_progress_rounds`) no-forward-progress guard from `v0.5.4` always gets the first
+  chance to catch a genuine stall, instead of the blunt lifetime cap occasionally beating it to
+  the punch and leaving no automatic recovery to fall back on.
+
 ## [0.5.4] - 2026-08-09
 
 ### Added

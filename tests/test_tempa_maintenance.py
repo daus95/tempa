@@ -216,6 +216,23 @@ def test_reset_failed_epics_returns_labels_and_mutates_in_place():
     assert config["epic"][2]["status"] == "pending"
 
 
+def test_reset_failed_epics_clears_run_and_stall_counters():
+    # Regression: a "reset" epic that had hit max_session_run or the no-forward-progress
+    # guard must not immediately re-trip the exact same limit on its very next attempt.
+    config = {"epic": [{
+        "epic_name": "e1", "status": "failed", "total_run": 30, "qa_total_run": 5,
+        "no_progress_rounds": 2, "blocked_reason": "blocked on EPIC-17",
+        "blocked_by_epic": "EPIC-17",
+    }]}
+    tm.reset_failed_epics(config)
+    epic = config["epic"][0]
+    assert epic["total_run"] == 0
+    assert epic["qa_total_run"] == 0
+    assert epic["no_progress_rounds"] == 0
+    assert "blocked_reason" not in epic
+    assert "blocked_by_epic" not in epic
+
+
 def test_reset_failed_epics_nothing_failed_returns_empty():
     config = {"epic": [{"epic_name": "e1", "status": "done"}]}
     assert tm.reset_failed_epics(config) == []

@@ -48,15 +48,28 @@ from tempa_session import (
 
 
 def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
-    """Increment total_run and validate against max_session_run. Returns False if limit exceeded."""
+    """Increment total_run and validate against max_session_run. Returns False if limit exceeded.
+
+    On the limit path, also marks the epic `failed` and saves `config` — without this it was
+    left stuck in `on_progress` forever with no self-service way out: `--reset-failed` only
+    resets epics whose status is already `failed`, and clicking Continue Implementation would
+    just hit this exact same check again on every future attempt. Marking it failed here means
+    the very next `tempa implement --reset-failed` (which the dashboard's Continue
+    Implementation button already runs automatically before every implement pass) resets it —
+    see reset_failed_epics, which also clears total_run/no_progress_rounds for a clean retry."""
     max_run = config.get("max_session_run")
     total_run = config["epic"][index].get("total_run", 0)
     if max_run is not None and total_run >= max_run:
-        log(f"Session [{label}] has reached the max_session_run limit ({max_run}). Stopping.")
+        log(f"Session [{label}] has reached the max_session_run limit ({max_run}). "
+            "Marking it failed — run `tempa implement --reset-failed` (or just click Continue "
+            "Implementation again, which does this automatically) to reset it and retry.")
+        config["epic"][index]["status"] = "failed"
+        save_config(config)
         notify_attention(
             AttentionEventType.SESSION_LIMIT_REACHED, "Implementation",
             f"{label} reached its session limit",
-            "Review the epic and either fix it or raise max_session_run before continuing.",
+            "Marked failed. Review the epic, then run `tempa implement --reset-failed` "
+            "(or click Continue Implementation again) to reset it and retry.",
             epic=label, details={"max_session_run": max_run},
         )
         return False
