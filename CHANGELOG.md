@@ -8,6 +8,14 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **The Implementation Status tab now shows a spinning "QA running" indicator** on an
+  epic's card while its QA session is actively in progress (`qa_status === "ongoing"`),
+  instead of showing nothing (or a stale "QA --") until the session finishes. The
+  dashboard also keeps polling for updates while any epic is running or being QA'd, even
+  if that session wasn't started from this dashboard instance.
+
 ### Fixed
 
 - **An implementation session that made no progress across `implement_no_progress_rounds`
