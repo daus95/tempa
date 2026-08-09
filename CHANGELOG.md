@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-08-09
+
 ### Added
 
 - **`tempa implement --reset-qa` can now target a single epic** (`--reset-qa EPIC-04`)
