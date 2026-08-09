@@ -10,6 +10,13 @@ once the first tagged release is cut.
 
 ### Added
 
+- **Unanswered/Fully answered panels now update live during a Finalized Clarification
+  run**, right after each round's evaluate or apply step succeeds, instead of only once
+  the whole (possibly multi-round) run finishes.
+- **Clarification answers are locked (read-only) while Finalized Clarification is
+  running**, since that run auto-answers findings itself — hand-editing a file mid-run
+  could race with its own reads/writes to the same file. Enforced both in the UI and on
+  the save endpoint (409 if attempted anyway).
 - **Settings → Run Limits now has a "Max Finalize No-Progress Round" field**, right below
   "Max Finalize Clarification Round". It configures `finalize_no_progress_rounds` — how many
   Finalized Clarification rounds in a row may fail to reduce the critical+major finding count

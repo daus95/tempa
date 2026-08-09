@@ -39,8 +39,8 @@ from dashboard_config import (
 )
 from dashboard_runs import (
     _epic_sessions,
-    _implementation_has_started,
     _finalize_limit_change_warning,
+    _implementation_has_started,
     _start_clarify_run,
     _start_implement_run,
     _stop_clarify_run,
@@ -526,7 +526,24 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "path": new_rel})
 
     def _handle_clarify_save(self) -> None:
+        # Finalized Clarification auto-answers findings itself (mechanical recommendation
+        # fill + agent-applied resolutions) — a hand save racing with that loop's own
+        # reads/writes to the same file could corrupt or lose an auto-answer, so saves are
+        # rejected for as long as a finalize run is in flight. This is the authoritative
+        # guard (the client already disables editing — see isClarifyFinalizeLocked in
+        # dashboard.js — but this also covers a stale tab that had the file open before
+        # finalize started).
         payload = self._read_json_body()
+        run = self.server.clarify_run
+        with run["lock"]:
+            finalize_running = run["running"] and run["mode"] == "finalize"
+        if finalize_running:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Finalized Clarification is running and auto-answering these "
+                         "findings — answers are locked until it stops.",
+            })
+            return
         if payload is None or not isinstance(payload, dict):
             self._send_json(400, {"ok": False, "error": "Malformed request."})
             return
