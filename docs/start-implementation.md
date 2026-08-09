@@ -104,6 +104,18 @@ config.json during the session; the harness only marks it `failed` when a sessio
 behind by an overload that *wasn't* recognized is reset back to `pending` before the
 automatic retry, see the 529 note above).
 
+**The QA gate doesn't trust a "done" epic blindly.** Marking each feature `done` and
+incrementing `completed_features`, then only *after* every feature is done marking the epic
+itself `done`, is all on the agent's own bookkeeping (see the MANDATORY RULE the
+implementation prompt gives it) — a step it can skip. Before running QA on a `done` epic,
+`check_and_run` checks that every one of its features is actually marked `done` and
+`completed_features` matches `total_features`. If not, the epic is routed back to
+`require_fixing` instead — genuinely finishing the remaining features — rather than running
+QA (and possibly passing it) against work that was never actually completed. The same check
+runs when manually forcing a re-check with `implement --reset-qa EPIC-ID` (see Recovery
+below), so resetting an epic that has this problem doesn't just immediately re-trigger QA
+against the same incomplete state.
+
 ## Cross-Epic Dependencies (No-Forward-Progress Guard)
 
 Epics are implemented in plan order — normally that's fine, since later epics build on
@@ -173,6 +185,7 @@ tempa implement --reset-failed   # all failed epics → pending (run this after 
                                  #   any failure when you click Continue Implementation on the
                                  #   dashboard — see above)
 tempa implement --reset-qa       # force re-QA for every done epic
+tempa implement --reset-qa EPIC-04   # same, but only for that one epic
 ```
 
 `--reset-failed` also covers an epic that hit `max_session_run` or the no-forward-progress
@@ -181,6 +194,14 @@ above) — both mark the epic `failed` now instead of leaving it stuck in `on_pr
 with no self-service way out. It clears the epic's run/stall counters too (`total_run`,
 `qa_total_run`, `no_progress_rounds`), not just its status, so the reset is a genuine clean
 slate rather than one that immediately re-trips the same limit on the very next attempt.
+
+`--reset-qa EPIC-ID` is the way to force a specific already-`done`-and-QA-passed epic to be
+re-checked — e.g. if you notice its features don't actually look finished despite "QA ok"
+(see the QA gate integrity check under [Epic Status Lifecycle](#epic-status-lifecycle) above).
+It also runs that same check: if the epic's features genuinely aren't all `done`, it's routed
+back to `require_fixing` instead of staying `done`, so it's actually finished before QA
+re-runs on it — resetting `qa_passed` alone wouldn't have been enough, since `check_and_run`'s
+QA gate acts on any `done` epic regardless of how it got there.
 
 ```bash
 tempa implement --clear      # delete ALL files in .tempa/qa/ and .tempa/logs/ (QA reports + session logs)

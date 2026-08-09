@@ -179,6 +179,41 @@ def test_reset_clarify_config_state_missing_keys_no_error():
 
 
 # ---------------------------------------------------------------------------
+# _epic_features_actually_done
+# ---------------------------------------------------------------------------
+
+def test_epic_features_actually_done_true_when_no_features_key():
+    assert tm._epic_features_actually_done({"status": "done"}) is True
+
+
+def test_epic_features_actually_done_true_when_all_done_and_counts_match():
+    epic = {
+        "completed_features": 2, "total_features": 2,
+        "features": [{"status": "done"}, {"status": "done"}],
+    }
+    assert tm._epic_features_actually_done(epic) is True
+
+
+def test_epic_features_actually_done_false_when_a_feature_is_not_done():
+    epic = {
+        "completed_features": 2, "total_features": 2,
+        "features": [{"status": "done"}, {"status": "require_fixing"}],
+    }
+    assert tm._epic_features_actually_done(epic) is False
+
+
+def test_epic_features_actually_done_false_when_completed_count_mismatches():
+    # The real-world case: epic-level bookkeeping (completed_features) says 0, even though
+    # this alone -- without checking every feature's own status -- wouldn't have caught it
+    # if a re-implementation round incremented the count without actually finishing them.
+    epic = {
+        "completed_features": 0, "total_features": 6,
+        "features": [{"status": "require_fixing"}] * 6,
+    }
+    assert tm._epic_features_actually_done(epic) is False
+
+
+# ---------------------------------------------------------------------------
 # _reset_failed_epics / _reset_qa_state / _reset_on_progress_epics
 # ---------------------------------------------------------------------------
 
@@ -258,6 +293,7 @@ def test_reset_qa_state_resets_matching_epics(isolate_tempa_paths):
     assert reset_epic["qa_session_id"] == ""
     assert reset_epic["qa_total_run"] == 0
     assert reset_epic["qa_report_filename"] == ""
+    assert reset_epic["status"] == "done"  # no features to check against — status untouched
     assert saved["epic"][1] == {"epic_name": "e2", "status": "pending"}
 
 
@@ -266,6 +302,48 @@ def test_reset_qa_state_no_matching_epics_noop(isolate_tempa_paths):
     tm._reset_qa_state()
     saved = tempa_config.load_config()
     assert saved["epic"][0] == {"epic_name": "e1", "status": "pending"}
+
+
+def test_reset_qa_state_targets_only_the_named_epic():
+    config = {"epic": [
+        {"epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done"},
+        {"epic_name": "EPIC-05", "status": "done", "qa_passed": True, "qa_status": "done"},
+    ]}
+    reset = tm.reset_qa_state(config, epic_name="EPIC-04")
+    assert reset == [("EPIC-04", False)]
+    assert config["epic"][0]["qa_passed"] is False
+    assert config["epic"][1]["qa_passed"] is True  # untouched
+
+
+def test_reset_qa_state_reroutes_to_require_fixing_when_features_not_actually_done():
+    # The real-world bug this guards against: a re-implementation round set the epic done
+    # without finishing each feature's own bookkeeping, then QA passed anyway.
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 0, "total_features": 2,
+        "features": [{"status": "require_fixing"}, {"status": "require_fixing"}],
+    }]}
+    reset = tm.reset_qa_state(config, epic_name="EPIC-04")
+    assert reset == [("EPIC-04", True)]
+    assert config["epic"][0]["status"] == "require_fixing"
+    assert config["epic"][0]["qa_passed"] is False
+
+
+def test_reset_qa_state_keeps_done_status_when_features_are_actually_done():
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 2, "total_features": 2,
+        "features": [{"status": "done"}, {"status": "done"}],
+    }]}
+    reset = tm.reset_qa_state(config, epic_name="EPIC-04")
+    assert reset == [("EPIC-04", False)]
+    assert config["epic"][0]["status"] == "done"
+
+
+def test_reset_qa_state_named_epic_not_found_returns_empty():
+    config = {"epic": [{"epic_name": "EPIC-04", "status": "done", "qa_passed": True}]}
+    assert tm.reset_qa_state(config, epic_name="EPIC-99") == []
+    assert config["epic"][0]["qa_passed"] is True  # untouched
 
 
 def test_reset_on_progress_epics_resets_matching(isolate_tempa_paths):

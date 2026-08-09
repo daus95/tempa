@@ -8,6 +8,25 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`tempa implement --reset-qa` can now target a single epic** (`--reset-qa EPIC-04`)
+  instead of always forcing every `done` epic to be re-QA'd.
+
+### Fixed
+
+- **An epic could be marked `done` and pass QA even though its own features were still
+  showing `require_fixing` and `completed_features` was still `0`** — a re-implementation
+  round had set the epic-level status to `done` without going through the mandatory
+  per-feature bookkeeping (mark each feature `done`, increment `completed_features`) first,
+  and QA's own "everything passes" path never double-checks that bookkeeping, since it
+  reasonably assumes the epic wouldn't have reached `done` otherwise. `check_and_run`'s QA
+  gate now verifies a `done` epic's features actually back up that status before running QA
+  on it — if they don't, the epic is routed back to `require_fixing` to genuinely finish the
+  remaining work instead. `--reset-qa` runs the same check, so forcing a re-check on an
+  epic with this problem doesn't just immediately re-trigger QA against the same incomplete
+  state.
+
 ## [0.5.6] - 2026-08-09
 
 ### Added

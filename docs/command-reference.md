@@ -32,7 +32,7 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `status` | Summary of progress for every epic |
 | `implement --reset` | `on_progress` → `pending` |
 | `implement --reset-failed` | `failed` → `pending` |
-| `implement --reset-qa` | Forces re-QA for `done` epics |
+| `implement --reset-qa [EPIC]` | Forces re-QA for all `done` epics, or just `EPIC` if given — also routes it back to `require_fixing` first if its own features weren't actually all done |
 | `implement --clear [--yes]` | Deletes ALL files in `.tempa/qa/` and `.tempa/logs/` (asks for confirmation) |
 | `clear [--yes]` | Runs `implement --clear` + `implement --clear-plan` + `clarify --clear` together, behind a single confirmation |
 | `test` | Permission test (verifies the `implement` stage's configured backend CLI works). For a lighter, non-invoking check across all three backends, see the dashboard's readiness checklist: [cli-availability.md](cli-availability.md) |
