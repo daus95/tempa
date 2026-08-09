@@ -48,6 +48,18 @@ def test_save_config_creates_parent_dirs(isolate_tempa_paths):
     assert json.loads(tempa_config.get_config_path().read_text(encoding="utf-8")) == {"a": 1}
 
 
+def test_save_config_no_leftover_temp_file(isolate_tempa_paths):
+    tempa_config.save_config({"a": 1})
+    siblings = list(tempa_config.get_config_path().parent.iterdir())
+    assert siblings == [tempa_config.get_config_path()]
+
+
+def test_save_config_overwrites_existing_file_atomically(isolate_tempa_paths):
+    tempa_config.save_config({"a": 1})
+    tempa_config.save_config({"a": 2, "b": 3})
+    assert json.loads(tempa_config.get_config_path().read_text(encoding="utf-8")) == {"a": 2, "b": 3}
+
+
 def test_read_config_safe_missing_file_returns_empty_dict(isolate_tempa_paths):
     assert tempa_config.read_config_safe() == {}
 

@@ -42,6 +42,7 @@ from tempa_config import (
     set_epic_session_id,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
+from tempa_maintenance import _epic_features_actually_done
 from tempa_notifications import AttentionEventType, notify_attention
 
 
@@ -625,6 +626,38 @@ def _try_reorder_for_dependency(config: dict, stuck_index: int, blocked_by_epic:
     return None
 
 
+def _epic_genuinely_complete(epic: dict) -> bool:
+    """True iff `epic`'s own feature-level bookkeeping proves it is genuinely fully
+    implemented: it has a non-empty total_features, completed_features equals it, and
+    _epic_features_actually_done confirms every individual feature agrees (that check
+    alone isn't enough on its own here — it vacuously returns True when an epic has no
+    "features" list at all, which is the right default for the QA gate it normally
+    guards, but wrong for this use: an epic with total_features==0 has proven nothing).
+
+    Used by run_session's no-progress-limit branch to tell a real external blocker apart
+    from a QA-state bookkeeping desync (see _repair_qa_state_desync): an epic that made no
+    forward progress across implement_no_progress_rounds resumed sessions AND satisfies
+    this isn't actually stuck implementing anything — its code is done, only its epic-level
+    status/QA fields disagree with that fact."""
+    total = epic.get("total_features", 0)
+    completed = epic.get("completed_features", 0)
+    return total > 0 and completed == total and _epic_features_actually_done(epic)
+
+
+def _repair_qa_state_desync(epic: dict) -> None:
+    """Repair a QA-state bookkeeping desync in place: route `epic` back through the normal
+    QA gate instead of the caller marking it failed. Sets status="done" (satisfies
+    check_and_run's "done and not qa_passed" QA-gate condition, tempa_implement.py:213),
+    qa_passed=False and qa_status="idle" (matches what a fresh, never-QA'd epic looks
+    like), and resets no_progress_rounds back to 0 so a genuinely new stall on this same
+    epic after the repair gets its own full grace period instead of instantly re-tripping
+    the limit again. Caller (run_session) still has to save_config."""
+    epic["status"] = "done"
+    epic["qa_passed"] = False
+    epic["qa_status"] = "idle"
+    epic["no_progress_rounds"] = 0
+
+
 def _reason_with_counterpart_context(reason: str, epics: list[dict], blocked_by_epic: str | None) -> str:
     """Append the counterpart epic's own last `blocked_reason` (if it has one) to `reason` —
     so a human deciding what to do about a stuck epic that couldn't be auto-reordered (most
@@ -808,6 +841,42 @@ def run_session(
                             epic=session_label,
                             log_path=log_path,
                             details={"reason": reason, "blocked_by_epic": blocked_by_epic},
+                        )
+                    elif _epic_genuinely_complete(epic):
+                        # The epic's own feature bookkeeping proves it's actually fully
+                        # implemented — this isn't a real external blocker, it's a QA-state
+                        # bookkeeping desync (e.g. the epic was already QA-passed and its
+                        # epic-level status/qa_passed got reverted or lost — see
+                        # tempa_config.save_config's non-atomic-write caveat). Repair it and
+                        # route it back through the normal QA gate instead of failing it.
+                        _repair_qa_state_desync(epic)
+                        save_config(config)
+                        log(
+                            f"Session [{session_label}] made no progress for {limit} resumed session(s) "
+                            "in a row, but its own feature bookkeeping shows all "
+                            f"{epic.get('total_features', 0)} feature(s) are actually done — this looks "
+                            "like a QA-state bookkeeping desync (the epic was likely already QA-passed and "
+                            "its epic-level status/qa_passed got reverted or lost) rather than a real "
+                            "blocker outside this epic. Routing it back through the QA gate automatically "
+                            "instead of marking it failed; it will be re-QA'd on the next poll. Its own "
+                            f"last explanation:\n{reason}"
+                        )
+                        notify_attention(
+                            AttentionEventType.IMPLEMENTATION_QA_STATE_REPAIRED,
+                            "Implementation",
+                            f"{session_label} reports fully complete but wasn't marked done/QA-passed — "
+                            "routed back through QA",
+                            "No action needed — this was repaired automatically and will be re-QA'd on "
+                            "the next poll. If this recurs for the same epic, it's worth investigating "
+                            "why its QA/epic-level state keeps reverting (a config.json write race is "
+                            "one candidate).",
+                            epic=session_label,
+                            log_path=log_path,
+                            details={
+                                "reason": reason,
+                                "completed_features": epic.get("completed_features", 0),
+                                "total_features": epic.get("total_features", 0),
+                            },
                         )
                     else:
                         reason = _reason_with_counterpart_context(reason, config["epic"], blocked_by_epic)
