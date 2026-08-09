@@ -45,6 +45,9 @@ a. UPDATE ${config_path} — READ first, then EDIT:
    - Find the entry with "epic_name": "${epic}" in the "epic" array
    - Set "qa_passed" to true
    - Set "qa_status" to "done"
+   - Set EVERY feature in the "features" array to "status": "done" — a previous failed QA
+     round may have left some marked "require_fixing", and you just verified they all pass
+   - Set "completed_features" = the total number of features in the array
 
 IMPORTANT: You MUST update ${config_path} (set qa_status="done") under one of the two conditions above.
 Otherwise, the agent runner will detect that QA is still ongoing and try to resume this session.

@@ -214,6 +214,90 @@ def test_epic_features_actually_done_false_when_completed_count_mismatches():
 
 
 # ---------------------------------------------------------------------------
+# reconcile_qa_passed_features
+# ---------------------------------------------------------------------------
+
+def test_reconcile_qa_passed_features_marks_leftover_require_fixing_done():
+    # The real-world bug: QA failed once (which set every feature to require_fixing and
+    # completed_features to 0), the re-implementation round set the epic done without
+    # redoing that per-feature bookkeeping, and the next QA passed -- leaving an epic that
+    # is "done + QA passed" while all its features still read require_fixing.
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 0, "total_features": 6,
+        "features": [{"status": "require_fixing"}] * 6,
+    }]}
+    assert tm.reconcile_qa_passed_features(config) == [("EPIC-04", 6)]
+    epic = config["epic"][0]
+    assert all(f["status"] == "done" for f in epic["features"])
+    assert epic["completed_features"] == 6
+
+
+def test_reconcile_qa_passed_features_fixes_stale_completed_count_only():
+    # completed_features drifted out of sync (here: above total, from a double increment)
+    # even though every feature is individually done -- still a contradiction to repair.
+    config = {"epic": [{
+        "epic_name": "EPIC-10", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 5, "total_features": 4,
+        "features": [{"status": "done"}] * 4,
+    }]}
+    assert tm.reconcile_qa_passed_features(config) == [("EPIC-10", 0)]
+    assert config["epic"][0]["completed_features"] == 4
+
+
+def test_reconcile_qa_passed_features_backfills_missing_total():
+    config = {"epic": [{
+        "epic_name": "EPIC-11", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 0, "total_features": 0,
+        "features": [{"status": "require_fixing"}, {"status": "done"}],
+    }]}
+    assert tm.reconcile_qa_passed_features(config) == [("EPIC-11", 1)]
+    assert config["epic"][0]["total_features"] == 2
+    assert config["epic"][0]["completed_features"] == 2
+
+
+def test_reconcile_qa_passed_features_noop_when_already_consistent():
+    config = {"epic": [{
+        "epic_name": "EPIC-02", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 2, "total_features": 2,
+        "features": [{"status": "done"}, {"status": "done"}],
+    }]}
+    assert tm.reconcile_qa_passed_features(config) == []
+
+
+def test_reconcile_qa_passed_features_ignores_epics_that_did_not_pass_qa():
+    # Nothing here may be touched: an epic still being worked on, one whose QA FAILED (the
+    # require_fixing statuses are the whole point of that state), and one whose QA session
+    # is still in flight.
+    config = {"epic": [
+        {"epic_name": "E1", "status": "on_progress", "qa_passed": False, "qa_status": "idle",
+         "completed_features": 0, "total_features": 2,
+         "features": [{"status": "require_fixing"}, {"status": "pending"}]},
+        {"epic_name": "E2", "status": "require_fixing", "qa_passed": False, "qa_status": "done",
+         "completed_features": 0, "total_features": 2,
+         "features": [{"status": "require_fixing"}, {"status": "require_fixing"}]},
+        {"epic_name": "E3", "status": "done", "qa_passed": True, "qa_status": "ongoing",
+         "completed_features": 0, "total_features": 2,
+         "features": [{"status": "require_fixing"}, {"status": "done"}]},
+    ]}
+    assert tm.reconcile_qa_passed_features(config) == []
+    assert config["epic"][0]["features"][0]["status"] == "require_fixing"
+    assert config["epic"][1]["features"][0]["status"] == "require_fixing"
+    assert config["epic"][2]["features"][0]["status"] == "require_fixing"
+
+
+def test_reconcile_qa_passed_features_and_log_reports_change(capsys):
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done",
+        "completed_features": 0, "total_features": 2,
+        "features": [{"status": "require_fixing"}, {"status": "done"}],
+    }]}
+    assert tm.reconcile_qa_passed_features_and_log(config) is True
+    assert "EPIC-04" in capsys.readouterr().out
+    assert tm.reconcile_qa_passed_features_and_log(config) is False
+
+
+# ---------------------------------------------------------------------------
 # _reset_failed_epics / _reset_qa_state / _reset_on_progress_epics
 # ---------------------------------------------------------------------------
 
