@@ -8,6 +8,14 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **The Implementation Status tab now shows a spinning "QA running" indicator** on an
+  epic's card while its QA session is actively in progress (`qa_status === "ongoing"`),
+  instead of showing nothing (or a stale "QA --") until the session finishes. The
+  dashboard also keeps polling for updates while any epic is running or being QA'd, even
+  if that session wasn't started from this dashboard instance.
+
 ### Fixed
 
 - **Two v0.5.6 changes shipped with no documentation of their own** — only CHANGELOG entries.
@@ -18,6 +26,12 @@ once the first tagged release is cut.
   grace period after a `[Done]` signal, force-terminate, and why it isn't treated as a real
   failure for implement/QA sessions but is for `clarify`/`verify`). README gets a short
   pointer to each from the relevant step.
+- **Scrolling up in the Clarify/Implement Log panel to read earlier output got yanked back
+  to the bottom** on the next 1-second poll tick, because both log panels were rebuilt from
+  scratch on every render and unconditionally forced `scrollTop` to the bottom. Both panels
+  now only follow new content to the bottom if the user was already there (or hadn't
+  scrolled yet); scrolling up now stays put while the log keeps updating underneath, and
+  scrolling back to the bottom resumes auto-follow.
 - **An implementation session that made no progress across `implement_no_progress_rounds`
   resumed sessions, but whose own feature bookkeeping showed every feature already
   `done`, was being marked `failed`** with a misleading "likely blocked on something

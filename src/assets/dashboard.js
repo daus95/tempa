@@ -1237,6 +1237,14 @@ function linkifyLogFilenames(escapedMsg) {
   );
 }
 
+// Whether a log panel is currently scrolled to (or near) its bottom — used to decide
+// whether a re-render should follow new content or leave the user's scroll-up position
+// alone (a 1s poll rebuilds the whole panel, so without this a user reading earlier
+// lines gets yanked back to the bottom on every tick).
+function isScrolledNearBottom(el, threshold = 4) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+}
+
 function appendClarifyLogRow(text) {
   const f = formatClarifyLogLine(text);
   const row = document.createElement("div");
@@ -1249,6 +1257,7 @@ function appendClarifyLogRow(text) {
 }
 
 function renderClarifyLog() {
+  const stickToBottom = isScrolledNearBottom(clarifyLogBody);
   clarifyLogBody.innerHTML = "";
   if (!state.clarifyRun.lines.length && !state.clarifyRun.progress) {
     clarifyLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
@@ -1259,7 +1268,9 @@ function renderClarifyLog() {
   // re-rendered fresh on every poll, so its elapsed time visibly keeps ticking instead of
   // freezing at whatever value happened to be present the first time it was fetched.
   if (state.clarifyRun.progress) clarifyLogBody.appendChild(appendClarifyLogRow(state.clarifyRun.progress));
-  clarifyLogBody.scrollTop = clarifyLogBody.scrollHeight;
+  // Only follow new content to the bottom if the user was already there (or hadn't
+  // scrolled) — otherwise a poll tick mid-read would yank them back down.
+  if (stickToBottom) clarifyLogBody.scrollTop = clarifyLogBody.scrollHeight;
 }
 
 function stopClarifyPolling() {
@@ -1429,7 +1440,11 @@ function renderImplementStatus() {
     const card = document.createElement("div");
     card.className = "impl-epic-card";
     const qaTag = epic.status === "done"
-      ? (epic.qa_passed ? '<span class="impl-qa-ok">QA ok</span>' : '<span class="impl-qa-pending">QA --</span>')
+      ? (epic.qa_status === "ongoing"
+          ? `<span class="impl-qa-running">${iconSvg("loader-circle", "icon-spin")} QA running</span>`
+          : epic.qa_passed
+            ? '<span class="impl-qa-ok">QA ok</span>'
+            : '<span class="impl-qa-pending">QA --</span>')
       : "";
     const lastRun = epic.last_run ? escapeHtml(epic.last_run.slice(0, 16).replace("T", " ")) : "-";
     const features = (epic.features || []).map((f) =>
@@ -1458,6 +1473,7 @@ function renderImplementStatus() {
 }
 
 function renderImplementLog() {
+  const stickToBottom = isScrolledNearBottom(implLogBody);
   implLogBody.innerHTML = "";
   if (!state.implementRun.lines.length && !state.implementRun.progress) {
     implLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
@@ -1465,7 +1481,9 @@ function renderImplementLog() {
   }
   for (const text of state.implementRun.lines) implLogBody.appendChild(appendClarifyLogRow(text));
   if (state.implementRun.progress) implLogBody.appendChild(appendClarifyLogRow(state.implementRun.progress));
-  implLogBody.scrollTop = implLogBody.scrollHeight;
+  // Only follow new content to the bottom if the user was already there (or hadn't
+  // scrolled) — otherwise a poll tick mid-read would yank them back down.
+  if (stickToBottom) implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
 // The preconditions gating "Start Implementation": clarification has run at least
@@ -1554,9 +1572,13 @@ async function refreshImplementRun() {
     state.implementRun.running = data.running;
     updateImplementControls();
     homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready;
-    if (data.running && !state.implementRun.pollTimer) startImplementPolling();
+    // Keep polling while any epic is actively running/QA'ing even if this dashboard
+    // session isn't the one that started it (e.g. `tempa implement` in a terminal) —
+    // otherwise the spinner freezes stale until the user re-navigates to the tab.
+    const qaActive = (state.epics || []).some((e) => e.qa_status === "ongoing" || e.status === "on_progress");
+    if ((data.running || qaActive) && !state.implementRun.pollTimer) startImplementPolling();
     if (!data.running) {
-      stopImplementPolling();
+      if (!qaActive) stopImplementPolling();
       if (wasRunning && data.returncode !== null) {
         toast(returncodeMessage(data.returncode, "implement"), data.returncode !== 0);
       }

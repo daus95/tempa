@@ -189,6 +189,8 @@
   .impl-epic-progress, .impl-epic-lastrun { color: var(--muted); font-size: 0.82rem; }
   .impl-qa-ok { color: var(--ok); font-weight: 600; font-size: 0.8rem; }
   .impl-qa-pending { color: var(--major); font-weight: 600; font-size: 0.8rem; }
+  .impl-qa-running { color: var(--accent); font-weight: 600; font-size: 0.8rem;
+    display: inline-flex; align-items: center; gap: 4px; }
   .impl-epic-blocked-reason { margin-top: 10px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--danger); background: var(--accent-soft); color: var(--danger);
     font-size: 0.85rem; line-height: 1.5; }
