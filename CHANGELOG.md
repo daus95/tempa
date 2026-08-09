@@ -16,6 +16,24 @@ once the first tagged release is cut.
   dashboard also keeps polling for updates while any epic is running or being QA'd, even
   if that session wasn't started from this dashboard instance.
 
+### Fixed
+
+- **An implementation session that made no progress across `implement_no_progress_rounds`
+  resumed sessions, but whose own feature bookkeeping showed every feature already
+  `done`, was being marked `failed`** with a misleading "likely blocked on something
+  outside this epic" message — even though the epic's code was genuinely complete and the
+  agent correctly had nothing left to do. This happens when an epic's `done`/`qa_passed`
+  state gets reverted or lost after a real QA pass (a QA-state bookkeeping desync).
+  `run_session` now recognizes this case (`_epic_genuinely_complete`) and repairs the
+  epic's state instead of failing it, routing it back through the normal QA gate to be
+  re-QA'd on the next poll (`_repair_qa_state_desync`), with a new
+  `implementation_qa_state_repaired` notification event for visibility.
+- **`config.json` writes were not atomic** (`save_config` did a plain in-place
+  `open(..., "w")`) — a process interruption mid-write could leave a torn/partial file, and
+  contributed to the state-desync failure mode above. Writes now go to a temp file in the
+  same directory followed by `os.replace()`, matching the pattern already used for the
+  notification outbox.
+
 ## [0.5.7] - 2026-08-09
 
 ### Added
