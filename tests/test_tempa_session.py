@@ -701,6 +701,55 @@ def test_try_reorder_for_dependency_refuses_circular_reversal():
 
 
 # ---------------------------------------------------------------------------
+# _epic_genuinely_complete / _repair_qa_state_desync
+# ---------------------------------------------------------------------------
+
+def test_epic_genuinely_complete_true_when_all_features_done():
+    epic = {
+        "total_features": 2, "completed_features": 2,
+        "features": [{"status": "done"}, {"status": "done"}],
+    }
+    assert ts._epic_genuinely_complete(epic) is True
+
+
+def test_epic_genuinely_complete_false_when_features_incomplete():
+    epic = {
+        "total_features": 2, "completed_features": 1,
+        "features": [{"status": "done"}, {"status": "pending"}],
+    }
+    assert ts._epic_genuinely_complete(epic) is False
+
+
+def test_epic_genuinely_complete_false_when_total_features_zero():
+    # No features ever recorded — _epic_features_actually_done alone would vacuously
+    # return True here; the total>0 guard is what prevents a false "genuinely complete".
+    epic = {"total_features": 0, "completed_features": 0, "features": []}
+    assert ts._epic_genuinely_complete(epic) is False
+
+
+def test_epic_genuinely_complete_false_when_feature_status_disagrees():
+    # completed_features/total_features agree at the epic level, but a feature's own
+    # status still says otherwise — the underlying integrity check must still catch this.
+    epic = {
+        "total_features": 2, "completed_features": 2,
+        "features": [{"status": "done"}, {"status": "require_fixing"}],
+    }
+    assert ts._epic_genuinely_complete(epic) is False
+
+
+def test_repair_qa_state_desync_routes_back_through_qa_gate():
+    epic = {
+        "status": "require_fixing", "qa_passed": False, "qa_status": "idle",
+        "no_progress_rounds": 2, "total_features": 3, "completed_features": 3,
+    }
+    ts._repair_qa_state_desync(epic)
+    assert epic["status"] == "done"
+    assert epic["qa_passed"] is False
+    assert epic["qa_status"] == "idle"
+    assert epic["no_progress_rounds"] == 0
+
+
+# ---------------------------------------------------------------------------
 # _reason_with_counterpart_context
 # ---------------------------------------------------------------------------
 
