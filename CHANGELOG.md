@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-08-09
+
 ### Added
 
 - **The Implementation Status tab now shows a spinning "QA running" indicator** on an
