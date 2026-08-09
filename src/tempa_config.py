@@ -13,8 +13,10 @@ tempa.py imports dashboard_ui).
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -294,10 +296,25 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
+    """Write config.json atomically: serialize to a temp file in the same directory, then
+    os.replace() it into place. A reader (this module's own load_config/read_config_safe,
+    or the spawned CLI agent's own file-read) never observes a partially-written file — it
+    either sees the old complete content or the new complete content, never a torn write.
+    This does NOT eliminate the separate lost-update race against the spawned agent process
+    editing the same file concurrently (a load-modify-save cycle here can still overwrite
+    whatever the agent wrote in between with the version Tempa read before it) — that would
+    need cross-process locking and is intentionally out of scope here."""
     config_path = get_config_path()
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, prefix=".config.", suffix=".json.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
 
 
 def read_config_safe() -> dict:
