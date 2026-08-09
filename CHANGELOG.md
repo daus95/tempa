@@ -23,6 +23,17 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **Scrolling the Implementation page's Status tab dragged the whole page with it** — the
+  Start/Continue and Stop Implementation buttons, the "Implementation readiness" card and the
+  Status/Log tab bar all scrolled out of view, and the epic cards ended up visually outside the
+  tab they belong to. The page is now a fixed-height column whose header stays pinned, with the
+  active tab panel as the scroll container (the same recipe the log-file viewer modal and the
+  sidebar already use); the Log tab, which already scrolled internally, is unchanged.
+- **The Implementation Status tab could not be scrolled at all while a run was active** — the
+  1-second poll rebuilt every epic card from scratch, and emptying the container collapsed its
+  height, so the browser clamped the scroll position back to the top on every tick. The panel's
+  scroll position is now preserved across a re-render, the same way both Log panels already
+  keep their position.
 - **Two v0.5.6 changes shipped with no documentation of their own** — only CHANGELOG entries.
   `docs/logging.md` gains a "Viewing a log file in the dashboard" section explaining the
   Clarify/Implement Log tabs' clickable filename links, the viewer modal, and the
