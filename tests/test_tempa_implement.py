@@ -323,3 +323,40 @@ def test_check_and_run_qa_gate_runs_qa_when_features_actually_done(isolate_tempa
     _state.running_thread.join(timeout=5)
     assert seen["called"] is True
     assert tempa_config.load_config()["epic"][0]["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# check_and_run — self-healing a QA-passed epic whose features never got resynced
+# ---------------------------------------------------------------------------
+
+def test_check_and_run_reconciles_qa_passed_epic_with_require_fixing_features(
+    isolate_tempa_paths, monkeypatch,
+):
+    # Regression: QA failed once (marking every feature require_fixing), the fix round set
+    # the epic done without redoing the per-feature bookkeeping, and the next QA passed --
+    # so the epic reads "done + QA passed" with require_fixing features forever, because
+    # the QA prompt's pass branch never touches them. check_and_run repairs it in place
+    # instead of scheduling any work for it.
+    tempa_config.save_config({"epic": [
+        {"epic_name": "EPIC-04", "status": "done", "qa_passed": True, "qa_status": "done",
+         "completed_features": 0, "total_features": 2,
+         "features": [{"id": "f1", "name": "n1", "status": "require_fixing"},
+                      {"id": "f2", "name": "n2", "status": "require_fixing"}]},
+        {"epic_name": "EPIC-05", "status": "pending", "qa_passed": False,
+         "completed_features": 0, "total_features": 1,
+         "features": [{"id": "f1", "name": "n1", "status": "pending"}]},
+    ]})
+
+    monkeypatch.setattr(ti, "run_session", lambda *a, **k: None)
+    monkeypatch.setattr(ti, "run_qa_session",
+                        lambda *a, **k: pytest.fail("QA must not re-run for a passed epic"))
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    repaired = tempa_config.load_config()["epic"][0]
+    assert [f["status"] for f in repaired["features"]] == ["done", "done"]
+    assert repaired["completed_features"] == 2
+    assert repaired["status"] == "done"
+    assert repaired["qa_passed"] is True

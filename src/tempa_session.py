@@ -42,7 +42,7 @@ from tempa_config import (
     set_epic_session_id,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
-from tempa_maintenance import _epic_features_actually_done
+from tempa_maintenance import _epic_features_actually_done, reconcile_qa_passed_features_and_log
 from tempa_notifications import AttentionEventType, notify_attention
 
 
@@ -939,6 +939,14 @@ def run_qa_session(
     # qa_status is managed by the agent in config.json.
     # If it is still "ongoing" after this session, check_and_run will detect and resume.
     with _state.lock:
+        # A pass verdict leaves the feature statuses of an earlier failed QA round untouched
+        # (the PASS branch of the QA prompt only writes qa_passed/qa_status) — resync them
+        # here, right after the verdict lands, so the status output and the dashboard never
+        # show this epic as QA-passed with 🔧 features. check_and_run does the same on every
+        # poll as the catch-all; this call is what makes the repair immediate.
+        config = load_config()
+        if reconcile_qa_passed_features_and_log(config):
+            save_config(config)
         _state.running_thread = None
         _state.running_index = None
 

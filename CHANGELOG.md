@@ -23,6 +23,19 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **Epics showed as "QA ok" while their features were still stuck on `require_fixing`** —
+  and with a `completed_features` count (often `0/N`) that contradicted the QA verdict, in
+  `tempa status` and on the dashboard alike. A *failing* QA round rewrites every affected
+  feature to `require_fixing` and recalculates `completed_features`; the QA prompt's *pass*
+  branch only ever wrote `qa_passed`/`qa_status`, so cleaning that up again was left entirely
+  to the following fix round's per-feature bookkeeping — and when that round marked only the
+  epic itself `done` (a routine agent slip), nothing ever corrected the feature statuses,
+  even after QA re-ran and passed. The pass branch of both QA prompts now marks every feature
+  `done` and sets `completed_features` to the total, and `check_and_run` reconciles it
+  deterministically on every poll and right after each QA session — which also repairs
+  configs already left in that state by earlier versions. Guarded to `done` +
+  `qa_passed: true` + `qa_status: done` epics only, so a failed or in-flight QA round's
+  `require_fixing` statuses are never overwritten.
 - **Scrolling the Implementation page's Status tab dragged the whole page with it** — the
   Start/Continue and Stop Implementation buttons, the "Implementation readiness" card and the
   Status/Log tab bar all scrolled out of view, and the epic cards ended up visually outside the

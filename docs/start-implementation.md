@@ -133,6 +133,22 @@ runs when manually forcing a re-check with `implement --reset-qa EPIC-ID` (see R
 below), so resetting an epic that has this problem doesn't just immediately re-trigger QA
 against the same incomplete state.
 
+**A QA pass also resyncs the feature bookkeeping.** When QA *fails*, it rewrites every
+affected feature to `require_fixing` and recalculates `completed_features` — so the fix round
+that follows has to mark each of those features `done` again for the epic's own bookkeeping to
+end up consistent. When that round skips the per-feature step (marking only the epic itself
+`done`), the epic can end up `done` + `qa_passed: true` while its features still read
+`require_fixing` and `completed_features` still reads `0/N` — a self-contradictory state that
+misreports progress in `tempa status` and on the dashboard, and that makes a later
+`--reset-qa` bounce the epic into a pointless re-implementation round. The QA prompt's pass
+branch now tells the agent to mark every feature `done` and set `completed_features` to the
+total, and `check_and_run` reconciles it deterministically on every poll (and right after
+each QA session) for the cases where the agent doesn't — including configs left in that state
+by earlier versions. Only an epic that is `done` **and** `qa_passed: true` **and**
+`qa_status: done` is reconciled: a failing QA verdict sets the epic-level status to
+`require_fixing` before it touches any feature, so an in-flight or failed QA round is never
+overwritten.
+
 ## Cross-Epic Dependencies (No-Forward-Progress Guard)
 
 Epics are implemented in plan order — normally that's fine, since later epics build on

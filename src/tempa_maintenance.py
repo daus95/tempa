@@ -286,6 +286,61 @@ def _epic_features_actually_done(epic: dict) -> bool:
     return completed == total and all(f.get("status") == "done" for f in features)
 
 
+def reconcile_qa_passed_features(config: dict) -> list[tuple[str, int]]:
+    """Bring the feature-level bookkeeping of every QA-PASSED epic back in line with the
+    QA verdict, and return [(label, features_flipped)] for the epics that were repaired —
+    the caller still has to save_config. Empty list = everything already consistent.
+
+    Why this is needed: the QA prompt's PASS branch (src/prompt/qa.md) only tells the agent
+    to set qa_passed/qa_status — the FAIL branch is what rewrites feature statuses to
+    "require_fixing" and recalculates completed_features. So in the normal
+    QA-fails → re-implement → QA-passes cycle, the "require_fixing" feature statuses (and
+    the completed_features count QA reset along with them) are only ever cleaned up by the
+    re-implementation agent's own per-feature bookkeeping — and when that agent skips the
+    step (it marks the epic done without touching each feature, a routine LLM slip), the
+    epic ends up permanently "done + QA passed" while its features still read
+    "require_fixing" and completed_features reads 0/N. That state is self-contradictory: it
+    misreports progress in `tempa status` and the dashboard, and it makes a later
+    --reset-qa reroute the epic back into a pointless re-implementation round
+    (reset_qa_state uses _epic_features_actually_done).
+
+    Trusting the QA verdict over the feature statuses is the correct direction here: QA only
+    ever runs on an epic whose features were ALL already marked done (check_and_run's QA gate
+    enforces that via _epic_features_actually_done before dispatching QA), and a pass means
+    QA re-verified every feature against the spec. The epic-level status/qa_status guards
+    below are what keep this from touching an interrupted QA session's in-flight state: a QA
+    agent that finds problems sets the EPIC-level status to "require_fixing" first, before it
+    rewrites any feature status, so a half-written failure verdict never satisfies
+    status == "done"."""
+    repaired: list[tuple[str, int]] = []
+    for i, epic in enumerate(config.get("epic") or []):
+        if not (epic.get("status") == "done" and epic.get("qa_passed", False)
+                and epic.get("qa_status") == "done"):
+            continue
+        features = epic.get("features") or []
+        if not features or _epic_features_actually_done(epic):
+            continue
+        flipped = sum(1 for f in features if f.get("status") != "done")
+        for feature in features:
+            feature["status"] = "done"
+        epic["completed_features"] = len(features)
+        if epic.get("total_features", 0) <= 0:
+            epic["total_features"] = len(features)
+        repaired.append((epic.get("epic_name", f"epic_{i}"), flipped))
+    return repaired
+
+
+def reconcile_qa_passed_features_and_log(config: dict) -> bool:
+    """reconcile_qa_passed_features + a log line per repaired epic. Returns True if anything
+    changed, i.e. if the caller needs to save_config."""
+    repaired = reconcile_qa_passed_features(config)
+    for label, flipped in repaired:
+        log(f"[{label}] passed QA but still had {flipped} feature(s) left marked "
+            "require_fixing/pending from an earlier failed QA round — marked them done and "
+            "resynced completed_features to match the QA verdict.")
+    return bool(repaired)
+
+
 def reset_failed_epics(config: dict) -> list[str]:
     """Flip every `failed` epic in `config` back to `pending` for a genuine clean-slate retry
     — dropping its stored session id (so the next attempt starts a fresh session) AND its

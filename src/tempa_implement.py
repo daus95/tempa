@@ -29,7 +29,11 @@ from tempa_config import (
     save_config,
 )
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
-from tempa_maintenance import _epic_features_actually_done, reset_failed_epics
+from tempa_maintenance import (
+    _epic_features_actually_done,
+    reconcile_qa_passed_features_and_log,
+    reset_failed_epics,
+)
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
     build_plan_epics_prompt,
@@ -129,6 +133,13 @@ def check_and_run(features_override: int | None = None) -> None:
             return
 
         config = load_config()
+
+        # Self-heal any QA-passed epic whose feature bookkeeping still contradicts its own
+        # QA verdict (see reconcile_qa_passed_features) before anything reads that state to
+        # make a scheduling decision. Also repairs configs written by older versions, which
+        # had no such reconciliation at all.
+        if reconcile_qa_passed_features_and_log(config):
+            save_config(config)
 
         # QA resumption: if any epic has qa_status="ongoing", resume that QA session first
         for i, session in enumerate(config["epic"]):
