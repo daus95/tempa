@@ -1313,6 +1313,7 @@ async function pollClarifyRun() {
     state.clarifyRun.progress = data.progress;
     renderClarifyLog();
     state.clarifyRun.running = data.running;
+    syncClarifyLockState();
     clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
     // Finalize's round counter, read fresh from config.json every poll (see
@@ -2518,6 +2519,21 @@ function isClarifyFinalizeLocked() {
 const CLARIFY_LOCKED_BANNER_HTML =
   '<div class="clarify-locked-banner">Finalized Clarification is running and auto-answering ' +
   "these findings — answers are read-only until it stops.</div>";
+
+// openClarifyFile applies the lock at open time only; this keeps a file that is
+// already on screen in sync when a finalize run starts or ends underneath it —
+// without it, a file opened before the run stays editable-looking until save, and
+// one opened during the run stays greyed out after it ends until the user closes
+// and reopens the file. Called every poll tick; a no-op unless the state flipped.
+function syncClarifyLockState() {
+  if (!state.selectedClarifyPath || state.clarifyShowingOverview) return;
+  const locked = isClarifyFinalizeLocked();
+  const banner = clarifyBody.querySelector(".clarify-locked-banner");
+  if (locked === !!banner) return;
+  if (locked) clarifyBody.insertAdjacentHTML("afterbegin", CLARIFY_LOCKED_BANNER_HTML);
+  else banner.remove();
+  clarifyBody.querySelectorAll('input[type=radio], textarea').forEach((el) => { el.disabled = locked; });
+}
 
 // Bulk-selects "Follow the recommendation" for every item that has no radio picked
 // yet (i.e. hasn't been answered in this session) — leaves items the user already
