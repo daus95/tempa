@@ -1429,7 +1429,11 @@ function renderImplementStatus() {
     const card = document.createElement("div");
     card.className = "impl-epic-card";
     const qaTag = epic.status === "done"
-      ? (epic.qa_passed ? '<span class="impl-qa-ok">QA ok</span>' : '<span class="impl-qa-pending">QA --</span>')
+      ? (epic.qa_status === "ongoing"
+          ? `<span class="impl-qa-running">${iconSvg("loader-circle", "icon-spin")} QA running</span>`
+          : epic.qa_passed
+            ? '<span class="impl-qa-ok">QA ok</span>'
+            : '<span class="impl-qa-pending">QA --</span>')
       : "";
     const lastRun = epic.last_run ? escapeHtml(epic.last_run.slice(0, 16).replace("T", " ")) : "-";
     const features = (epic.features || []).map((f) =>
@@ -1554,9 +1558,13 @@ async function refreshImplementRun() {
     state.implementRun.running = data.running;
     updateImplementControls();
     homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready;
-    if (data.running && !state.implementRun.pollTimer) startImplementPolling();
+    // Keep polling while any epic is actively running/QA'ing even if this dashboard
+    // session isn't the one that started it (e.g. `tempa implement` in a terminal) —
+    // otherwise the spinner freezes stale until the user re-navigates to the tab.
+    const qaActive = (state.epics || []).some((e) => e.qa_status === "ongoing" || e.status === "on_progress");
+    if ((data.running || qaActive) && !state.implementRun.pollTimer) startImplementPolling();
     if (!data.running) {
-      stopImplementPolling();
+      if (!qaActive) stopImplementPolling();
       if (wasRunning && data.returncode !== null) {
         toast(returncodeMessage(data.returncode, "implement"), data.returncode !== 0);
       }
