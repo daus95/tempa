@@ -246,7 +246,7 @@ DEFAULT_CONFIG = {
             "security": "starttls",
             "smtp_username": "",
             "smtp_password": "",
-            "from": "",
+            "from": "tempa-noreply@tempa-ai.com",
             "recipients": [],
             "username_env": "TEMPA_SMTP_USERNAME",
             "password_env": "TEMPA_SMTP_PASSWORD",
