@@ -358,6 +358,11 @@
             <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
             <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
           </div>
+          <div class="settings-field">
+            <label for="settingsFinalizeNoProgressRounds">Max Finalize No-Progress Round</label>
+            <p class="settings-field-desc">How many rounds in a row may fail to reduce the critical + major finding count before Finalized Clarification gives up early — the remaining findings likely need a human decision rather than more automated apply passes. Raise it to let the automation keep trying for longer.</p>
+            <input type="number" id="settingsFinalizeNoProgressRounds" min="1" step="1">
+          </div>
         </div>
         <div class="settings-group">
           <h3>Clarification</h3>

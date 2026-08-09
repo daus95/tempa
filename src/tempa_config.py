@@ -224,7 +224,7 @@ DEFAULT_CONFIG = {
     "resume_implementation_sessions": True,
     "max_session_run": 30,
     "max_clarification_run": 20,
-    "finalize_no_progress_rounds": 2,
+    "finalize_no_progress_rounds": 5,
     "implement_no_progress_rounds": 2,
     "usage_limit_retry_wait_sec": 1800,
     "usage_limit_heartbeat_sec": 300,
@@ -548,6 +548,13 @@ def get_resume_implementation_sessions(config: dict) -> bool:
     where resuming misbehaves for a given backend/workspace."""
     value = config.get("resume_implementation_sessions")
     return bool(value) if isinstance(value, bool) else True
+
+
+def get_finalize_no_progress_rounds(config: dict) -> int | float:
+    """Return config.json's "finalize_no_progress_rounds" — how many `clarify --finalize`
+    rounds in a row may fail to reduce the critical+major finding count before the loop
+    gives up and asks for human answers (see run_clarify_finalize) — defaulting to 5."""
+    return _get_positive_number(config, "finalize_no_progress_rounds", DEFAULT_CONFIG["finalize_no_progress_rounds"])
 
 
 def get_poll_interval_sec(config: dict) -> int | float:

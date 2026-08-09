@@ -216,6 +216,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsModelNotePlan = $("settingsModelNotePlan"),
   settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
+  settingsFinalizeNoProgressRounds = $("settingsFinalizeNoProgressRounds"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),
@@ -1224,11 +1225,13 @@ function formatClarifyLogLine(text) {
 }
 
 // Matches the bare filenames tempa_session._run_backend_session's own banner line always
-// names (e.g. "... | log: session_EPIC-17_20260809_044718.txt") — every session/QA/process
-// log Tempa writes follows this <prefix>_<name>_<timestamp>.txt shape with no path
-// separators, so this alone is enough to find them inside an already-escaped log message
-// without matching anything else.
-const LOG_FILENAME_RE = /\b((?:session|qa|process)_[\w-]+\.txt)\b/g;
+// names (e.g. "... | log: session_EPIC-17_20260809_044718.txt"). Anchored on the
+// _<YYYYMMDD>_<HHMMSS>.txt suffix every log Tempa writes ends with rather than on a list of
+// known prefixes, so clarification_/apply_clarification_/verify_/plan_epics_* logs linkify
+// too — and any prefix added later does as well, without another edit here. No path
+// separators are allowed in the match, so it only ever yields the bare filename
+// /api/log-file expects (which serves flat files out of .tempa/logs/).
+const LOG_FILENAME_RE = /\b([\w.-]+_\d{8}_\d{6}\.txt)\b/g;
 
 function linkifyLogFilenames(escapedMsg) {
   return escapedMsg.replace(
@@ -1887,6 +1890,7 @@ function fillSettingsForm(config) {
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
+  settingsFinalizeNoProgressRounds.value = config.finalize_no_progress_rounds ?? 5;
   settingsAllowFinalizeWithCritical.checked = !!config.allow_finalize_with_critical;
   settingsAllowFinalizeWithCriticalWarning.classList.toggle("hidden", !config.allow_finalize_with_critical);
   const requirement = config.implementation_start_requirement || "no_critical_or_major";
@@ -2038,6 +2042,7 @@ settingsSaveBtn.addEventListener("click", async () => {
         features_per_session: settingsFeaturesPerSession.value,
         max_session_run: settingsMaxSessionRun.value,
         max_clarification_run: settingsMaxClarificationRun.value,
+        finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
         allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
         implementation_start_requirement: selectedImplementRequirement(),
         notifications: { email: {
@@ -2066,7 +2071,7 @@ settingsSaveBtn.addEventListener("click", async () => {
     toast("Settings saved.");
     // Saved fine, but a run already in flight can't pick the new value up — surfaced as a
     // modal rather than a toast because it contradicts what the user is about to watch
-    // happen in the log (see _max_clarification_run_change_warning in dashboard_runs.py).
+    // happen in the log (see _finalize_limit_change_warning in dashboard_runs.py).
     if (data.warning) {
       settingsSaveStatus.textContent = "Saved — applies from the next Finalized Clarification run.";
       await alertModal(data.warning, { title: "Finalized Clarification Is Already Running" });

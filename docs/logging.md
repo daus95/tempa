@@ -22,7 +22,10 @@ confirmation; add `--yes` to skip). See [docs/command-reference.md](command-refe
 
 Every "log: `<filename>`" reference the Clarify/Implement Log tabs print (from a session's
 own startup banner line) is a clickable link — clicking it opens the file's content in a
-viewer modal instead of needing to go find it on disk. The modal is large by default
+viewer modal instead of needing to go find it on disk. The link detection
+(`LOG_FILENAME_RE` in `dashboard.js`) keys off the `_<YYYYMMDD>_<HHMMSS>.txt` suffix every
+log filename above ends with, not a list of known prefixes, so a new `log_prefix` added to
+`_run_backend_session` becomes clickable with no dashboard change. The modal is large by default
 (`min(92vw, 1200px)` × `min(88vh, 900px)`) with a header button to toggle fullscreen, since a
 session log can legitimately run past 400KB.
 

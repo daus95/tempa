@@ -166,10 +166,11 @@ not you — run this once you're confident its recommended answers can be truste
 Each round's apply step resumes the evaluate session that just wrote its findings (see
 `clarify_session_id` in [config-json.md](config-json.md)) instead of starting a fresh session
 that re-reads the whole PRD — the evaluate session already paid for that context. If
-`finalize_no_progress_rounds` (default `2`) evaluate rounds in a row fail to reduce the
-critical+major count, the loop stops on its own instead of running to `max_clarification_run`
-— those findings likely need a human decision (`tempa answer`) rather than more automated
-apply passes.
+`finalize_no_progress_rounds` (default `5`, dashboard Settings' "Max Finalize No-Progress
+Round") evaluate rounds in a row fail to reduce the critical+major count, the loop stops on
+its own instead of running to `max_clarification_run` — those findings likely need a human
+decision (`tempa answer`) rather than more automated apply passes. Raise that setting if you'd
+rather the automation kept trying for longer before giving up.
 
 `--skip-minor` also applies here (`tempa clarify --finalize --skip-minor`), skipping minor
 findings on every evaluate pass in the loop.

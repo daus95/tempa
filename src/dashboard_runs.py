@@ -87,34 +87,51 @@ def _new_clarify_run_state() -> dict:
 _CLARIFY_RUN_ARGS = {"run": ["--noui"], "finalize": ["--finalize"], "apply": ["--apply"]}
 
 
-def _max_clarification_run_change_warning(server, previous, current) -> str | None:
-    """Warning text for saving a changed "Max Finalize Clarification Round" while a Finalized
-    Clarification run is already in progress — or None when there's nothing to warn about.
+# The run limits `clarify --finalize` snapshots at process start, mapped to the label the
+# dashboard Settings pane shows for each (see _finalize_limit_change_warning below).
+_FINALIZE_SNAPSHOT_LIMITS = {
+    "max_clarification_run": "Max Finalize Clarification Round",
+    "finalize_no_progress_rounds": "Max Finalize No-Progress Round",
+}
 
-    `clarify --finalize` reads max_clarification_run ONCE, when its process starts (see
+
+def _finalize_limit_change_warning(server, previous: dict, current: dict) -> str | None:
+    """Warning text for saving a changed finalize run limit ("Max Finalize Clarification
+    Round" / "Max Finalize No-Progress Round") while a Finalized Clarification run is
+    already in progress — or None when there's nothing to warn about.
+
+    `clarify --finalize` reads both limits ONCE, when its process starts (see
     run_clarify_finalize in tempa_clarify.py), and keeps using that snapshot for its whole
     evaluate/apply loop even though it re-reads the rest of config.json every round. So
-    lowering the limit mid-run doesn't shorten the run the user is watching: its rounds keep
-    counting toward the limit that was in effect when it started ("ROUND 17/25" while the
+    lowering a limit mid-run doesn't shorten the run the user is watching: its rounds keep
+    counting toward the limits that were in effect when it started ("ROUND 17/25" while the
     Settings field reads 10), which is easily mistaken for the limit not being enforced at
     all. It is enforced — just from the next finalize run onward. This is the one moment
     that misunderstanding forms, so it's the moment to say so.
 
-    Only mode "finalize" is warned about: it's the only run that reads this setting. Fresh
-    per-run subprocesses mean nothing needs restarting for the new value to take effect."""
-    if previous == current:
+    Only mode "finalize" is warned about: it's the only run that reads these settings. Fresh
+    per-run subprocesses mean nothing needs restarting for the new values to take effect."""
+    changed = [(label, previous.get(key), current.get(key))
+               for key, label in _FINALIZE_SNAPSHOT_LIMITS.items()
+               if previous.get(key) != current.get(key)]
+    if not changed:
         return None
     run = server.clarify_run
     with run["lock"]:
         if not (run["running"] and run["mode"] == "finalize"):
             return None
-    previous_label = f"its previous limit ({previous})" if isinstance(previous, int) else "its original limit"
+    saved = "; ".join(
+        f"{label} was saved as {new}, replacing "
+        + (f"its previous limit ({old})" if isinstance(old, int) else "its original limit")
+        for label, old, new in changed
+    )
+    settings_label = "these settings" if len(changed) > 1 else "this setting"
     return (
-        f"Max Finalize Clarification Round was saved as {current}, but a Finalized Clarification run is "
-        f"already in progress and will keep using {previous_label} until it stops — it reads "
-        "this setting once, when it starts, so the round counter in its log keeps counting "
-        "toward the old limit. Your new value applies from the next Finalized Clarification "
-        "run onward; nothing needs to be restarted for it to take effect."
+        f"{saved} — but a Finalized Clarification run is already in progress and will keep "
+        f"using the old limits until it stops. It reads {settings_label} once, when it starts, "
+        "so the round counter in its log keeps counting toward the old limit. Your new value "
+        "applies from the next Finalized Clarification run onward; nothing needs to be "
+        "restarted for it to take effect."
     )
 
 

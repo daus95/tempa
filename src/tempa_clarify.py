@@ -22,6 +22,7 @@ from tempa_config import (
     get_backend,
     get_clarify_apply_session_id,
     get_clarify_session_id,
+    get_finalize_no_progress_rounds,
     get_model,
     get_reasoning_effort,
     get_sources,
@@ -378,7 +379,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     clar_dir.mkdir(parents=True, exist_ok=True)
 
     max_run = config.get("max_clarification_run", 20)
-    no_progress_limit = config.get("finalize_no_progress_rounds", 2)
+    no_progress_limit = get_finalize_no_progress_rounds(config)
     run_number = 0
     no_progress_rounds = 0
     prev_total = None  # critical+major from the previous round, for the convergence guard

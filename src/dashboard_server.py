@@ -40,7 +40,7 @@ from dashboard_config import (
 from dashboard_runs import (
     _epic_sessions,
     _implementation_has_started,
-    _max_clarification_run_change_warning,
+    _finalize_limit_change_warning,
     _start_clarify_run,
     _start_implement_run,
     _stop_clarify_run,
@@ -338,6 +338,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "features_per_session": config.get("features_per_session"),
                 "max_session_run": config.get("max_session_run"),
                 "max_clarification_run": config.get("max_clarification_run"),
+                "finalize_no_progress_rounds": tempa_config.get_finalize_no_progress_rounds(config),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
                 "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
                 "notifications": {"email": tempa_config.get_email_notifications(config)},
@@ -816,6 +817,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if not ok:
             self._send_json(400, {"ok": False, "error": "Max Finalize Clarification Round must be a positive whole number."})
             return
+        ok, finalize_no_progress_rounds = _parse_limit("finalize_no_progress_rounds", required=True)
+        if not ok:
+            self._send_json(400, {"ok": False, "error": "Max Finalize No-Progress Round must be a positive whole number."})
+            return
         ok, usage_limit_retry_wait_sec = _parse_limit("usage_limit_retry_wait_sec", required=True)
         if not ok:
             self._send_json(400, {"ok": False, "error": "Usage Limit Retry Wait must be a positive whole number."})
@@ -879,13 +884,17 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
 
         config = current_config
-        previous_max_clarification_run = config.get("max_clarification_run")
+        previous_finalize_limits = {
+            "max_clarification_run": config.get("max_clarification_run"),
+            "finalize_no_progress_rounds": config.get("finalize_no_progress_rounds"),
+        }
         config["models"] = models
         config["backends"] = backends
         config["reasoning_efforts"] = reasoning_efforts
         config["features_per_session"] = features_per_session
         config["max_session_run"] = max_session_run
         config["max_clarification_run"] = max_clarification_run
+        config["finalize_no_progress_rounds"] = finalize_no_progress_rounds
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
         config["implementation_start_requirement"] = implementation_start_requirement
         config["notifications"] = {"email": email}
@@ -897,10 +906,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         print("[settings] configuration saved")
         # The save itself always succeeds; `warning` is an advisory note about a setting
         # a run already in flight can no longer pick up (see
-        # _max_clarification_run_change_warning). Computed server-side rather than in the
+        # _finalize_limit_change_warning). Computed server-side rather than in the
         # client, since only the server knows for certain what's running right now.
-        warning = _max_clarification_run_change_warning(
-            self.server, previous_max_clarification_run, max_clarification_run)
+        warning = _finalize_limit_change_warning(self.server, previous_finalize_limits, {
+            "max_clarification_run": max_clarification_run,
+            "finalize_no_progress_rounds": finalize_no_progress_rounds,
+        })
         self._send_json(200, {
             "ok": True,
             "warning": warning,
@@ -911,6 +922,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "features_per_session": features_per_session,
                 "max_session_run": max_session_run,
                 "max_clarification_run": max_clarification_run,
+                "finalize_no_progress_rounds": finalize_no_progress_rounds,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
                 "implementation_start_requirement": implementation_start_requirement,
                 "notifications": {"email": email},
