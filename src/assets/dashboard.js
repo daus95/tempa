@@ -1431,6 +1431,10 @@ function featureStatusIcon(status) {
 }
 
 function renderImplementStatus() {
+  // The 1s poll rebuilds every card from scratch, and emptying the container collapses its
+  // height — which makes the browser clamp the panel's scrollTop to 0. Without capturing and
+  // restoring it, a user scrolled down the epic list gets snapped back to the top every tick.
+  const prevScroll = implStatusPanel.scrollTop;
   implStatusBody.innerHTML = "";
   if (!state.epics.length) {
     implStatusBody.innerHTML = '<div class="clarify-log-empty">No plan/epic yet. A plan will be generated automatically the first time implementation starts.</div>';
@@ -1470,6 +1474,7 @@ function renderImplementStatus() {
       `<div class="impl-feature-list">${features}</div>`;
     implStatusBody.appendChild(card);
   }
+  implStatusPanel.scrollTop = prevScroll;
 }
 
 function renderImplementLog() {
