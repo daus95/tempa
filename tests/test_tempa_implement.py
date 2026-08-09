@@ -276,3 +276,50 @@ def test_validate_and_increment_run_marks_epic_failed_and_persists_when_limit_re
     assert result is False
     assert config["epic"][0]["status"] == "failed"
     assert tempa_config.load_config()["epic"][0]["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# check_and_run — QA gate feature-completeness integrity check
+# ---------------------------------------------------------------------------
+
+def test_check_and_run_qa_gate_reroutes_epic_with_incomplete_features(isolate_tempa_paths, monkeypatch):
+    # Regression: a re-implementation round set the epic done without finishing each
+    # feature's own bookkeeping -- QA must not run against it; it goes back to
+    # require_fixing instead, and the next poll's require_fixing picker takes it from there.
+    tempa_config.save_config({"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": False,
+        "completed_features": 0, "total_features": 2,
+        "features": [{"id": "f1", "name": "n1", "status": "require_fixing"},
+                     {"id": "f2", "name": "n2", "status": "require_fixing"}],
+    }]})
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("QA must not run when features aren't actually done")
+
+    monkeypatch.setattr(ti, "run_qa_session", fail_if_called)
+
+    ti.check_and_run()
+
+    assert _state.running_thread is None
+    assert tempa_config.load_config()["epic"][0]["status"] == "require_fixing"
+
+
+def test_check_and_run_qa_gate_runs_qa_when_features_actually_done(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({"epic": [{
+        "epic_name": "EPIC-04", "status": "done", "qa_passed": False,
+        "completed_features": 2, "total_features": 2,
+        "features": [{"id": "f1", "name": "n1", "status": "done"},
+                     {"id": "f2", "name": "n2", "status": "done"}],
+    }]})
+    seen = {"called": False}
+
+    def fake_run_qa_session(*args, **kwargs):
+        seen["called"] = True
+
+    monkeypatch.setattr(ti, "run_qa_session", fake_run_qa_session)
+
+    ti.check_and_run()
+    assert _state.running_thread is not None, "check_and_run didn't start a QA session thread"
+    _state.running_thread.join(timeout=5)
+    assert seen["called"] is True
+    assert tempa_config.load_config()["epic"][0]["status"] == "done"

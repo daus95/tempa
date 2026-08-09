@@ -265,6 +265,27 @@ def run_clear_all() -> None:
     sys.exit(0)
 
 
+def _epic_features_actually_done(epic: dict) -> bool:
+    """True iff `epic`'s own bookkeeping backs up its epic-level "done" status: every
+    feature is itself marked "done" and completed_features matches total_features. Returns
+    True (nothing to check, trust the epic-level status) when there's no "features" list at
+    all.
+
+    The AI agent is solely responsible for this bookkeeping (see the MANDATORY RULE in
+    build_session_prompt: mark each feature done + increment completed_features, and only
+    THEN set the epic-level status to done) — if it skips a step, nothing catches a "done"
+    epic whose features were never actually finished until QA happens to fail again, or
+    silently passes against unfinished work. Used by check_and_run's QA gate (to route such
+    an epic back to require_fixing before ever running QA on it) and reset_qa_state (the
+    same check, applied when manually forcing a re-check on an already-QA'd epic)."""
+    features = epic.get("features") or []
+    if not features:
+        return True
+    total = epic.get("total_features", len(features))
+    completed = epic.get("completed_features", 0)
+    return completed == total and all(f.get("status") == "done" for f in features)
+
+
 def reset_failed_epics(config: dict) -> list[str]:
     """Flip every `failed` epic in `config` back to `pending` for a genuine clean-slate retry
     — dropping its stored session id (so the next attempt starts a fresh session) AND its
@@ -310,25 +331,58 @@ def _reset_failed_epics() -> None:
         log(f"Reset {len(reset)} failed session(s). Ready to restart.")
 
 
-def _reset_qa_state() -> None:
-    config = load_config()
-    reset_count = 0
+def reset_qa_state(config: dict, epic_name: str | None = None) -> list[tuple[str, bool]]:
+    """Reset QA state for every "done" epic with QA history — or just `epic_name`, if given
+    — so QA is forced to run/re-run, and return [(epic_name, rerouted), ...] for what was
+    reset (`rerouted` is True when the epic was also sent back to "require_fixing" — see
+    below); the caller still has to save_config. Empty list = nothing matched.
+
+    Also runs the same feature-completeness integrity check as check_and_run's QA gate
+    (_epic_features_actually_done): an epic whose features were never actually finished
+    (e.g. a re-implementation round set the epic done without finishing each feature's own
+    bookkeeping) is sent back to "require_fixing" instead of staying "done" — otherwise
+    resetting its QA state alone would just immediately re-trigger QA against the same
+    incomplete work, since check_and_run's QA gate acts on "done" epics regardless of how
+    they got there."""
+    reset: list[tuple[str, bool]] = []
     for i, session in enumerate(config.get("epic") or []):
-        if session["status"] == "done" and (session.get("qa_passed", False) or session.get("qa_status") in ("ongoing", "done")):
-            label = session.get("epic_name", f"epic_{i}")
-            config["epic"][i]["qa_passed"] = False
-            config["epic"][i]["qa_status"] = "idle"
-            config["epic"][i]["qa_session_id"] = ""
-            config["epic"][i].pop("qa_session_backend", None)
-            config["epic"][i]["qa_total_run"] = 0
-            config["epic"][i]["qa_report_filename"] = ""
-            reset_count += 1
-            log(f"Reset QA [{label}] → qa_passed=false, qa_status=idle")
-    if reset_count == 0:
-        log("No done epics with QA state found — nothing to reset")
+        label = session.get("epic_name", f"epic_{i}")
+        if epic_name is not None and label != epic_name:
+            continue
+        if session["status"] != "done":
+            continue
+        if not (session.get("qa_passed", False) or session.get("qa_status") in ("ongoing", "done")):
+            continue
+        session["qa_passed"] = False
+        session["qa_status"] = "idle"
+        session["qa_session_id"] = ""
+        session.pop("qa_session_backend", None)
+        session["qa_total_run"] = 0
+        session["qa_report_filename"] = ""
+        rerouted = not _epic_features_actually_done(session)
+        if rerouted:
+            session["status"] = "require_fixing"
+        reset.append((label, rerouted))
+    return reset
+
+
+def _reset_qa_state(epic_name: str | None = None) -> None:
+    config = load_config()
+    reset = reset_qa_state(config, epic_name)
+    for label, rerouted in reset:
+        suffix = (
+            " — its features weren't all actually done, so it's routed back to "
+            "require_fixing first" if rerouted else ""
+        )
+        log(f"Reset QA [{label}] → qa_passed=false, qa_status=idle{suffix}")
+    if not reset:
+        if epic_name:
+            log(f"No done epic named '{epic_name}' with QA state found — nothing to reset")
+        else:
+            log("No done epics with QA state found — nothing to reset")
     else:
         save_config(config)
-        log(f"Reset QA for {reset_count} epic(s). QA will be re-run.")
+        log(f"Reset QA for {len(reset)} epic(s). QA will be re-run.")
 
 
 def _reset_on_progress_epics() -> None:

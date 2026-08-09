@@ -29,7 +29,7 @@ from tempa_config import (
     save_config,
 )
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
-from tempa_maintenance import reset_failed_epics
+from tempa_maintenance import _epic_features_actually_done, reset_failed_epics
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
     build_plan_epics_prompt,
@@ -212,6 +212,24 @@ def check_and_run(features_override: int | None = None) -> None:
         for i, session in enumerate(config["epic"]):
             if session["status"] == "done" and not session.get("qa_passed", False):
                 label = session.get("epic_name", f"epic_{i}")
+
+                # Integrity check: don't trust the epic-level "done" status blindly — the AI
+                # agent is solely responsible for also marking each feature "done" and
+                # incrementing completed_features before setting the epic itself done (see
+                # the MANDATORY RULE in build_session_prompt), and it can skip that step. A
+                # "done" epic whose features were never actually finished must be fixed for
+                # real before QA runs on it, not QA'd (and possibly passed) against
+                # incomplete work.
+                if not _epic_features_actually_done(session):
+                    completed = session.get("completed_features", 0)
+                    total = session.get("total_features", len(session.get("features", [])))
+                    log(f"[{label}] is marked done but only {completed}/{total} feature(s) "
+                        "are actually marked done — routing back to implementation before "
+                        "QA runs (a re-implementation round likely set the epic done without "
+                        "finishing each feature's own bookkeeping).")
+                    config["epic"][i]["status"] = "require_fixing"
+                    save_config(config)
+                    return
 
                 # Block if any PREVIOUS epic's QA found issues and is waiting for re-implementation.
                 # qa_status="done" + qa_passed=false means QA ran and failed — that epic must be

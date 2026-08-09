@@ -139,6 +139,8 @@ USAGE
   tempa implement --reset         Reset on_progress → pending (clears session_id)
   tempa implement --reset-failed  Reset all failed → pending
   tempa implement --reset-qa      Reset qa_passed=false for all done epics (forces QA to re-run)
+  tempa implement --reset-qa EPIC-04  Same, but only for that one epic — also routes it back to
+                                  require_fixing first if its features weren't all actually done
   tempa implement --clear    Delete ALL files in the workspace's .tempa/qa and .tempa/logs folders (asks for confirmation; --yes to skip)
 
   -- Monitoring & Utilities --
@@ -317,7 +319,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("implement", parents=[common], add_help=False)
     p.add_argument("--reset-failed", action="store_true")
-    p.add_argument("--reset-qa", action="store_true")
+    p.add_argument("--reset-qa", nargs="?", const=True, default=False, metavar="EPIC")
     p.add_argument("--reset", action="store_true")
     p.add_argument("--clear-plan", action="store_true")
     p.add_argument("--clear", action="store_true")
@@ -350,7 +352,7 @@ def _dispatch_implement(args: argparse.Namespace) -> None:
     if args.reset_failed:
         _reset_failed_epics()
     elif args.reset_qa:
-        _reset_qa_state()
+        _reset_qa_state(None if args.reset_qa is True else args.reset_qa)
     elif args.reset:
         _reset_on_progress_epics()
     elif args.clear_plan:
