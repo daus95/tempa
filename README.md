@@ -404,7 +404,9 @@ every level trivially. The requirement is enforced server-side too, not just by 
 button, so it holds for the dashboard regardless of what the page shows. The
 **Implementation** section's
 **Status** tab shows live epic/feature progress and QA results; **Log** shows the raw
-console output; **Stop Implementation** is available while it's running.
+console output — any `session_*.txt`/`qa_*.txt`/`process_*.txt` filename it mentions is
+clickable and opens that file in a viewer modal, see [docs/logging.md](docs/logging.md);
+**Stop Implementation** is available while it's running.
 
 Once any epic has actually run, the button relabels itself to **Continue Implementation** —
 the run resumes the existing plan rather than starting anything — and clicking it resets any
@@ -574,6 +576,13 @@ a single 529 could leave every later poll — and every later `tempa implement` 
 on that stale status even though nothing was actually broken. A **real** failure still stops
 the runner and still keeps its `failed` status, so it stays visible for you to look at; in
 that case fix the cause and run `tempa implement --reset-failed` yourself before continuing.
+
+**Nor does a backend CLI that finishes but never exits.** If the CLI signals its turn is
+complete but the process itself hangs afterward (e.g. stuck in its own cleanup), Tempa
+force-terminates it after a 120-second grace period instead of waiting forever — and since
+the epic/QA state already reflects everything that session did, this isn't treated as a
+failure either; the run just resumes automatically. See
+[docs/start-implementation.md](docs/start-implementation.md).
 
 **A plan that schedules an epic before something it actually depends on doesn't get stuck
 either.** If an epic keeps resuming without completing another feature, Tempa asks the

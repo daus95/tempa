@@ -18,6 +18,14 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **Two v0.5.6 changes shipped with no documentation of their own** — only CHANGELOG entries.
+  `docs/logging.md` gains a "Viewing a log file in the dashboard" section explaining the
+  Clarify/Implement Log tabs' clickable filename links, the viewer modal, and the
+  `GET /api/log-file` endpoint behind it (path confinement, `.txt`-only, 5MB tail cap).
+  `docs/start-implementation.md` gains a paragraph on the stuck-backend-CLI watchdog (120s
+  grace period after a `[Done]` signal, force-terminate, and why it isn't treated as a real
+  failure for implement/QA sessions but is for `clarify`/`verify`). README gets a short
+  pointer to each from the relevant step.
 - **Scrolling up in the Clarify/Implement Log panel to read earlier output got yanked back
   to the bottom** on the next 1-second poll tick, because both log panels were rebuilt from
   scratch on every render and unconditionally forced `scrollTop` to the bottom. Both panels

@@ -86,6 +86,23 @@ applies to all three copies of the button (Home step 3, the Clarification ready 
 Implementation header) — they all trigger the same run. The CLI is unchanged: plain
 `tempa implement` still halts on a `failed` epic and tells you to reset it.
 
+**A backend CLI that finishes but never exits doesn't stop the run either — and doesn't even
+need the reset above.** A watchdog thread runs alongside every backend session (implement,
+QA, `clarify`, `verify`) — once the CLI signals its turn is complete (a `[Done] ...` line,
+per that backend's own output format), it's given **120 seconds** to actually exit on its own
+before Tempa force-terminates the process instead of waiting on it indefinitely. Seen live: a
+QA session's very last action tried to stop a background test process it had spawned; that
+cleanup command was rejected by the CLI's own sandbox policy, and the process itself never
+returned, leaving an otherwise fully finished session (report already written, config.json
+already updated) stuck for 17+ minutes. For a session run from `implement`'s loop
+(implementation or QA), this isn't treated as a real failure in the first place — the
+epic/QA state on disk already reflects everything that session actually did, since it had
+already reached `[Done]` before getting stuck in unrelated cleanup — so the epic is never
+marked `failed` and there's nothing to reset; the loop just logs what happened and resumes
+immediately (no wait, unlike the usage-limit/overload cases above). A `clarify`/`verify`
+session hit by the same watchdog is still force-terminated (so it can't hang forever either),
+but its non-zero exit is treated as an ordinary failure there rather than silently retried.
+
 ## Epic Status Lifecycle
 
 ```
