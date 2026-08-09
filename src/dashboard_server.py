@@ -26,6 +26,7 @@ from dashboard_clarify_parse import (
     _latest_evaluation_findings,
     file_answer_status,
     parse_file,
+    pending_overlay_stats,
 )
 from dashboard_clarify_render import _render_blocks_html
 from dashboard_config import (
@@ -159,6 +160,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             finalize_round = dashboard_config.get("last_finalize_round") or 0
             allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
             implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
+            overlay = pending_overlay_stats(self.server.clar_dir, _load_clarify_applied_hashes())
             self._send_json(200, {
                 "ok": True,
                 "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -168,9 +170,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                             "findings": findings,
                             "finalize": _clarify_finalize_status(
                                 findings, last_action, round_, max_round, allow_finalize_with_critical,
-                                finalize_round),
+                                finalize_round, overlay["findings"]),
                             "implementReadiness": _implement_readiness_status(
-                                findings, last_action is not None, implementation_requirement),
+                                findings, last_action is not None, implementation_requirement,
+                                overlay["findings"]),
+                            "pendingOverlay": overlay,
+                            "overlayWarnThreshold": tempa_config.get_clarify_overlay_warn_findings(
+                                dashboard_config),
                             "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config)},
                 "principles": {"set": bool(tempa_config.read_principles())},
                 "backends": _backend_status(),
@@ -301,6 +307,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "progress": run["progress"],
                 "finalizeRound": dashboard_config.get("last_finalize_round") or 0,
                 "maxRound": dashboard_config.get("max_clarification_run") or 0,
+                # "evaluate" | "verify" — which kind of round finalize is on (see
+                # run_clarify_finalize). A finalize run ends with a verification round over
+                # the freshly-compacted PRD, which looks identical in the badge otherwise.
+                "finalizePhase": dashboard_config.get("last_finalize_phase") or "",
             })
 
     def _handle_implement_run_status(self, query: dict) -> None:
@@ -574,13 +584,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
-        # No server-side precondition gate on mode == "finalize" (there used to be
-        # one requiring a fresh zero-critical evaluate on record): `clarify --finalize`
-        # now resolves its own pre-existing backlog first — files with every finding
-        # answered but not yet applied get applied, files with unanswered findings get
-        # each one filled in with its own recommendation and then applied too — before
-        # its evaluate/apply loop starts (see _resolve_clarification_backlog in
-        # tempa_clarify.py). So it's always safe to start, the same as "run"/"apply".
+        # No server-side precondition gate on mode == "finalize" (there used to be one
+        # requiring a fresh zero-critical evaluate on record): `clarify --finalize` answers
+        # its own pre-existing backlog first — every finding still missing an answer gets
+        # filled in with its own recommendation — and carries the whole lot into its loop as
+        # the pending overlay (see _prepare_finalize_backlog in tempa_clarify.py). So it's
+        # always safe to start, the same as "run"/"apply".
         if not _start_clarify_run(self.server, mode):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
             return
@@ -633,11 +642,19 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
         )
         requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
-        if not _implement_readiness_status(findings, True, requirement)["ready"]:
+        overlay = pending_overlay_stats(self.server.clar_dir, _load_clarify_applied_hashes())
+        status = _implement_readiness_status(findings, True, requirement, overlay["findings"])
+        if not status["ready"]:
             # Wording matches the requirement actually configured (dashboard Settings'
             # "Start Implementation requires") rather than always assuming the strictest
-            # ("no_critical_or_major") level.
-            if requirement == "no_critical":
+            # ("no_critical_or_major") level. The pending-overlay branch is checked FIRST
+            # when it's the only thing blocking: reporting "critical/major findings remain"
+            # to someone whose latest round found none is both wrong and unactionable.
+            if overlay["findings"] and status["critical"] == 0 and status["major"] == 0:
+                error = (f"Cannot start implementation: {overlay['findings']} answered clarification "
+                         f"finding(s) across {overlay['files']} file(s) haven't been written into the "
+                         "PRD yet. Click Apply Answers first (it's a no-op if the PRD already matches).")
+            elif requirement == "no_critical":
                 error = "Cannot start implementation while critical clarification findings remain."
             else:
                 error = "Cannot start implementation while critical/major clarification findings remain."

@@ -1,9 +1,15 @@
-"""Tests for tempa_clarify.py's clarification-backlog pre-check (see
-_resolve_clarification_backlog, used by `clarify --finalize` before its evaluate/apply
-loop starts): _clarification_backlog splits existing clarification result files into
-"unanswered" vs "answered but not yet applied", and _fill_unanswered_with_recommendations
-mechanically copies each unanswered finding's own Recommendation text into its answer
-(no agent/LLM call — the "follow recommendation" resolution)."""
+"""Tests for tempa_clarify.py's clarification backlog and the `clarify --finalize` loop.
+
+_clarification_backlog splits existing clarification result files into "unanswered" vs
+"answered but not yet applied", and _fill_unanswered_with_recommendations mechanically
+copies each unanswered finding's own Recommendation text into its answer (no agent/LLM
+call — the "follow recommendation" resolution). Both feed _prepare_finalize_backlog, the
+pre-flight run before finalize's loop starts.
+
+The finalize tests below cover the loop itself: evaluate -> auto-answer until an
+evaluation comes back clean, then ONE apply ("compaction") that writes the accumulated
+answers into the PRD, then ONE verification evaluate over the result. No apply runs
+inside the loop."""
 
 from __future__ import annotations
 
@@ -396,35 +402,123 @@ def test_run_apply_step_uses_clarify_apply_backend_and_effort_independent_of_cla
 
 
 # ---------------------------------------------------------------------------
-# run_clarify_finalize — convergence guard
+# run_clarify_finalize
 #
-# If apply can't reduce the critical+major count for `finalize_no_progress_rounds`
-# rounds in a row, the loop must stop on its own instead of burning the rest of
-# max_clarification_run re-evaluating a PRD that apply has no more moves on (the
-# remaining findings need a human decision).
+# The loop is evaluate -> auto-answer, repeated until an evaluation reports no
+# critical/major findings. Only then does it compact (one apply) and verify (one more
+# evaluate). The helper below drives that with fakes: `findings_by_round` is what each
+# successive evaluate reports, and every evaluate leaves behind a clarification file with
+# one unanswered finding so there's something for auto-answer to pick up (the real agent
+# writes those files; the fake has to stand in for it).
 # ---------------------------------------------------------------------------
 
-def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, monkeypatch):
-    clar_dir = tmp_path / "clarifications"
-    clar_dir.mkdir()
-    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
-                              "finalize_no_progress_rounds": 2})
+def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=True):
+    """Wire up fake evaluate/auto-answer/apply steps and return the call-count dict.
 
-    calls = {"evaluate": 0, "apply": 0}
+    Counts are keyed "evaluate"/"answer"/"apply"; "resume" records what the compaction
+    apply was handed, and "prompts" every evaluate prompt (so a test can prove the overlay
+    reached the next round)."""
+    calls = {"evaluate": 0, "answer": 0, "apply": 0, "resume": [], "prompts": []}
 
     def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        index = min(calls["evaluate"], len(findings_by_round) - 1)
+        findings = findings_by_round[index]
         calls["evaluate"] += 1
+        calls["prompts"].append(prompt)
         cfg = tempa_config.load_config()
-        cfg["last_clarification_findings"] = {"critical": 2, "major": 1, "minor": 0}
+        cfg["last_clarification_findings"] = findings
         tempa_config.save_config(cfg)
+        if findings["critical"] or findings["major"]:
+            # Stand in for the agent writing this round's findings file.
+            (clar_dir / f"clarification-2026010{calls['evaluate']}-000000.md").write_text(
+                _item(f"C{calls['evaluate']}", "critical", f"Finding {calls['evaluate']}",
+                      "PRD 1", f"question {calls['evaluate']}", f"recommendation {calls['evaluate']}", ""),
+                encoding="utf-8",
+            )
+        return True
+
+    def fake_auto_answer(config, unanswered_files):
+        calls["answer"] += 1
         return True
 
     def fake_run_apply_step(config, resume_session_id=None):
         calls["apply"] += 1
-        return True
+        calls["resume"].append(resume_session_id)
+        if apply_result:
+            # A real apply stamps every current file's hash, which is what empties the
+            # overlay — without it the "verify" round would still carry one.
+            tc._record_clarify_applied_state(tempa_config.load_config(), clar_dir)
+        return apply_result
 
     monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_auto_answer_step", fake_auto_answer)
     monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    return calls
+
+
+def _finalize_config(tmp_path, clar_dir, **extra):
+    tempa_config.save_config({
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}, **extra,
+    })
+
+
+def test_finalize_answers_without_applying_then_compacts_and_verifies(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 3, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> compaction
+        {"critical": 0, "major": 0, "minor": 0},   # verification round, also clean -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    # Rounds 1-3 evaluate, round 4 is the verification pass over the compacted PRD.
+    assert calls["evaluate"] == 4
+    assert calls["answer"] == 2          # only the two rounds that found something
+    assert calls["apply"] == 1           # ONE compaction, at the end — not per round
+    assert tempa_config.load_config()["last_clarification_action"] == "evaluate"
+
+
+def test_finalize_carries_answers_into_the_next_round_prompt(tmp_path, isolate_tempa_paths, monkeypatch):
+    # End-to-end proof of the overlay: an answer recorded during round 1 has to show up in
+    # round 2's evaluate prompt, since that's what makes applying-before-continuing
+    # unnecessary.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    # The real template, minus everything this test doesn't need — the overlay has to be
+    # rendered by the actual prompt builder for this to prove anything.
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "Re-evaluate ${sources.prd} (${finding_scope}).\n\n${pending_resolutions}\n", encoding="utf-8")
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+    ])
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    # The fake auto-answer writes nothing, so the backstop fill supplies round 1's own
+    # recommendation as the answer — which the round-2 prompt must then carry.
+    assert "recommendation 1" in calls["prompts"][1]
+    assert "DECIDED:" in calls["prompts"][1]
+    # ...and the verification round (after the compaction) must NOT: applying emptied it.
+    assert "recommendation 1" not in calls["prompts"][2]
+
+
+def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_no_progress_rounds=2)
+    calls = _finalize_harness(monkeypatch, clar_dir, [{"critical": 2, "major": 1, "minor": 0}])
 
     with pytest.raises(SystemExit) as exc:
         tc.run_clarify_finalize()
@@ -432,10 +526,11 @@ def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, 
     assert exc.value.code == 1
     # Round 1: 3 findings, no prior round to compare against -> no-progress count stays 0.
     # Round 2: still 3 findings (no reduction) -> no-progress count becomes 1.
-    # Round 3: still 3 findings -> no-progress count reaches the configured limit (2) -> stop
-    # BEFORE applying again — evaluate ran 3 times, apply only ran after rounds 1 and 2.
+    # Round 3: still 3 findings -> reaches the configured limit (2) -> stop BEFORE answering
+    # again. Nothing was ever applied: the PRD is only rewritten once the loop comes back clean.
     assert calls["evaluate"] == 3
-    assert calls["apply"] == 2
+    assert calls["answer"] == 2
+    assert calls["apply"] == 0
 
 
 def test_finalize_no_progress_limit_defaults_to_five(tmp_path, isolate_tempa_paths, monkeypatch):
@@ -443,23 +538,8 @@ def test_finalize_no_progress_limit_defaults_to_five(tmp_path, isolate_tempa_pat
     # so the automation gets five stalled rounds before handing back to a human.
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
-    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
-
-    calls = {"evaluate": 0, "apply": 0}
-
-    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
-        calls["evaluate"] += 1
-        cfg = tempa_config.load_config()
-        cfg["last_clarification_findings"] = {"critical": 2, "major": 1, "minor": 0}
-        tempa_config.save_config(cfg)
-        return True
-
-    def fake_run_apply_step(config, resume_session_id=None):
-        calls["apply"] += 1
-        return True
-
-    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
-    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [{"critical": 2, "major": 1, "minor": 0}])
 
     with pytest.raises(SystemExit) as exc:
         tc.run_clarify_finalize()
@@ -467,70 +547,175 @@ def test_finalize_no_progress_limit_defaults_to_five(tmp_path, isolate_tempa_pat
     assert exc.value.code == 1
     # Same counting as above, five stalled rounds instead of two: rounds 2-6 each add one.
     assert calls["evaluate"] == 6
-    assert calls["apply"] == 5
+    assert calls["answer"] == 5
+    assert calls["apply"] == 0
 
 
-def test_finalize_keeps_going_when_findings_are_decreasing(tmp_path, isolate_tempa_paths, monkeypatch):
+def test_finalize_dirty_verification_re_enters_the_loop_then_compacts_again(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    # Apply is an agent rewriting prose, so the verification round can legitimately surface
+    # something new. That's not a failure: answer it and compact again (bounded by
+    # MAX_COMPACTIONS), rather than leaving a rewritten-but-never-verified PRD behind.
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
-    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
-
-    findings_by_round = [
-        {"critical": 3, "major": 0, "minor": 0},
-        {"critical": 1, "major": 0, "minor": 0},
-        {"critical": 0, "major": 0, "minor": 0},  # done: no critical/major left
-    ]
-    calls = {"evaluate": 0, "apply": 0}
-
-    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
-        cfg = tempa_config.load_config()
-        cfg["last_clarification_findings"] = findings_by_round[calls["evaluate"]]
-        calls["evaluate"] += 1
-        tempa_config.save_config(cfg)
-        return True
-
-    def fake_run_apply_step(config, resume_session_id=None):
-        calls["apply"] += 1
-        return True
-
-    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
-    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 0, "major": 0, "minor": 0},   # round 1 clean -> compaction #1
+        {"critical": 1, "major": 0, "minor": 0},   # round 2 verification is DIRTY
+        {"critical": 0, "major": 0, "minor": 0},   # round 3 clean again -> compaction #2
+        {"critical": 0, "major": 0, "minor": 0},   # round 4 verification clean -> done
+    ])
+    # Something has to be pending for round 1's compaction to have work to do.
+    (clar_dir / "clarification-20251231-000000.md").write_text(
+        _item("C0", "critical", "T", "w", "q", "rec", "decided"), encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc:
         tc.run_clarify_finalize()
 
-    assert exc.value.code == 0  # reached 0 critical/0 major -> clean success
-    assert calls["evaluate"] == 3
-    assert calls["apply"] == 2  # no apply needed after the clean 3rd round
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 4
+    assert calls["apply"] == 2
 
 
-def test_finalize_apply_resumes_evaluate_session(tmp_path, isolate_tempa_paths, monkeypatch):
+def test_finalize_gives_up_after_max_compactions(tmp_path, isolate_tempa_paths, monkeypatch):
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
-    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
-
-    seen = {}
-
-    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
-        cfg = tempa_config.load_config()
-        cfg["last_clarification_findings"] = {"critical": 1, "major": 0, "minor": 0}
-        cfg["clarify_session_id"] = "eval-sid-42"
-        cfg["clarify_session_backend"] = "claude"
-        tempa_config.save_config(cfg)
-        return True
-
-    def fake_run_apply_step(config, resume_session_id=None):
-        seen["resume_session_id"] = resume_session_id
-        return False  # stop after the first round so the test doesn't need round 2
-
-    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
-    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    _finalize_config(tmp_path, clar_dir)
+    # Every verification comes back dirty, so the run keeps wanting to compact again.
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+    ])
+    (clar_dir / "clarification-20251231-000000.md").write_text(
+        _item("C0", "critical", "T", "w", "q", "rec", "decided"), encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc:
         tc.run_clarify_finalize()
 
     assert exc.value.code == 1
-    assert seen["resume_session_id"] == "eval-sid-42"
+    assert calls["apply"] == tc.MAX_COMPACTIONS  # never a third rewrite of the PRD
+
+
+def test_finalize_verification_does_not_trip_the_convergence_guard(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    # The compaction materially rewrites the PRD, so the verification round's finding count
+    # says nothing about whether the loop was making progress before it. Comparing the two
+    # would trip the guard immediately at finalize_no_progress_rounds=1.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_no_progress_rounds=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},   # round 1
+        {"critical": 0, "major": 0, "minor": 0},   # round 2 clean -> compaction
+        {"critical": 1, "major": 0, "minor": 0},   # round 3 verification: same total as round 1
+        {"critical": 0, "major": 0, "minor": 0},   # round 4 clean -> compaction #2
+        {"critical": 0, "major": 0, "minor": 0},   # round 5 verification clean -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 5
+
+
+def test_finalize_verification_round_counts_against_max_run(tmp_path, isolate_tempa_paths, monkeypatch):
+    # The verification pass is a full evaluate session with full cost, so it consumes a
+    # round of the budget and shows up in last_finalize_round like any other.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+    ])
+    (clar_dir / "clarification-20251231-000000.md").write_text(
+        _item("C0", "critical", "T", "w", "q", "rec", "decided"), encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    saved = tempa_config.load_config()
+    assert saved["last_finalize_round"] == 2
+    assert saved["last_finalize_phase"] == "verify"
+
+
+def test_finalize_stops_at_max_run_without_compacting(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, max_clarification_run=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, [{"critical": 1, "major": 0, "minor": 0}])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert calls["evaluate"] == 1
+    assert calls["apply"] == 0
+
+
+def test_finalize_exits_clean_when_there_is_nothing_to_compact(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [{"critical": 0, "major": 0, "minor": 0}])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 1
+    assert calls["apply"] == 0
+
+
+def test_finalize_auto_answer_failure_stops_the_run(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [{"critical": 1, "major": 0, "minor": 0}])
+    monkeypatch.setattr(tc, "_run_auto_answer_step", lambda config, files: False)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert calls["evaluate"] == 1
+
+
+def test_finalize_apply_resumes_evaluate_session(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(
+        monkeypatch, clar_dir,
+        [{"critical": 0, "major": 0, "minor": 0}],
+        apply_result=False,  # stop right after the compaction; the resume id is all we want
+    )
+    (clar_dir / "clarification-20251231-000000.md").write_text(
+        _item("C0", "critical", "T", "w", "q", "rec", "decided"), encoding="utf-8")
+
+    def stamp_session(prompt, run_number, backend, model, reasoning_effort=""):
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = {"critical": 0, "major": 0, "minor": 0}
+        cfg["clarify_session_id"] = "eval-sid-42"
+        cfg["clarify_session_backend"] = "claude"
+        tempa_config.save_config(cfg)
+        calls["evaluate"] += 1
+        return True
+    monkeypatch.setattr(tc, "run_clarification_session", stamp_session)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    # The evaluate session that just ran already read the whole PRD and was handed the
+    # entire overlay — exactly what the compaction has to write.
+    assert calls["resume"] == ["eval-sid-42"]
 
 
 def test_finalize_apply_does_not_resume_when_clarify_apply_backend_differs(tmp_path, isolate_tempa_paths, monkeypatch):
@@ -539,32 +724,27 @@ def test_finalize_apply_does_not_resume_when_clarify_apply_backend_differs(tmp_p
     # apply step must NOT be handed a resume_session_id in this case.
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
-    tempa_config.save_config({
-        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
-        "backends": {"clarify": "claude", "clarify_apply": "codex"},
-    })
+    _finalize_config(tmp_path, clar_dir, backends={"clarify": "claude", "clarify_apply": "codex"})
+    calls = _finalize_harness(
+        monkeypatch, clar_dir, [{"critical": 0, "major": 0, "minor": 0}], apply_result=False,
+    )
+    (clar_dir / "clarification-20251231-000000.md").write_text(
+        _item("C0", "critical", "T", "w", "q", "rec", "decided"), encoding="utf-8")
 
-    seen = {}
-
-    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+    def stamp_session(prompt, run_number, backend, model, reasoning_effort=""):
         cfg = tempa_config.load_config()
-        cfg["last_clarification_findings"] = {"critical": 1, "major": 0, "minor": 0}
+        cfg["last_clarification_findings"] = {"critical": 0, "major": 0, "minor": 0}
         cfg["clarify_session_id"] = "eval-sid-42"
         cfg["clarify_session_backend"] = "claude"
         tempa_config.save_config(cfg)
+        calls["evaluate"] += 1
         return True
-
-    def fake_run_apply_step(config, resume_session_id=None):
-        seen["resume_session_id"] = resume_session_id
-        return False
-
-    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
-    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    monkeypatch.setattr(tc, "run_clarification_session", stamp_session)
 
     with pytest.raises(SystemExit):
         tc.run_clarify_finalize()
 
-    assert seen["resume_session_id"] is None
+    assert calls["resume"] == [None]
 
 
 # ---------------------------------------------------------------------------

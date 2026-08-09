@@ -257,6 +257,7 @@ def _latest_evaluation_findings(files: list[dict], clean_since: float = 0) -> di
 def _clarify_finalize_status(
     findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
     allow_finalize_with_critical: bool = False, finalize_round: int = 0,
+    pending_overlay_findings: int = 0,
 ) -> dict:
     """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
     state, NOT a gate: the button itself is only disabled while a clarify run is already
@@ -292,6 +293,14 @@ def _clarify_finalize_status(
     (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
     _run_apply_step(), and run_clarify_finalize() there.
 
+    `pending_overlay_findings` (pending_overlay_stats()["findings"]) is reported back for
+    display only and deliberately does NOT affect "ready": finalize CONSUMES the pending
+    overlay — every evaluate pass in its loop carries it, and its compaction step is what
+    writes it into the PRD — so treating an unapplied overlay as "not ready to finalize"
+    would pin the button to "Continue Clarification" exactly when finalize is the thing that
+    would resolve it. The gate that does require an empty overlay is Start Implementation
+    (_implement_readiness_status below), because implementation reads the PRD itself.
+
     `round_`/`max_round`/`finalize_round` are config.json's "last_clarification_round" /
     "max_clarification_run" / "last_finalize_round" — passed straight through so the
     dashboard can show both numbers without a separate request. `round_` is a running
@@ -314,10 +323,13 @@ def _clarify_finalize_status(
         "maxRound": max_round,
         "finalizeRound": finalize_round,
         "allowFinalizeWithCritical": allow_finalize_with_critical,
+        "pendingOverlay": pending_overlay_findings,
     }
 
 
-def _implement_readiness_status(findings: dict, has_run: bool, requirement: str) -> dict:
+def _implement_readiness_status(
+    findings: dict, has_run: bool, requirement: str, pending_overlay_findings: int = 0,
+) -> dict:
     """Whether "Start Implementation" is currently allowed to run, per config.json's
     "implementation_start_requirement" (the dashboard Settings "Start Implementation
     requires" control; one of tempa_config.IMPLEMENTATION_START_REQUIREMENTS):
@@ -331,6 +343,16 @@ def _implement_readiness_status(findings: dict, has_run: bool, requirement: str)
     never run has zero findings simply from having no clarification files yet, which
     would otherwise trivially satisfy every requirement level, including the default.
 
+    `pending_overlay_findings` (pending_overlay_stats()["findings"]) also gates regardless
+    of `requirement`, including "none". That setting expresses how strict to be about OPEN
+    QUESTIONS; this is a different thing — a correctness invariant. Implementation reads the
+    PRD/spec documents, so an answer that has been recorded but not yet applied
+    (`clarify --apply`) is invisible to it: the epic would be built from a specification the
+    user has already decided against. Since clarification no longer has to apply after every
+    round (answers are carried in the evaluate prompt as a pending overlay — see
+    pending_resolutions), this is the only thing left forcing the PRD to be current before
+    any code gets written.
+
     This is the single source of truth shared by the server-side gate
     (_handle_implement_run_start in dashboard_server.py) and every dashboard surface
     that shows Start Implementation readiness (Home step 3, the Clarification
@@ -343,7 +365,8 @@ def _implement_readiness_status(findings: dict, has_run: bool, requirement: str)
         "critical": findings["critical"],
         "major": findings["major"],
         "requirement": requirement,
-        "ready": has_run and critical_ok and major_ok,
+        "pendingOverlay": pending_overlay_findings,
+        "ready": has_run and critical_ok and major_ok and pending_overlay_findings == 0,
     }
 
 
@@ -378,3 +401,89 @@ def _clarify_files_overview(
     unanswered.sort(key=lambda f: f["started_at"], reverse=True)
     answered.sort(key=lambda f: f["started_at"], reverse=True)
     return unanswered, answered
+
+
+@dataclass
+class PendingResolution:
+    """One already-decided-but-not-yet-applied finding: its question and the answer
+    recorded for it. See pending_resolutions."""
+    file_name: str
+    started_at: float
+    round_index: int
+    raw_id: str
+    severity: str
+    title: str
+    where: str
+    question: str
+    answer: str
+
+
+def pending_resolutions(clar_dir: Path, applied_hashes: dict) -> list[PendingResolution]:
+    """Every ANSWERED clarification finding whose answer isn't in the PRD yet — the
+    "pending overlay" carried into each clarification evaluation so the PRD no longer has
+    to be rewritten (`clarify --apply`) after every round just to keep evaluating.
+
+    Membership is exactly the answered half of what an apply pass would write: an item
+    counts iff it has an answer AND its file's current content hash doesn't match
+    `applied_hashes` (config.json's "clarify_applied_hashes", the only record of applied
+    state there is — see _record_clarify_applied_state in tempa_clarify.py). So an empty
+    result means every recorded answer is already reflected in the PRD/spec, which is what
+    the Start Implementation gate keys off (_implement_readiness_status below).
+
+    A partially-answered file contributes its answered items and skips the rest — those
+    answers are decided and absent from the PRD regardless of what else in the file is
+    still open, and _clarification_backlog already sends such files to apply for the same
+    reason. A file edited after a previous apply re-contributes everything it holds: the
+    hash no longer matches, so the PRD can no longer be trusted to reflect it.
+
+    Ordered OLDEST ROUND FIRST (by _file_started_at, then name). The order is load-bearing:
+    prompt/clarification.md tells the agent that a later round's decision supersedes an
+    earlier one, which only works if the rounds arrive in chronological order. Filenames
+    happen to sort chronologically too, but that's the naming convention's doing, not a
+    guarantee — sort on the parsed timestamp."""
+    contributing: list[tuple[Path, float, list[ClarificationItem]]] = []
+    for path in sorted(clar_dir.glob("*.md")) if clar_dir.exists() else []:
+        if path.name.lower() == "claude.md":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        items, _ = parse_file(path, text, 0)
+        if not items:
+            continue
+        if applied_hashes.get(path.name) == hashlib.sha256(text.encode("utf-8")).hexdigest():
+            continue
+        answered = [it for it in items if it.existing_answer]
+        if answered:
+            contributing.append((path, _file_started_at(path), answered))
+
+    contributing.sort(key=lambda entry: (entry[1], entry[0].name))
+    pending: list[PendingResolution] = []
+    for round_index, (path, started_at, items) in enumerate(contributing, start=1):
+        for it in items:
+            pending.append(PendingResolution(
+                file_name=path.name, started_at=started_at, round_index=round_index,
+                raw_id=it.raw_id, severity=it.severity, title=it.title,
+                where=it.where, question=it.question, answer=it.existing_answer,
+            ))
+    return pending
+
+
+def pending_overlay_stats(clar_dir: Path, applied_hashes: dict) -> dict:
+    """How big the pending overlay is: {"files", "findings", "chars"} — what the dashboard
+    shows on the "Pending resolutions" card and what the Start Implementation gate checks
+    ("findings" == 0 means the PRD is up to date).
+
+    "chars" is an APPROXIMATION of the rendered block's size (the sum of the text actually
+    carried, plus a per-item allowance for labels), not a byte-exact measurement: the block
+    is rendered by _render_pending_overlay in tempa_prompts.py, which belongs to the CLI
+    half and is deliberately not imported here. It's only ever displayed as a rounded "~N KB"
+    hint, so a few percent either way costs nothing."""
+    pending = pending_resolutions(clar_dir, applied_hashes)
+    chars = sum(len(p.title) + len(p.where) + len(p.question) + len(p.answer) + 48 for p in pending)
+    return {
+        "files": len({p.file_name for p in pending}),
+        "findings": len(pending),
+        "chars": chars,
+    }

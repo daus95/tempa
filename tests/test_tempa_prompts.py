@@ -342,3 +342,78 @@ def test_real_prompt_files_load():
         path = real_prompt_dir / f"{name}.md"
         assert path.exists(), f"missing prompt template: {path}"
         assert path.read_text(encoding="utf-8").strip() != "", f"empty prompt template: {path}"
+
+
+# ---------------------------------------------------------------------------
+# ${pending_resolutions} — the already-decided-but-unapplied overlay carried into
+# every clarification evaluation (see pending_resolutions in dashboard_clarify_parse.py).
+# ---------------------------------------------------------------------------
+
+def _pending(round_index, raw_id, question, answer, title="T", where="PRD 1", severity="critical"):
+    from dashboard_clarify_parse import PendingResolution
+    return PendingResolution(
+        file_name=f"clarification-2026010{round_index}-090000.md", started_at=1767250800.0,
+        round_index=round_index, raw_id=raw_id, severity=severity, title=title,
+        where=where, question=question, answer=answer,
+    )
+
+
+def test_render_pending_overlay_empty_is_an_explicit_line():
+    # Never an empty string: the template has a header above this placeholder, and a
+    # dangling header with nothing under it reads as a truncated prompt.
+    rendered = tp._render_pending_overlay([])
+    assert "None" in rendered
+    assert rendered.strip() != ""
+
+
+def test_build_clarification_prompt_renders_questions_and_answers_verbatim(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "OVERLAY:\n${pending_resolutions}")
+    config = _sample_config(tmp_path)
+    prompt = tp.build_clarification_prompt(config, pending=[
+        _pending(1, "C1", "Should tokens expire?", "Yes — 30 days, rotating on every use."),
+    ])
+    assert "Should tokens expire?" in prompt
+    assert "Yes — 30 days, rotating on every use." in prompt
+    assert "[C1] critical — T" in prompt
+    assert "DECIDED:" in prompt
+
+
+def test_build_clarification_prompt_rounds_rendered_in_given_order(tmp_path, isolate_tempa_paths):
+    # The order IS the "a later round supersedes an earlier one" rule, so it must survive
+    # rendering exactly as handed in.
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${pending_resolutions}")
+    prompt = tp.build_clarification_prompt(_sample_config(tmp_path), pending=[
+        _pending(1, "C1", "q1", "older decision"),
+        _pending(2, "C1", "q2", "newer decision"),
+    ])
+    assert "ROUND 1 of 2" in prompt
+    assert "ROUND 2 of 2" in prompt
+    assert prompt.index("older decision") < prompt.index("newer decision")
+
+
+def test_build_clarification_prompt_without_pending_resolves_the_placeholder(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${pending_resolutions}")
+    config = _sample_config(tmp_path)
+    for prompt in (tp.build_clarification_prompt(config),
+                   tp.build_clarification_prompt(config, pending=[])):
+        assert "${pending_resolutions}" not in prompt
+        assert "None" in prompt
+
+
+def test_build_clarification_prompt_never_truncates_a_multiline_answer(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${pending_resolutions}")
+    answer = "First line of the decision.\nSecond line with a caveat.\nThird line."
+    prompt = tp.build_clarification_prompt(_sample_config(tmp_path), pending=[
+        _pending(1, "C1", "q", answer),
+    ])
+    for line in answer.splitlines():
+        assert line in prompt
+
+
+def test_real_clarification_template_carries_the_overlay_placeholder():
+    # Guards against a future edit dropping the placeholder: without it the overlay is
+    # silently never sent and clarification quietly re-raises settled findings.
+    from pathlib import Path
+    template = (Path(__file__).resolve().parent.parent / "src" / "prompt" / "clarification.md").read_text(
+        encoding="utf-8")
+    assert template.count("${pending_resolutions}") == 1

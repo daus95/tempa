@@ -1,11 +1,15 @@
 Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has been fully applied to the PRD/spec in a previous apply pass, so it does NOT need to be read again:
 ${clarification_files}
 
+The files above are listed in chronological order, oldest round first. If two findings across these files cover the same point, the one from the LATER file supersedes the earlier one entirely — apply only the later decision, and do not merge the two. If two findings in the SAME file contradict each other, do not apply either silently: pick the one that keeps the rest of the specification consistent, and say explicitly in your final response which one you dropped and why.
+
 For each finding, use the content written under its "Your answer:" label if present; otherwise fall back to the finding's own "Recommendation:" line.
 
 Apply every resulting resolution to the related PRD and technical spec documents in the folder: ${sources.prd}
 
 Do NOT delete, rename, or modify the clarification result files themselves (in ${sources.clarifications}) — they are a historical record the user needs to keep seeing, even after their findings are fully resolved. Only ever write to the PRD/spec documents and ${config_path}.
+
+This pass may be compacting several rounds' worth of decisions at once. Rewrite each affected PRD section ONCE, to its final state, rather than layering successive edits on top of each other.
 
 Repeat the following steps (LOOP) until there are no more critical or major findings:
 

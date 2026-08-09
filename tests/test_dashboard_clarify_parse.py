@@ -257,6 +257,7 @@ def test_clarify_finalize_status_no_action_yet():
     assert result == {
         "hasRun": False, "lastAction": None, "critical": 0, "ready": False,
         "round": 0, "maxRound": 0, "finalizeRound": 0, "allowFinalizeWithCritical": False,
+        "pendingOverlay": 0,
     }
 
 
@@ -347,3 +348,129 @@ def test_clarify_files_overview_skips_files_with_no_findings(tmp_path):
     unanswered, answered = dcp._clarify_files_overview(tmp_path, {})
     assert unanswered == []
     assert answered == []
+
+
+# ---------------------------------------------------------------------------
+# pending_resolutions / pending_overlay_stats — the overlay carried into every
+# clarification evaluation (answered findings not yet written into the PRD).
+# ---------------------------------------------------------------------------
+
+def _hash(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_pending_resolutions_empty_dir(tmp_path):
+    assert dcp.pending_resolutions(tmp_path / "missing", {}) == []
+    assert dcp.pending_resolutions(tmp_path, {}) == []
+
+
+def test_pending_resolutions_never_applied_file_contributes_everything(tmp_path):
+    text = _item("C1", "critical", "Token lifetime", "PRD 4.2", "expire?", "30 days", "30 days, rotating")
+    (tmp_path / "clarification-20260101-101500.md").write_text(text, encoding="utf-8")
+
+    pending = dcp.pending_resolutions(tmp_path, {})
+    assert len(pending) == 1
+    assert pending[0].raw_id == "C1"
+    assert pending[0].severity == "critical"
+    assert pending[0].title == "Token lifetime"
+    assert pending[0].where == "PRD 4.2"
+    assert pending[0].question == "expire?"
+    assert pending[0].answer == "30 days, rotating"
+    assert pending[0].round_index == 1
+
+
+def test_pending_resolutions_skips_already_applied_file(tmp_path):
+    text = _item("C1", "critical", "T", "w", "q", "r", "decided")
+    (tmp_path / "a.md").write_text(text, encoding="utf-8")
+    assert dcp.pending_resolutions(tmp_path, {"a.md": _hash(text)}) == []
+
+
+def test_pending_resolutions_partially_answered_file_contributes_only_answered_items(tmp_path):
+    text = (_item("C1", "critical", "A", "w", "q1", "r1", "decided")
+            + _item("C2", "major", "B", "w", "q2", "r2", ""))
+    (tmp_path / "a.md").write_text(text, encoding="utf-8")
+
+    pending = dcp.pending_resolutions(tmp_path, {})
+    assert [p.raw_id for p in pending] == ["C1"]
+
+
+def test_pending_resolutions_reappears_after_edit_following_an_apply(tmp_path):
+    # A file edited since the last apply can no longer be trusted to match the PRD, so
+    # everything it holds goes back into the overlay.
+    original = _item("C1", "critical", "T", "w", "q", "r", "first answer")
+    path = tmp_path / "a.md"
+    path.write_text(original, encoding="utf-8")
+    applied = {"a.md": _hash(original)}
+    assert dcp.pending_resolutions(tmp_path, applied) == []
+
+    path.write_text(_item("C1", "critical", "T", "w", "q", "r", "revised answer"), encoding="utf-8")
+    pending = dcp.pending_resolutions(tmp_path, applied)
+    assert [p.answer for p in pending] == ["revised answer"]
+
+
+def test_pending_resolutions_excludes_claude_md_and_finding_less_files(tmp_path):
+    (tmp_path / "claude.md").write_text(_item("C1", "critical", "T", "w", "q", "r", "a"), encoding="utf-8")
+    (tmp_path / "notes.md").write_text("just prose, no findings", encoding="utf-8")
+    assert dcp.pending_resolutions(tmp_path, {}) == []
+
+
+def test_pending_resolutions_ordered_oldest_round_first(tmp_path):
+    # Names sort the other way round from the timestamps they carry — ordering must follow
+    # _file_started_at, since "a later round supersedes an earlier one" depends on it.
+    (tmp_path / "a-clarification-20260201-090000.md").write_text(
+        _item("C1", "critical", "T", "w", "q", "r", "newer"), encoding="utf-8")
+    (tmp_path / "b-clarification-20260101-090000.md").write_text(
+        _item("C1", "critical", "T", "w", "q", "r", "older"), encoding="utf-8")
+
+    pending = dcp.pending_resolutions(tmp_path, {})
+    assert [p.answer for p in pending] == ["older", "newer"]
+    assert [p.round_index for p in pending] == [1, 2]
+
+
+def test_pending_overlay_stats_counts_files_and_findings(tmp_path):
+    (tmp_path / "clarification-20260101-090000.md").write_text(
+        _item("C1", "critical", "A", "w", "q", "r", "one") + _item("C2", "major", "B", "w", "q", "r", "two"),
+        encoding="utf-8")
+    (tmp_path / "clarification-20260102-090000.md").write_text(
+        _item("C1", "critical", "C", "w", "q", "r", "three"), encoding="utf-8")
+
+    stats = dcp.pending_overlay_stats(tmp_path, {})
+    assert stats["files"] == 2
+    assert stats["findings"] == 3
+    assert stats["chars"] > 0
+
+
+def test_pending_overlay_stats_empty(tmp_path):
+    assert dcp.pending_overlay_stats(tmp_path, {}) == {"files": 0, "findings": 0, "chars": 0}
+
+
+# ---------------------------------------------------------------------------
+# _implement_readiness_status — the pending overlay is a hard gate
+# ---------------------------------------------------------------------------
+
+_CLEAN = {"critical": 0, "major": 0, "minor": 0}
+
+
+def test_implement_readiness_blocked_by_pending_overlay_even_with_no_requirement():
+    # "none" says don't gate on OPEN QUESTIONS. It doesn't license implementing from a PRD
+    # that's missing decisions the user already made.
+    result = dcp._implement_readiness_status(_CLEAN, True, "none", 3)
+    assert result["ready"] is False
+    assert result["pendingOverlay"] == 3
+
+
+def test_implement_readiness_ready_when_overlay_is_empty():
+    assert dcp._implement_readiness_status(_CLEAN, True, "no_critical_or_major", 0)["ready"] is True
+
+
+def test_implement_readiness_overlay_defaults_to_zero():
+    # Existing callers that don't pass the argument keep their previous behavior.
+    assert dcp._implement_readiness_status(_CLEAN, True, "no_critical_or_major")["ready"] is True
+
+
+def test_clarify_finalize_status_reports_overlay_without_gating_on_it():
+    # Finalize CONSUMES the overlay, so it must stay "ready" while one is pending.
+    result = dcp._clarify_finalize_status({"critical": 0}, "evaluate", pending_overlay_findings=7)
+    assert result["pendingOverlay"] == 7
+    assert result["ready"] is True

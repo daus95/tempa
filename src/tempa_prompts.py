@@ -9,6 +9,7 @@ substitution and prepends the workspace's architecture principles; the higher-le
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
@@ -231,13 +232,66 @@ def build_qa_prompt(config: dict, epic_name: str, qa_output_file: Path, is_conti
     return build_prompt(template, params)
 
 
-def build_clarification_prompt(config: dict, skip_minor: bool = False) -> str:
+def _format_answer(answer: str) -> str:
+    """Indent a recorded answer under its `DECIDED:` label, preserving every line. Answers
+    are never truncated or summarized here — shortening one would silently change the
+    decision the agent is told to treat as settled."""
+    lines = answer.strip().splitlines() or [""]
+    return "\n".join([lines[0]] + [f"    {line.strip()}" if line.strip() else "" for line in lines[1:]])
+
+
+def _render_pending_overlay(pending: list) -> str:
+    """Render already-decided-but-unapplied resolutions as the ${pending_resolutions} block.
+
+    `pending` is dashboard_clarify_parse.pending_resolutions()'s output — computed by the
+    caller (tempa_clarify) and merely formatted here, so this module stays free of any
+    dashboard-half import. It arrives ordered oldest round first, and that ordering IS the
+    precedence rule prompt/clarification.md states ("a later round supersedes an earlier
+    one"), so it is rendered through as-is.
+
+    The findings' `clarify:` HTML-comment markers are deliberately NOT reproduced: they are
+    file syntax the answer UI depends on, and putting them in a prompt invites the agent to
+    think it's looking at a file it may edit. Neither is the finding's own Recommendation —
+    the recorded answer supersedes it, and showing both invites the agent to arbitrate
+    between them instead of treating the answer as settled."""
+    if not pending:
+        return "(None — every recorded answer has already been written into the PRD documents.)"
+
+    rounds = sorted({p.round_index for p in pending})
+    lines = [f"{len(rounds)} pending round(s), {len(pending)} already-decided resolution(s)."]
+    for round_index in rounds:
+        items = [p for p in pending if p.round_index == round_index]
+        stamp = datetime.fromtimestamp(items[0].started_at).strftime("%Y-%m-%d %H:%M")
+        lines.append("")
+        lines.append(
+            f"--- ROUND {round_index} of {len(rounds)} — {items[0].file_name} (recorded {stamp}) ---"
+        )
+        for item in items:
+            lines.append("")
+            lines.append(f"[{item.raw_id}] {item.severity} — {item.title}")
+            if item.where:
+                lines.append(f"  Where: {item.where}")
+            if item.question:
+                lines.append(f"  Question: {item.question}")
+            lines.append(f"  DECIDED: {_format_answer(item.answer)}")
+    return "\n".join(lines)
+
+
+def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: list | None = None) -> str:
+    """`pending` is the pending-resolution overlay: every answered clarification finding
+    whose answer hasn't been written into the PRD yet (see
+    dashboard_clarify_parse.pending_resolutions, computed by tempa_clarify._pending_overlay).
+    Carrying it in the prompt is what lets a round of clarification run without an apply
+    pass first — the agent evaluates the PRD as it will read once those decisions are
+    applied. None/empty renders an explicit "nothing pending" line rather than an empty
+    block, so the template's overlay section never has a dangling header."""
     sources = get_sources(config)
     template = load_prompt("clarification")
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
+        "pending_resolutions": _render_pending_overlay(pending or []),
         "finding_scope": (
             "critical or major — do NOT look for, evaluate, or report MINOR findings at all"
             if skip_minor else "critical, major, or minor"

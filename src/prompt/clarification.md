@@ -1,5 +1,22 @@
 Re-evaluate all PRD documents at (${sources.prd}) to check whether any specifications are still conflicting or need clarification. The PRD may consist of multiple document files — check all of them.
 
+=== ALREADY-DECIDED RESOLUTIONS NOT YET WRITTEN INTO THE PRD ===
+
+The decisions below were raised in earlier clarification rounds and have already been answered by the user (or on the user's behalf). They have NOT yet been written into the PRD documents. Treat this block as an AUTHORITATIVE OVERLAY on top of the PRD: wherever a decision below contradicts what the PRD files currently say, THE DECISION BELOW IS THE TRUTH and the PRD text is simply stale.
+
+${pending_resolutions}
+
+Rules for using this overlay — follow all four:
+
+1. ALREADY DECIDED. Do NOT raise a new finding for anything the overlay already settles, and do NOT re-ask a question it already answers, even if the PRD text still reads the old way. Those points are closed.
+2. LAST ONE WINS. The rounds above are in chronological order, oldest first. If two decisions cover the same point, the one in the LATER round supersedes the earlier one completely. Do not merge them and do not average them.
+3. CONTRADICTION IS A FINDING. If two decisions in the SAME round contradict each other, or a decision contradicts something in the PRD that it does not itself resolve (i.e. applying it would break a different, still-valid part of the spec), RAISE THAT AS A NEW FINDING using the format below. Quote both sides. This is the one case where the overlay produces findings rather than suppressing them.
+4. EVALUATE AS IF APPLIED. Judge the specification as it will read once every decision above has been written in. Do not report an ambiguity that only exists because the overlay has not been applied yet.
+
+Do NOT edit the PRD documents in this session, and do NOT edit any existing clarification file — this session only evaluates and writes a new findings file.
+
+=== END ALREADY-DECIDED RESOLUTIONS ===
+
 For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
 
 ```

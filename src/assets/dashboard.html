@@ -220,6 +220,10 @@
               findings entirely instead of finding and reporting them.</p>
           </div>
         </div>
+        <div class="gate-panel hidden" id="clarifyOverlayCard">
+          <h3>Pending resolutions <span class="clarify-round-badge hidden" id="clarifyOverlayBadge"></span></h3>
+          <p class="gate-hint" id="clarifyOverlayHint"></p>
+        </div>
         <div class="gate-panel" id="finalizeGate">
           <h3>Finalize readiness <span class="clarify-round-badge hidden" id="clarifyRoundBadge"></span></h3>
           <p class="gate-hint hidden" id="finalizeGateHint"></p>
@@ -252,7 +256,7 @@
         <div class="group">
           <h3>Fully answered</h3>
           <table>
-            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th><th>Applied</th></tr></thead>
+            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
             <tbody id="clarifyAnsweredTbody"></tbody>
           </table>
         </div>
