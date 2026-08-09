@@ -16,6 +16,11 @@ once the first tagged release is cut.
   dashboard also keeps polling for updates while any epic is running or being QA'd, even
   if that session wasn't started from this dashboard instance.
 
+### Changed
+
+- **Settings → Email alerts' "From" field now defaults to `tempa-noreply@tempa-ai.com`**
+  for freshly created workspaces, instead of an empty field.
+
 ### Fixed
 
 - **Two v0.5.6 changes shipped with no documentation of their own** — only CHANGELOG entries.
@@ -32,6 +37,13 @@ once the first tagged release is cut.
   now only follow new content to the bottom if the user was already there (or hadn't
   scrolled yet); scrolling up now stays put while the log keeps updating underneath, and
   scrolling back to the bottom resumes auto-follow.
+- **Settings → Email alerts' "Alert events" checkboxes could visually break onto two
+  lines** for longer event names (e.g. "Implementation auto-reordered", "Implementation
+  run limit reached") — the checkbox row's `display: flex` was being overridden by the
+  higher-specificity `.settings-field label` rule, since (unlike the neighboring
+  switch/radio rows) it wasn't scoped under its own group selector. Every alert-event row
+  now stays a single tidy line, truncating with an ellipsis instead of wrapping if it ever
+  runs out of room.
 - **An implementation session that made no progress across `implement_no_progress_rounds`
   resumed sessions, but whose own feature bookkeeping showed every feature already
   `done`, was being marked `failed`** with a misleading "likely blocked on something
