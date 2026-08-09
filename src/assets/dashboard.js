@@ -1300,6 +1300,13 @@ async function pollClarifyRun() {
     if (data.lines.length) {
       state.clarifyRun.lines.push(...data.lines);
       state.clarifyRun.nextIndex = data.next;
+      // Each evaluate/apply session ends with a "... SUCCEEDED (exit code N)" line
+      // (_log_session_result) — refresh Unanswered/Fully answered right then instead
+      // of waiting for the whole (possibly multi-round) finalize run to exit, so the
+      // panels track each round's answers as they land on disk.
+      if (data.lines.some((l) => l.includes("SUCCEEDED (exit code"))) {
+        refreshClarifyList();
+      }
     }
     // Always re-render, even with no new finalized lines: `progress` (the live
     // elapsed-time tick) changes every second on its own and isn't part of `lines`.
@@ -2499,10 +2506,27 @@ function wireClarifyBody() {
   });
 }
 
+// Finalized Clarification auto-answers findings itself (mechanical recommendation
+// fill + agent-applied resolutions) — a hand save racing with that loop's own
+// reads/writes to the same file would corrupt or lose an auto-answer, so answer
+// editing is locked for as long as a finalize run is in flight. Mirrors the
+// server-side guard in _handle_clarify_save (dashboard_server.py).
+function isClarifyFinalizeLocked() {
+  return state.clarifyRun.running && state.clarifyRun.mode === "finalize";
+}
+
+const CLARIFY_LOCKED_BANNER_HTML =
+  '<div class="clarify-locked-banner">Finalized Clarification is running and auto-answering ' +
+  "these findings — answers are read-only until it stops.</div>";
+
 // Bulk-selects "Follow the recommendation" for every item that has no radio picked
 // yet (i.e. hasn't been answered in this session) — leaves items the user already
 // answered, or already chose a mode for, untouched.
 function followAllRecommendations() {
+  if (isClarifyFinalizeLocked()) {
+    toast("Answers are locked while Finalized Clarification is running.", true);
+    return;
+  }
   let count = 0;
   clarifyBody.querySelectorAll(".item").forEach((sec) => {
     if (sec.querySelector('input[type=radio]:checked')) return;
@@ -2538,8 +2562,12 @@ async function openClarifyFile(file) {
     state.clarifyDirty = false;
     state.clarifyShowingOverview = false;
     clarifySummary.textContent = data.summary || "";
-    clarifyBody.innerHTML = data.html || "";
+    const locked = isClarifyFinalizeLocked();
+    clarifyBody.innerHTML = (locked ? CLARIFY_LOCKED_BANNER_HTML : "") + (data.html || "");
     wireClarifyBody();
+    if (locked) {
+      clarifyBody.querySelectorAll('input[type=radio], textarea').forEach((el) => { el.disabled = true; });
+    }
     showPane("clarify");
     renderSidebar();
   } catch (e) {
@@ -2561,6 +2589,10 @@ function collectClarifyAnswers() {
 
 async function saveClarifyFile() {
   if (!state.selectedClarifyPath || !state.clarifyDirty) return;
+  if (isClarifyFinalizeLocked()) {
+    toast("Answers are locked while Finalized Clarification is running.", true);
+    return;
+  }
   const items = collectClarifyAnswers();
   const own = items.filter((i) => i.mode === "own");
   const missing = own.filter((i) => !i.answer.trim());
