@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scrolling up in the Clarify/Implement Log panel to read earlier output got yanked back
+  to the bottom** on the next 1-second poll tick, because both log panels were rebuilt from
+  scratch on every render and unconditionally forced `scrollTop` to the bottom. Both panels
+  now only follow new content to the bottom if the user was already there (or hadn't
+  scrolled yet); scrolling up now stays put while the log keeps updating underneath, and
+  scrolling back to the bottom resumes auto-follow.
+
 ## [0.5.7] - 2026-08-09
 
 ### Added

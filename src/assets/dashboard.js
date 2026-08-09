@@ -1237,6 +1237,14 @@ function linkifyLogFilenames(escapedMsg) {
   );
 }
 
+// Whether a log panel is currently scrolled to (or near) its bottom — used to decide
+// whether a re-render should follow new content or leave the user's scroll-up position
+// alone (a 1s poll rebuilds the whole panel, so without this a user reading earlier
+// lines gets yanked back to the bottom on every tick).
+function isScrolledNearBottom(el, threshold = 4) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+}
+
 function appendClarifyLogRow(text) {
   const f = formatClarifyLogLine(text);
   const row = document.createElement("div");
@@ -1249,6 +1257,7 @@ function appendClarifyLogRow(text) {
 }
 
 function renderClarifyLog() {
+  const stickToBottom = isScrolledNearBottom(clarifyLogBody);
   clarifyLogBody.innerHTML = "";
   if (!state.clarifyRun.lines.length && !state.clarifyRun.progress) {
     clarifyLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
@@ -1259,7 +1268,9 @@ function renderClarifyLog() {
   // re-rendered fresh on every poll, so its elapsed time visibly keeps ticking instead of
   // freezing at whatever value happened to be present the first time it was fetched.
   if (state.clarifyRun.progress) clarifyLogBody.appendChild(appendClarifyLogRow(state.clarifyRun.progress));
-  clarifyLogBody.scrollTop = clarifyLogBody.scrollHeight;
+  // Only follow new content to the bottom if the user was already there (or hadn't
+  // scrolled) — otherwise a poll tick mid-read would yank them back down.
+  if (stickToBottom) clarifyLogBody.scrollTop = clarifyLogBody.scrollHeight;
 }
 
 function stopClarifyPolling() {
@@ -1458,6 +1469,7 @@ function renderImplementStatus() {
 }
 
 function renderImplementLog() {
+  const stickToBottom = isScrolledNearBottom(implLogBody);
   implLogBody.innerHTML = "";
   if (!state.implementRun.lines.length && !state.implementRun.progress) {
     implLogBody.innerHTML = '<div class="clarify-log-empty">No log output yet.</div>';
@@ -1465,7 +1477,9 @@ function renderImplementLog() {
   }
   for (const text of state.implementRun.lines) implLogBody.appendChild(appendClarifyLogRow(text));
   if (state.implementRun.progress) implLogBody.appendChild(appendClarifyLogRow(state.implementRun.progress));
-  implLogBody.scrollTop = implLogBody.scrollHeight;
+  // Only follow new content to the bottom if the user was already there (or hadn't
+  // scrolled) — otherwise a poll tick mid-read would yank them back down.
+  if (stickToBottom) implLogBody.scrollTop = implLogBody.scrollHeight;
 }
 
 // The preconditions gating "Start Implementation": clarification has run at least
