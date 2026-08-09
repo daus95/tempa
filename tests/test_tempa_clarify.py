@@ -407,7 +407,8 @@ def test_run_apply_step_uses_clarify_apply_backend_and_effort_independent_of_cla
 def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, monkeypatch):
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
-    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")},
+                              "finalize_no_progress_rounds": 2})
 
     calls = {"evaluate": 0, "apply": 0}
 
@@ -431,10 +432,42 @@ def test_finalize_stops_after_no_progress_rounds(tmp_path, isolate_tempa_paths, 
     assert exc.value.code == 1
     # Round 1: 3 findings, no prior round to compare against -> no-progress count stays 0.
     # Round 2: still 3 findings (no reduction) -> no-progress count becomes 1.
-    # Round 3: still 3 findings -> no-progress count reaches the default limit (2) -> stop
+    # Round 3: still 3 findings -> no-progress count reaches the configured limit (2) -> stop
     # BEFORE applying again — evaluate ran 3 times, apply only ran after rounds 1 and 2.
     assert calls["evaluate"] == 3
     assert calls["apply"] == 2
+
+
+def test_finalize_no_progress_limit_defaults_to_five(tmp_path, isolate_tempa_paths, monkeypatch):
+    # A config.json without the key (or with a junk value) falls back to the default of 5,
+    # so the automation gets five stalled rounds before handing back to a human.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    tempa_config.save_config({"sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}})
+
+    calls = {"evaluate": 0, "apply": 0}
+
+    def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
+        calls["evaluate"] += 1
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = {"critical": 2, "major": 1, "minor": 0}
+        tempa_config.save_config(cfg)
+        return True
+
+    def fake_run_apply_step(config, resume_session_id=None):
+        calls["apply"] += 1
+        return True
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
+    monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    # Same counting as above, five stalled rounds instead of two: rounds 2-6 each add one.
+    assert calls["evaluate"] == 6
+    assert calls["apply"] == 5
 
 
 def test_finalize_keeps_going_when_findings_are_decreasing(tmp_path, isolate_tempa_paths, monkeypatch):

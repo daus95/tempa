@@ -8,6 +8,33 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Settings → Run Limits now has a "Max Finalize No-Progress Round" field**, right below
+  "Max Finalize Clarification Round". It configures `finalize_no_progress_rounds` — how many
+  Finalized Clarification rounds in a row may fail to reduce the critical+major finding count
+  before the loop gives up early and asks for human answers. Previously this was a
+  config.json-only setting hardcoded to default `2`, which stopped finalization far too soon.
+
+### Changed
+
+- **`finalize_no_progress_rounds` now defaults to `5`** (was `2`), giving Finalized
+  Clarification more attempts before it concludes the remaining findings need a human
+  decision. Existing config.json files keep whatever value they already have.
+- **The "Finalized Clarification Is Already Running" save warning now covers both finalize
+  run limits.** Like "Max Finalize Clarification Round", the new no-progress limit is read
+  once when the finalize run starts, so changing either one mid-run now says so and names
+  each changed setting.
+
+### Fixed
+
+- **The Clarification page's log filenames are now clickable**, opening the same large log
+  viewer modal the Implementation page's Log tab already had. The linkifier only recognized
+  `session_`/`qa_`/`process_` filenames, so the clarify loop's own
+  `clarification_*`/`apply_clarification_*` logs (and `verify_*`/`plan_epics_*`) rendered as
+  plain text. It now keys off the `_<YYYYMMDD>_<HHMMSS>.txt` suffix every Tempa log filename
+  ends with, so any future log prefix linkifies too.
+
 ## [0.5.8] - 2026-08-09
 
 ### Added
