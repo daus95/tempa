@@ -39,6 +39,11 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **README and docs/clarify-modes.md no longer describe a Finalize run as uncancelable, or
+  the Clarification page's log as an expandable panel.** Both were stale against the Stop
+  Clarification/Stop Apply Answers buttons and the Overview/Log tab split added above —
+  README's Step 2 now documents all three Stop buttons and the tab split, and
+  clarify-modes.md documents the auto-chain apply loop's self-stop-on-stall behavior.
 - **Apply Answers' auto-chain loop no longer logs "Apply finished" after stalling.**
   When the loop stopped early because a batch wasn't clearing the remaining backlog (not
   because everything was applied), it still printed "Apply finished. Run Continue

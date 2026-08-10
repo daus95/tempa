@@ -183,9 +183,12 @@ Difference from `--finalize`: `--apply` doesn't re-evaluate — it only applies 
 answers. `--finalize` runs the whole evaluate/answer loop and finishes with one apply.
 
 Once the apply step succeeds, `clarify --apply` also shows the **Ask to continue** prompt
-below. Started from the dashboard instead, it keeps applying until no backlog is left and
-then stops — it does **not** chain into an evaluation of its own. Run **Continue
-Clarification** when you want fresh numbers for the updated PRD.
+below. Started from the dashboard instead, it keeps applying — one backlog file per
+subprocess — until no backlog is left and then stops — it does **not** chain into an
+evaluation of its own. If a batch doesn't actually reduce the remaining count (a file that
+can't resolve on its own), the loop stops itself early rather than spinning forever, says so
+in the log, and leaves that file for a human to review by hand instead of retrying it forever.
+Run **Continue Clarification** when you want fresh numbers for the updated PRD.
 
 ## Ask to continue — after any apply step
 
@@ -280,4 +283,16 @@ one run only, independent of the all-time total above. It's shown as **N / M** n
 
 While a finalize run is in progress, "Finalized Clarification" is itself replaced by a **Stop
 Finalize** button — clicking it (after a confirmation prompt) kills the running process, the
-same way "Stop Implementation" does for `tempa implement`.
+same way "Stop Implementation" does for `tempa implement`. "Start Clarification"/"Continue
+Clarification" and "Apply Answers" get the same treatment while *they're* running — **Stop
+Clarification** and **Stop Apply Answers** respectively, same confirmation-then-kill. Apply's
+auto-chain loop (see **Ask to continue** above) additionally checks for a pending stop between
+batches: a Stop clicked in that gap skips the next queued file instead of waiting for it to
+start and then killing it mid-way.
+
+The Clarification page itself splits into an **Overview** tab (the Unanswered/Fully answered
+tables above) and a **Log** tab (raw streamed console output for whichever run is in
+progress), the same Status/Log split the Implementation page uses. The run buttons and
+readiness panels (Evaluation scope, Pending resolutions, Finalize readiness) stay pinned above
+both tabs, with a spinning status badge next to the run buttons reflecting live progress
+regardless of which tab is open.
