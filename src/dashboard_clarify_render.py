@@ -68,7 +68,14 @@ def _attr(s: str) -> str:
 def _render_item_html(item: ClarificationItem) -> str:
     key = _attr(item.key)
     has_recommendation = bool(item.recommendation)
-    default_own = bool(item.existing_answer) or not has_recommendation
+    # "Follow the recommendation" round-trips as checked only for answers saved through
+    # the marker'd mode="recommendation" path (see apply_answers_to_file /
+    # _fill_unanswered_with_recommendations) — pre-existing files that duplicated the
+    # recommendation text into "Your answer" with no mode marker are left exactly as
+    # they rendered before this: shown as "own answer" (forward-only, deliberately not
+    # reclassified by comparing existing_answer to recommendation).
+    followed_recommendation = has_recommendation and item.answer_mode == "recommendation"
+    default_own = (bool(item.existing_answer) or not has_recommendation) and not followed_recommendation
 
     # Unanswered items with a recommendation start with NEITHER radio checked, so the
     # user has to actively pick one — pre-selecting "recommendation" here meant a user
@@ -76,8 +83,9 @@ def _render_item_html(item: ClarificationItem) -> str:
     # false and the Save button stuck disabled (see followAllBtn for the bulk version).
     recommendation_radio = ""
     if has_recommendation:
+        rec_checked = "checked" if followed_recommendation else ""
         recommendation_radio = (
-            f'<label><input type="radio" name="mode-{key}" value="recommendation"> '
+            f'<label><input type="radio" name="mode-{key}" value="recommendation" {rec_checked}> '
             f"Follow the recommendation</label>"
         )
     own_checked = "checked" if default_own else ""

@@ -24,7 +24,9 @@ ITEM_RE = re.compile(
 
 
 ANSWER_RE = re.compile(
-    r'<!--\s*clarify:answer-start\s*-->(?P<answer>.*?)<!--\s*clarify:answer-end\s*-->',
+    r'<!--\s*clarify:answer-start(?:\s+mode="(?P<mode>[^"]*)")?\s*-->'
+    r'(?P<answer>.*?)'
+    r'<!--\s*clarify:answer-end\s*-->',
     re.DOTALL,
 )
 
@@ -73,10 +75,28 @@ class ClarificationItem:
     question: str
     recommendation: str
     existing_answer: str
+    answer_mode: str
     file: Path
     answer_start: int
     answer_end: int
     has_markers: bool
+
+    @property
+    def resolved_answer(self) -> str:
+        """The effective answer text regardless of how it's stored on disk: the typed
+        answer if present, otherwise the recommendation IF this item's answer was saved
+        as "follow the recommendation" (answer_mode == "recommendation") — the one case
+        where the persisted file deliberately doesn't carry the answer text itself, to
+        avoid duplicating the recommendation (see apply_answers_to_file /
+        _fill_unanswered_with_recommendations). Everywhere the code needs "what did the
+        user decide" (answered/total counts, the pending overlay) should use this, not
+        `existing_answer` directly — the UI's "which radio is checked" logic is the one
+        exception, since it needs the raw distinction between the two."""
+        if self.existing_answer:
+            return self.existing_answer
+        if self.answer_mode == "recommendation":
+            return self.recommendation
+        return ""
 
 
 def _parse_item_match(match: re.Match, text: str, path: Path, file_index: int) -> ClarificationItem | None:
@@ -118,11 +138,13 @@ def _parse_item_match(match: re.Match, text: str, path: Path, file_index: int) -
         answer_start = ya_abs_start + am.start(0)
         answer_end = ya_abs_start + am.end(0)
         has_markers = True
+        answer_mode = am.group("mode") or ""
     else:
         existing_answer = ya_text.strip()
         answer_start = ya_abs_start
         answer_end = ya_abs_end
         has_markers = False
+        answer_mode = ""
 
     return ClarificationItem(
         key=f"f{file_index}-{raw_id}",
@@ -133,6 +155,7 @@ def _parse_item_match(match: re.Match, text: str, path: Path, file_index: int) -
         question=seg_text("Question"),
         recommendation=seg_text("Recommendation"),
         existing_answer=existing_answer,
+        answer_mode=answer_mode,
         file=path,
         answer_start=answer_start,
         answer_end=answer_end,
@@ -176,7 +199,7 @@ def file_answer_status(path: Path) -> tuple[int, int]:
     items, _ = parse_file(path, text, 0)
     if not items:
         return (0, 0)
-    return (sum(1 for it in items if it.existing_answer), len(items))
+    return (sum(1 for it in items if it.resolved_answer), len(items))
 
 
 def _file_severity_stats(path: Path, timings: dict | None = None) -> dict | None:
@@ -198,7 +221,7 @@ def _file_severity_stats(path: Path, timings: dict | None = None) -> dict | None
     by_severity = {sev: {"answered": 0, "total": 0} for sev in ("critical", "major", "minor")}
     for it in items:
         by_severity[it.severity]["total"] += 1
-        if it.existing_answer:
+        if it.resolved_answer:
             by_severity[it.severity]["answered"] += 1
     answered = sum(v["answered"] for v in by_severity.values())
     file_timing = (timings or {}).get(path.name, {})
@@ -456,7 +479,7 @@ def pending_resolutions(clar_dir: Path, applied_hashes: dict) -> list[PendingRes
             continue
         if applied_hashes.get(path.name) == hashlib.sha256(text.encode("utf-8")).hexdigest():
             continue
-        answered = [it for it in items if it.existing_answer]
+        answered = [it for it in items if it.resolved_answer]
         if answered:
             contributing.append((path, _file_started_at(path), answered))
 
@@ -467,7 +490,7 @@ def pending_resolutions(clar_dir: Path, applied_hashes: dict) -> list[PendingRes
             pending.append(PendingResolution(
                 file_name=path.name, started_at=started_at, round_index=round_index,
                 raw_id=it.raw_id, severity=it.severity, title=it.title,
-                where=it.where, question=it.question, answer=it.existing_answer,
+                where=it.where, question=it.question, answer=it.resolved_answer,
             ))
     return pending
 

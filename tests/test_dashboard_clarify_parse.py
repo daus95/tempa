@@ -26,6 +26,21 @@ def _item(item_id, severity, heading, where, question, recommendation, answer, w
     )
 
 
+def _item_followed_recommendation(item_id, severity, heading, where, question, recommendation):
+    """A finding saved via "Follow the recommendation": a mode="recommendation" marker
+    with an empty body — no duplicated recommendation text."""
+    answer_block = '<!-- clarify:answer-start mode="recommendation" -->\n\n<!-- clarify:answer-end -->'
+    return (
+        f'<!-- clarify:item id="{item_id}" severity="{severity}" -->\n'
+        f"### {heading}\n"
+        f"**Where:** {where}\n"
+        f"**Question:** {question}\n"
+        f"**Recommendation:** {recommendation}\n"
+        f"**Your answer:** {answer_block}\n"
+        f"<!-- clarify:enditem -->\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # parse_file
 # ---------------------------------------------------------------------------
@@ -156,6 +171,55 @@ def test_parse_file_no_markers_at_all():
 
 
 # ---------------------------------------------------------------------------
+# mode="recommendation" marker / resolved_answer — "follow the recommendation" no
+# longer duplicates the recommendation text into the file; it's recorded via the
+# marker's mode attribute instead, with an empty body.
+# ---------------------------------------------------------------------------
+
+def test_parse_file_followed_recommendation_marker_has_empty_answer_and_mode_set():
+    text = _item_followed_recommendation("1", "major", "T", "w", "q", "do the thing")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].existing_answer == ""
+    assert items[0].answer_mode == "recommendation"
+    assert items[0].has_markers is True
+
+
+def test_parse_file_own_answer_has_no_mode():
+    text = _item("1", "major", "T", "w", "q", "do the thing", "my own text")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].answer_mode == ""
+
+
+def test_resolved_answer_prefers_existing_answer_when_present():
+    text = _item("1", "major", "T", "w", "q", "do the thing", "my own text")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].resolved_answer == "my own text"
+
+
+def test_resolved_answer_falls_back_to_recommendation_when_mode_is_recommendation():
+    text = _item_followed_recommendation("1", "major", "T", "w", "q", "do the thing")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].resolved_answer == "do the thing"
+
+
+def test_resolved_answer_empty_when_unanswered():
+    text = _item("1", "major", "T", "w", "q", "do the thing", "")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].resolved_answer == ""
+
+
+def test_forward_only_legacy_duplicated_text_without_mode_marker_is_not_reclassified():
+    # A pre-existing file where the recommendation text was copied verbatim into "Your
+    # answer" (the old bug) but with no mode="recommendation" marker must NOT be
+    # reclassified as "followed recommendation" — forward-only, by design.
+    text = _item("1", "major", "T", "w", "q", "do the thing", "do the thing")
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert items[0].existing_answer == "do the thing"
+    assert items[0].answer_mode == ""
+    assert items[0].resolved_answer == "do the thing"
+
+
+# ---------------------------------------------------------------------------
 # file_answer_status
 # ---------------------------------------------------------------------------
 
@@ -178,6 +242,16 @@ def test_file_answer_status_mixed(tmp_path):
     )
     path.write_text(text, encoding="utf-8")
     assert dcp.file_answer_status(path) == (2, 3)
+
+
+def test_file_answer_status_counts_followed_recommendation_as_answered(tmp_path):
+    path = tmp_path / "f.md"
+    text = (
+        _item_followed_recommendation("1", "critical", "A", "w", "q", "r")
+        + _item("2", "major", "B", "w", "q", "r", "")
+    )
+    path.write_text(text, encoding="utf-8")
+    assert dcp.file_answer_status(path) == (1, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +460,18 @@ def test_pending_resolutions_never_applied_file_contributes_everything(tmp_path)
     assert pending[0].question == "expire?"
     assert pending[0].answer == "30 days, rotating"
     assert pending[0].round_index == 1
+
+
+def test_pending_resolutions_carries_full_text_for_followed_recommendation(tmp_path):
+    # The persisted file doesn't store the recommendation text a second time, but the
+    # overlay carried into the next clarification round must still see the full
+    # resolution text — that's what resolved_answer reconstructs.
+    text = _item_followed_recommendation("C1", "critical", "T", "PRD 4.2", "expire?", "30 days")
+    (tmp_path / "clarification-20260101-101500.md").write_text(text, encoding="utf-8")
+
+    pending = dcp.pending_resolutions(tmp_path, {})
+    assert len(pending) == 1
+    assert pending[0].answer == "30 days"
 
 
 def test_pending_resolutions_skips_already_applied_file(tmp_path):

@@ -2,9 +2,10 @@
 
 _clarification_backlog splits existing clarification result files into "unanswered" vs
 "answered but not yet applied", and _fill_unanswered_with_recommendations mechanically
-copies each unanswered finding's own Recommendation text into its answer (no agent/LLM
-call — the "follow recommendation" resolution). Both feed _prepare_finalize_backlog, the
-pre-flight run before finalize's loop starts.
+marks each unanswered finding as "follow the recommendation" — a mode="recommendation"
+marker with an empty body, not a copy of the recommendation text (no agent/LLM call; see
+ClarificationItem.resolved_answer, which reconstructs the full text). Both feed
+_prepare_finalize_backlog, the pre-flight run before finalize's loop starts.
 
 The finalize tests below cover the loop itself: evaluate -> auto-answer until an
 evaluation comes back clean, then ONE apply ("compaction") that writes the accumulated
@@ -135,7 +136,10 @@ def test_fill_writes_recommendation_into_empty_answer(tmp_path):
     filled = tc._fill_unanswered_with_recommendations([f])
     assert filled == 1
     items, _ = tc.parse_file(f, f.read_text(encoding="utf-8"), 0)
-    assert items[0].existing_answer == "do the thing"
+    # The recommendation text is NOT copied into the file — only the mode marker is set.
+    assert items[0].existing_answer == ""
+    assert items[0].answer_mode == "recommendation"
+    assert items[0].resolved_answer == "do the thing"
 
 
 def test_fill_leaves_already_answered_items_untouched(tmp_path):
@@ -159,9 +163,11 @@ def test_fill_multiple_unanswered_items_in_one_file(tmp_path):
     assert filled == 2
     items, _ = tc.parse_file(f, f.read_text(encoding="utf-8"), 0)
     by_id = {it.raw_id: it for it in items}
-    assert by_id["1"].existing_answer == "rec one"
-    assert by_id["2"].existing_answer == "already answered"
-    assert by_id["3"].existing_answer == "rec three"
+    assert by_id["1"].resolved_answer == "rec one"
+    assert by_id["1"].answer_mode == "recommendation"
+    assert by_id["2"].resolved_answer == "already answered"
+    assert by_id["3"].resolved_answer == "rec three"
+    assert by_id["3"].answer_mode == "recommendation"
 
 
 def test_fill_no_markers_form_still_gets_filled(tmp_path):
@@ -173,7 +179,12 @@ def test_fill_no_markers_form_still_gets_filled(tmp_path):
     filled = tc._fill_unanswered_with_recommendations([f])
     assert filled == 1
     items, _ = tc.parse_file(f, f.read_text(encoding="utf-8"), 0)
-    assert items[0].existing_answer == "the recommendation"
+    # Upgraded to a mode="recommendation" marker, same as the marker'd branch — no
+    # verbatim copy, even for a file that started with no markers at all.
+    assert items[0].existing_answer == ""
+    assert items[0].answer_mode == "recommendation"
+    assert items[0].resolved_answer == "the recommendation"
+    assert items[0].has_markers is True
 
 
 def test_fill_across_multiple_files(tmp_path):
@@ -185,8 +196,8 @@ def test_fill_across_multiple_files(tmp_path):
     assert filled == 2
     items1, _ = tc.parse_file(f1, f1.read_text(encoding="utf-8"), 0)
     items2, _ = tc.parse_file(f2, f2.read_text(encoding="utf-8"), 0)
-    assert items1[0].existing_answer == "rec a"
-    assert items2[0].existing_answer == "rec b"
+    assert items1[0].resolved_answer == "rec a"
+    assert items2[0].resolved_answer == "rec b"
 
 
 def test_fill_then_backlog_reclassifies_as_unapplied(tmp_path):
@@ -297,7 +308,8 @@ def test_run_apply_step_fills_unanswered_findings_with_recommendation_before_app
     assert tc._run_apply_step(config) is True
 
     items, _ = tc.parse_file(f, f.read_text(encoding="utf-8"), 0)
-    assert items[0].existing_answer == "do the thing"
+    assert items[0].resolved_answer == "do the thing"
+    assert items[0].answer_mode == "recommendation"
 
 
 def test_run_apply_step_resumes_given_session_id(tmp_path, isolate_tempa_paths, monkeypatch):

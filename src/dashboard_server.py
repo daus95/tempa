@@ -90,13 +90,20 @@ def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
             continue
         mode = entry.get("mode")
         if mode == "recommendation" and item.recommendation:
-            new_text = item.recommendation
+            # Don't duplicate the recommendation text into the file — it's already
+            # shown once under "Recommendation:". Record the choice via the marker's
+            # mode attribute instead; ClarificationItem.resolved_answer reconstructs
+            # the full text for anything that needs it (answered counts, the pending
+            # overlay carried into the next clarification round).
+            new_text = ""
+            start_marker = '<!-- clarify:answer-start mode="recommendation" -->'
         else:
             new_text = (entry.get("answer") or "").strip()
+            start_marker = "<!-- clarify:answer-start -->"
         if item.has_markers:
-            replacement = f"<!-- clarify:answer-start -->\n{new_text}\n<!-- clarify:answer-end -->"
+            replacement = f"{start_marker}\n{new_text}\n<!-- clarify:answer-end -->"
         else:
-            replacement = f"\n<!-- clarify:answer-start -->\n{new_text}\n<!-- clarify:answer-end -->\n"
+            replacement = f"\n{start_marker}\n{new_text}\n<!-- clarify:answer-end -->\n"
         edits.append((item.answer_start, item.answer_end, replacement))
 
     for start, end, replacement in sorted(edits, key=lambda s: s[0], reverse=True):
@@ -254,7 +261,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         counts = {"critical": 0, "major": 0, "minor": 0}
         for it in items:
             counts[it.severity] += 1
-        answered = sum(1 for it in items if it.existing_answer)
+        answered = sum(1 for it in items if it.resolved_answer)
         summary = (
             f"{len(items)} finding(s) — {counts['critical']} critical · "
             f"{counts['major']} major · {counts['minor']} minor"
