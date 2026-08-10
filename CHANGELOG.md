@@ -18,6 +18,16 @@ once the first tagged release is cut.
   implementation run is in progress, same as Update Now; a confirmation dialog explains the
   impact before it runs.
 
+### Changed
+
+- **Clarification page now splits into Overview/Log tabs**, same pattern as the
+  Implementation page's Status/Log tabs — the Unanswered/Fully answered tables live under
+  Overview, the run log lives under Log. The run buttons and readiness panels (Evaluation
+  scope, Pending resolutions, Finalize readiness, Start Implementation) stay pinned above
+  both tabs, and a spinning status badge next to the run buttons shows the live
+  clarify/apply/finalize progress regardless of which tab is open, so switching to Overview
+  during a run no longer hides the fact that something is happening.
+
 ## [0.6.0] - 2026-08-10
 
 ### Added

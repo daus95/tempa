@@ -200,6 +200,7 @@
           <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
             <span><svg class="icon-svg"><use href="#i-upload"></use></svg></span><span>Apply Answers</span>
           </button>
+          <span class="clarify-run-status hidden" id="clarifyRunStatus"></span>
         </div>
         <div class="gate-panel" id="skipMinorCard">
           <h3>Evaluation scope</h3>
@@ -237,23 +238,28 @@
             <span><svg class="icon-svg"><use href="#i-rocket"></use></svg></span><span>Start Implementation</span>
           </button>
         </div>
-        <details class="clarify-log hidden" id="clarifyLogPanel">
-          <summary>Clarification log <span class="clarify-log-status" id="clarifyLogStatus"></span></summary>
-          <div class="clarify-log-body" id="clarifyLogBody"></div>
-        </details>
-        <div class="group">
-          <h3>Unanswered</h3>
-          <table>
-            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
-            <tbody id="clarifyUnansweredTbody"></tbody>
-          </table>
+        <div class="tab-bar">
+          <button type="button" class="tab-btn active" id="clarifyTabOverviewBtn">Overview</button>
+          <button type="button" class="tab-btn" id="clarifyTabLogBtn">Log</button>
         </div>
-        <div class="group">
-          <h3>Fully answered</h3>
-          <table>
-            <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
-            <tbody id="clarifyAnsweredTbody"></tbody>
-          </table>
+        <div class="tab-panel" id="clarifyOverviewTabPanel">
+          <div class="group">
+            <h3>Unanswered</h3>
+            <table>
+              <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
+              <tbody id="clarifyUnansweredTbody"></tbody>
+            </table>
+          </div>
+          <div class="group">
+            <h3>Fully answered</h3>
+            <table>
+              <thead><tr><th>File</th><th>Started</th><th>Findings</th><th>Status</th></tr></thead>
+              <tbody id="clarifyAnsweredTbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="tab-panel hidden" id="clarifyLogTabPanel">
+          <div class="clarify-log-body" id="clarifyLogBody"></div>
         </div>
       </div>
       <div id="implPane" class="pane impl-pane hidden">
@@ -270,14 +276,14 @@
           <h3>Implementation readiness</h3>
           <ul class="gate-checklist" id="implGateList"></ul>
         </div>
-        <div class="impl-tabs">
-          <button type="button" class="impl-tab active" id="implTabStatusBtn">Status</button>
-          <button type="button" class="impl-tab" id="implTabLogBtn">Log</button>
+        <div class="tab-bar">
+          <button type="button" class="tab-btn active" id="implTabStatusBtn">Status</button>
+          <button type="button" class="tab-btn" id="implTabLogBtn">Log</button>
         </div>
-        <div class="impl-tab-panel" id="implStatusPanel">
+        <div class="tab-panel" id="implStatusPanel">
           <div id="implStatusBody"></div>
         </div>
-        <div class="impl-tab-panel hidden" id="implLogPanel">
+        <div class="tab-panel hidden" id="implLogPanel">
           <div class="clarify-log-body" id="implLogBody"></div>
         </div>
       </div>
