@@ -26,6 +26,21 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **Settings page now splits into five tabs** — AI Models, Runs, Guardrails, Notifications
+  and Maintenance — instead of one long scroll of eight cards. The page header and the
+  **Save Settings** bar sit outside the tabs and stay pinned (the same flex layout the
+  Implementation and Clarification pages already use), so Save is reachable from any tab and
+  one Save still writes every group at once. The bar now also shows an **Unsaved changes**
+  hint whenever a field differs from what was loaded, cleared on a successful save. The
+  Maintenance tab (Updates, Restart Server) has nothing of its own to save, so the Save
+  button is replaced there by a "Nothing to save on this tab." note — unless edits are
+  pending on another tab, in which case it comes back.
+- **Settings readability pass.** The eight longest field descriptions keep their first
+  sentence inline and move the rest into a "More…" disclosure (no wording removed); the four
+  backend/model/effort rows gained a Backend · Model · Reasoning effort column header so they
+  read as an aligned table; the SMTP fields lay out in two columns on wide screens; and the
+  SMTP/provider/alert-event fields are hidden entirely while **Enable email alerts** is off —
+  their values are still saved and reloaded exactly as before.
 - **README now shows Implementation page screenshots.** The Step 3 — Start Implementation
   section includes example screenshots of the Status and Log tabs
   (`docs/assets/implement-status.webp`, `docs/assets/implement-log.webp`).

@@ -91,8 +91,8 @@ tempa show-efforts                                # show the reasoning effort pe
 ```
 
 **The value must be supported by that stage's currently configured backend *and* model** —
-Tempa validates this both in the dashboard (Settings → the effort dropdown next to each
-stage's model field only offers the valid choices for whatever's currently typed there) and
+Tempa validates this both in the dashboard (Settings → AI Models tab → the effort dropdown next to
+each stage's model field only offers the valid choices for whatever's currently typed there) and
 on the CLI (`set-effort` rejects an unsupported value with the list of what *is* valid). An
 invalid combination never reaches the CLI.
 

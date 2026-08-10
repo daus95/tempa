@@ -1,7 +1,8 @@
 # Email notifications
 
 Tempa can send a best-effort SMTP email only when a workflow needs a person. Dashboard →
-Settings → Email alerts provides presets for Gmail and Microsoft 365, plus Custom SMTP.
+Settings → Notifications tab → Email alerts provides presets for Gmail and Microsoft 365,
+plus Custom SMTP.
 
 For Gmail, enable 2-Step Verification, then [open Google App Passwords](https://myaccount.google.com/apppasswords),
 enter **Tempa** as the app name, and copy the generated password into Tempa. Use it instead of

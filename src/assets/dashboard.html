@@ -293,234 +293,293 @@
           <div class="clarify-log-body" id="implLogBody"></div>
         </div>
       </div>
-      <div id="settingsPane" class="pane settings-pane hidden">
+      <div id="settingsPane" class="pane settings-pane settings-pane-tabbed hidden">
         <div class="settings-header">
           <h2>Settings</h2>
           <p class="settings-intro">Configure the AI models and run limits used by Tempa's clarification and implementation stages. These settings are stored in <code>config.json</code>.</p>
         </div>
-        <div class="settings-group">
-          <h3>AI Backend &amp; Model</h3>
-          <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for. The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested. Reasoning Effort's options depend on the model typed — an unsupported combination is rejected when you save.</p>
-          <div class="settings-backend-status">
-            <ul class="gate-checklist" id="settingsBackendStatusList"></ul>
-            <button type="button" class="clarify-run-btn secondary" id="settingsDetectBackendsBtn">
-              <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Detect CLI Backends</span>
-            </button>
-          </div>
-          <div class="settings-field">
-            <label for="settingsBackendClarify">Clarifications</label>
-            <p class="settings-field-desc">Used for the Clarification stage — analyzes the specification for ambiguities and conflicts. It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model.</p>
-            <div class="settings-inline-row">
-              <select id="settingsBackendClarify" class="settings-backend-select"></select>
-              <input type="text" id="settingsModelClarify" class="settings-model-input" list="modelSuggestionsClarify" autocomplete="off">
-              <datalist id="modelSuggestionsClarify"></datalist>
-              <select id="settingsEffortClarify" class="settings-effort-select"></select>
-            </div>
-            <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
-          </div>
-          <div class="settings-field">
-            <label for="settingsBackendClarifyApply">Clarify — Apply / Auto-Answer</label>
-            <p class="settings-field-desc">Used to apply already-decided answers/recommendations to the PRD/spec (<code>clarify --apply</code>, the apply half of <code>--finalize</code>) and to auto-answer unanswered findings — mechanical work compared to evaluating the PRD, so it defaults to a cheaper model. Backend/model/effort are independent of the Clarifications stage above — mechanical apply work doesn't need the same reasoning strength (or even the same CLI) as evaluate.</p>
-            <div class="settings-inline-row">
-              <select id="settingsBackendClarifyApply" class="settings-backend-select"></select>
-              <input type="text" id="settingsModelClarifyApply" class="settings-model-input" list="modelSuggestionsClarifyApply" autocomplete="off">
-              <datalist id="modelSuggestionsClarifyApply"></datalist>
-              <select id="settingsEffortClarifyApply" class="settings-effort-select"></select>
-            </div>
-            <p class="settings-model-note hidden" id="settingsModelNoteClarifyApply"></p>
-          </div>
-          <div class="settings-field">
-            <label for="settingsBackendPlan">Planning</label>
-            <p class="settings-field-desc">Used to automatically draft the epic/feature/task plan before implementation starts (via Start Implementation, or a replan). Runs frequently and unattended, so speed and cost usually matter more here than for Clarification.</p>
-            <div class="settings-inline-row">
-              <select id="settingsBackendPlan" class="settings-backend-select"></select>
-              <input type="text" id="settingsModelPlan" class="settings-model-input" list="modelSuggestionsPlan" autocomplete="off">
-              <datalist id="modelSuggestionsPlan"></datalist>
-              <select id="settingsEffortPlan" class="settings-effort-select"></select>
-            </div>
-            <p class="settings-model-note hidden" id="settingsModelNotePlan"></p>
-          </div>
-          <div class="settings-field">
-            <label for="settingsBackendImplement">Implementation</label>
-            <p class="settings-field-desc">Used for the Implementation stage — writing code, running QA, and verifying each feature. Runs repeatedly at high volume, per epic/feature/session.</p>
-            <div class="settings-inline-row">
-              <select id="settingsBackendImplement" class="settings-backend-select"></select>
-              <input type="text" id="settingsModelImplement" class="settings-model-input" list="modelSuggestionsImplement" autocomplete="off">
-              <datalist id="modelSuggestionsImplement"></datalist>
-              <select id="settingsEffortImplement" class="settings-effort-select"></select>
-            </div>
-            <p class="settings-model-note hidden" id="settingsModelNoteImplement"></p>
-          </div>
+        <div class="tab-bar">
+          <button type="button" class="tab-btn active" id="settingsTabModelsBtn">AI Models</button>
+          <button type="button" class="tab-btn" id="settingsTabRunsBtn">Runs</button>
+          <button type="button" class="tab-btn" id="settingsTabGuardrailsBtn">Guardrails</button>
+          <button type="button" class="tab-btn" id="settingsTabNotificationsBtn">Notifications</button>
+          <button type="button" class="tab-btn" id="settingsTabMaintenanceBtn">Maintenance</button>
         </div>
-        <div class="settings-group">
-          <h3>Run Limits</h3>
-          <div class="settings-field">
-            <label for="settingsFeaturesPerSession">Features per Session</label>
-            <p class="settings-field-desc">Maximum number of features implemented in a single session run. Leave empty for no limit — the session processes all pending features for the epic until done.</p>
-            <input type="number" id="settingsFeaturesPerSession" min="1" step="1" placeholder="No limit">
+        <div class="tab-panel" id="settingsTabModelsPanel">
+          <div class="settings-group">
+            <h3>AI Backend &amp; Model</h3>
+            <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for.</p>
+            <details class="settings-more">
+              <summary>More…</summary>
+              <p>The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested. Reasoning Effort's options depend on the model typed — an unsupported combination is rejected when you save.</p>
+            </details>
+            <div class="settings-backend-status">
+              <ul class="gate-checklist" id="settingsBackendStatusList"></ul>
+              <button type="button" class="clarify-run-btn secondary" id="settingsDetectBackendsBtn">
+                <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Detect CLI Backends</span>
+              </button>
+            </div>
+          <div class="settings-inline-row settings-stage-head" aria-hidden="true">
+            <span class="settings-backend-select">Backend</span>
+            <span class="settings-model-input">Model</span>
+            <span class="settings-effort-select">Reasoning effort</span>
           </div>
-          <div class="settings-field">
-            <label for="settingsMaxSessionRun">Max Session Runs</label>
-            <p class="settings-field-desc">Maximum number of implementation/QA sessions allowed per epic — an anti-loop safeguard that stops Tempa from retrying the same epic indefinitely.</p>
-            <input type="number" id="settingsMaxSessionRun" min="1" step="1">
-          </div>
-          <div class="settings-field">
-            <label for="settingsMaxClarificationRun">Max Finalize Clarification Round</label>
-            <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
-            <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
-          </div>
-          <div class="settings-field">
-            <label for="settingsFinalizeNoProgressRounds">Max Finalize No-Progress Round</label>
-            <p class="settings-field-desc">How many rounds in a row may fail to reduce the critical + major finding count before Finalized Clarification gives up early — the remaining findings likely need a human decision rather than more automated apply passes. Raise it to let the automation keep trying for longer.</p>
-            <input type="number" id="settingsFinalizeNoProgressRounds" min="1" step="1">
-          </div>
-        </div>
-        <div class="settings-group">
-          <h3>Clarification</h3>
-          <div class="settings-field">
-            <label class="settings-switch-row" for="settingsAllowFinalizeWithCritical">
-              <span class="settings-switch">
-                <input type="checkbox" id="settingsAllowFinalizeWithCritical">
-                <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-              </span>
-              <span>Allow finalizing with critical findings</span>
-            </label>
-            <p class="settings-field-desc">Off by default. Finalized Clarification normally refuses to start while any
-              critical finding is still open, so you have to answer and apply those yourself first — the automated
-              evaluate/apply loop it runs is meant for mopping up remaining major findings and confirming nothing has
-              regressed, not for unsupervised critical fixes. Turning this on lets Finalized Clarification start (and
-              its automated loop run) even with critical findings still open, so the automation will attempt to
-              resolve them on its own — review its answers carefully afterward. This setting only affects Finalized
-              Clarification — Start Implementation has its own separate requirement, configured independently below
-              under "Start Implementation".</p>
-            <div class="settings-warning hidden" id="settingsAllowFinalizeWithCriticalWarning">
-              <svg class="icon-svg icon-status-failed"><use href="#i-triangle-alert"></use></svg> Enabled — Finalized Clarification can start with critical findings still open, and its automation
-              will try to resolve them unsupervised. Double-check the results before relying on them.
+            <div class="settings-field">
+              <label for="settingsBackendClarify">Clarifications</label>
+              <p class="settings-field-desc">Used for the Clarification stage — analyzes the specification for ambiguities and conflicts.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model.</p>
+              </details>
+              <div class="settings-inline-row">
+                <select id="settingsBackendClarify" class="settings-backend-select"></select>
+                <input type="text" id="settingsModelClarify" class="settings-model-input" list="modelSuggestionsClarify" autocomplete="off">
+                <datalist id="modelSuggestionsClarify"></datalist>
+                <select id="settingsEffortClarify" class="settings-effort-select"></select>
+              </div>
+              <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
+            </div>
+            <div class="settings-field">
+              <label for="settingsBackendClarifyApply">Clarify — Apply / Auto-Answer</label>
+              <p class="settings-field-desc">Used to apply already-decided answers/recommendations to the PRD/spec (<code>clarify --apply</code>, the apply half of <code>--finalize</code>) and to auto-answer unanswered findings — mechanical work compared to evaluating the PRD, so it defaults to a cheaper model.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>Backend/model/effort are independent of the Clarifications stage above — mechanical apply work doesn't need the same reasoning strength (or even the same CLI) as evaluate.</p>
+              </details>
+              <div class="settings-inline-row">
+                <select id="settingsBackendClarifyApply" class="settings-backend-select"></select>
+                <input type="text" id="settingsModelClarifyApply" class="settings-model-input" list="modelSuggestionsClarifyApply" autocomplete="off">
+                <datalist id="modelSuggestionsClarifyApply"></datalist>
+                <select id="settingsEffortClarifyApply" class="settings-effort-select"></select>
+              </div>
+              <p class="settings-model-note hidden" id="settingsModelNoteClarifyApply"></p>
+            </div>
+            <div class="settings-field">
+              <label for="settingsBackendPlan">Planning</label>
+              <p class="settings-field-desc">Used to automatically draft the epic/feature/task plan before implementation starts (via Start Implementation, or a replan).</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>Runs frequently and unattended, so speed and cost usually matter more here than for Clarification.</p>
+              </details>
+              <div class="settings-inline-row">
+                <select id="settingsBackendPlan" class="settings-backend-select"></select>
+                <input type="text" id="settingsModelPlan" class="settings-model-input" list="modelSuggestionsPlan" autocomplete="off">
+                <datalist id="modelSuggestionsPlan"></datalist>
+                <select id="settingsEffortPlan" class="settings-effort-select"></select>
+              </div>
+              <p class="settings-model-note hidden" id="settingsModelNotePlan"></p>
+            </div>
+            <div class="settings-field">
+              <label for="settingsBackendImplement">Implementation</label>
+              <p class="settings-field-desc">Used for the Implementation stage — writing code, running QA, and verifying each feature. Runs repeatedly at high volume, per epic/feature/session.</p>
+              <div class="settings-inline-row">
+                <select id="settingsBackendImplement" class="settings-backend-select"></select>
+                <input type="text" id="settingsModelImplement" class="settings-model-input" list="modelSuggestionsImplement" autocomplete="off">
+                <datalist id="modelSuggestionsImplement"></datalist>
+                <select id="settingsEffortImplement" class="settings-effort-select"></select>
+              </div>
+              <p class="settings-model-note hidden" id="settingsModelNoteImplement"></p>
             </div>
           </div>
         </div>
-        <div class="settings-group">
-          <h3>Start Implementation</h3>
-          <div class="settings-field">
-            <label>Start Implementation requires</label>
-            <p class="settings-field-desc">What the most recent clarification evaluation must show before Start
-              Implementation is allowed to run (clarification must have been run at least once either way).</p>
-            <div class="settings-radio-group" id="settingsImplementRequirementGroup">
-              <label class="settings-radio-row">
-                <input type="radio" name="settingsImplementRequirement" value="no_critical_or_major"
-                  id="settingsImplementReqStrict">
-                <span>
-                  <span class="settings-radio-option-label">No critical or major findings (default)</span>
-                  <span class="settings-radio-option-desc">The original, safest behavior — every critical and major
-                    finding must be resolved first.</span>
+        <div class="tab-panel hidden" id="settingsTabRunsPanel">
+          <div class="settings-group">
+            <h3>Run Limits</h3>
+            <div class="settings-field">
+              <label for="settingsFeaturesPerSession">Features per Session</label>
+              <p class="settings-field-desc">Maximum number of features implemented in a single session run.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>Leave empty for no limit — the session processes all pending features for the epic until done.</p>
+              </details>
+              <input type="number" id="settingsFeaturesPerSession" min="1" step="1" placeholder="No limit">
+            </div>
+            <div class="settings-field">
+              <label for="settingsMaxSessionRun">Max Session Runs</label>
+              <p class="settings-field-desc">Maximum number of implementation/QA sessions allowed per epic — an anti-loop safeguard that stops Tempa from retrying the same epic indefinitely.</p>
+              <input type="number" id="settingsMaxSessionRun" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsMaxClarificationRun">Max Finalize Clarification Round</label>
+              <p class="settings-field-desc">Maximum number of automated rounds run when finalizing clarification (Finalized Clarification).</p>
+              <input type="number" id="settingsMaxClarificationRun" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsFinalizeNoProgressRounds">Max Finalize No-Progress Round</label>
+              <p class="settings-field-desc">How many rounds in a row may fail to reduce the critical + major finding count before Finalized Clarification gives up early.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>Stopping there is deliberate — the remaining findings likely need a human decision rather than more automated apply passes. Raise it to let the automation keep trying for longer.</p>
+              </details>
+              <input type="number" id="settingsFinalizeNoProgressRounds" min="1" step="1">
+            </div>
+          </div>
+          <div class="settings-group">
+            <h3>Retries &amp; Timing</h3>
+            <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work.</p>
+            <details class="settings-more">
+              <summary>More…</summary>
+              <p>These changes take effect on any already-running session or agent runner — no restart needed.</p>
+            </details>
+            <div class="settings-field">
+              <label for="settingsUsageLimitRetryWaitMin">Usage Limit Retry Wait (minutes)</label>
+              <p class="settings-field-desc">How long to wait before automatically retrying a clarify/implement/QA/verify step after the configured backend's subscription/token usage limit is hit.</p>
+              <input type="number" id="settingsUsageLimitRetryWaitMin" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsUsageLimitHeartbeatMin">Usage Limit Heartbeat Interval (minutes)</label>
+              <p class="settings-field-desc">How often a "still waiting" log line is printed while waiting out a usage limit, so a long wait doesn't look hung.</p>
+              <input type="number" id="settingsUsageLimitHeartbeatMin" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsServerOverloadRetryWaitMin">Server Overload Retry Wait (minutes)</label>
+              <p class="settings-field-desc">How long to wait before automatically retrying after the backend's API reports itself overloaded (e.g. a transient 529 response).</p>
+              <input type="number" id="settingsServerOverloadRetryWaitMin" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsPollIntervalSec">Implementation Poll Interval (seconds)</label>
+              <p class="settings-field-desc">How often the <code>tempa implement</code> agent runner checks for new work while idle.</p>
+              <input type="number" id="settingsPollIntervalSec" min="1" step="1">
+            </div>
+          </div>
+        </div>
+        <div class="tab-panel hidden" id="settingsTabGuardrailsPanel">
+          <div class="settings-group">
+            <h3>Clarification</h3>
+            <div class="settings-field">
+              <label class="settings-switch-row" for="settingsAllowFinalizeWithCritical">
+                <span class="settings-switch">
+                  <input type="checkbox" id="settingsAllowFinalizeWithCritical">
+                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
                 </span>
+                <span>Allow finalizing with critical findings</span>
               </label>
-              <label class="settings-radio-row">
-                <input type="radio" name="settingsImplementRequirement" value="no_critical"
-                  id="settingsImplementReqNoCritical">
-                <span>
-                  <span class="settings-radio-option-label">No critical findings (major findings allowed)</span>
-                  <span class="settings-radio-option-desc">Only critical findings block Start Implementation; open
-                    major findings are carried into implementation instead.</span>
-                </span>
-              </label>
-              <label class="settings-radio-row">
-                <input type="radio" name="settingsImplementRequirement" value="none" id="settingsImplementReqNone">
-                <span>
-                  <span class="settings-radio-option-label">No condition</span>
-                  <span class="settings-radio-option-desc">Start Implementation is never blocked by clarification
-                    findings, critical or major.</span>
-                </span>
-              </label>
+              <p class="settings-field-desc">Off by default. Finalized Clarification normally refuses to start while any
+                critical finding is still open, so you have to answer and apply those yourself first.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>The automated evaluate/apply loop it runs is meant for mopping up remaining major findings and
+                  confirming nothing has regressed, not for unsupervised critical fixes. Turning this on lets
+                  Finalized Clarification start (and its automated loop run) even with critical findings still open,
+                  so the automation will attempt to resolve them on its own — review its answers carefully afterward.
+                  This setting only affects Finalized Clarification — Start Implementation has its own separate
+                  requirement, configured independently below under "Start Implementation".</p>
+              </details>
+              <div class="settings-warning hidden" id="settingsAllowFinalizeWithCriticalWarning">
+                <svg class="icon-svg icon-status-failed"><use href="#i-triangle-alert"></use></svg> Enabled — Finalized Clarification can start with critical findings still open, and its automation
+                will try to resolve them unsupervised. Double-check the results before relying on them.
+              </div>
             </div>
-            <div class="settings-warning hidden" id="settingsImplementRequirementWarning"></div>
           </div>
-        </div>
-        <div class="settings-group">
-          <h3>Email alerts</h3>
-          <p class="settings-field-desc">Email is sent only when Tempa needs a human. Automatic resume and recovery paths never send alerts.</p>
-          <div class="settings-field">
-            <label class="settings-switch-row" for="settingsEmailEnabled"><span class="settings-switch"><input type="checkbox" id="settingsEmailEnabled"><span class="settings-switch-track"><span class="settings-switch-thumb"></span></span></span><span>Enable email alerts</span></label>
-          </div>
-          <div class="settings-field">
-            <label for="settingsEmailProvider">Email provider</label>
-            <select id="settingsEmailProvider"><option value="gmail">Gmail</option><option value="office365">Microsoft 365 / Office 365</option><option value="custom">Custom SMTP</option></select>
-            <p class="settings-field-desc" id="settingsEmailProviderGuidance"></p>
-          </div>
-          <div class="settings-field"><label for="settingsEmailHost">SMTP host</label><input id="settingsEmailHost" type="text" placeholder="smtp.example.com" autocomplete="off"></div>
-          <div class="settings-field"><label for="settingsEmailPort">SMTP port</label><input id="settingsEmailPort" type="number" min="1" max="65535"></div>
-          <div class="settings-field"><label for="settingsEmailSecurity">SMTP security</label><select id="settingsEmailSecurity"><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None</option></select></div>
-          <div class="settings-field"><label for="settingsEmailUsername">SMTP username</label><input id="settingsEmailUsername" type="text" placeholder="you@example.com" autocomplete="username"></div>
-          <div class="settings-field"><label for="settingsEmailPassword">SMTP password or app password</label><input id="settingsEmailPassword" type="password" placeholder="Enter password" autocomplete="current-password"><p class="settings-field-desc">Stored locally in this workspace’s <code>.tempa/config.json</code>; do not commit or share that file.</p></div>
-          <div class="settings-field"><label for="settingsEmailFrom">From</label><input id="settingsEmailFrom" type="email" placeholder="tempa@example.com" autocomplete="email"></div>
-          <div class="settings-field"><label for="settingsEmailRecipients">Recipients</label><input id="settingsEmailRecipients" type="text" placeholder="owner@example.com, team@example.com"><p class="settings-field-desc">Comma-separated email addresses.</p></div>
-          <div class="settings-field">
-            <label>Alert events</label>
-            <p class="settings-field-desc">Choose exactly which situations should email you.</p>
-            <div class="settings-event-actions"><button type="button" class="clarify-run-btn secondary" id="settingsEmailSelectAllBtn">Select all</button><button type="button" class="clarify-run-btn secondary" id="settingsEmailClearAllBtn">Clear all</button></div>
-            <div class="settings-checkbox-group" id="settingsEmailEventList"></div>
-          </div>
-          <button type="button" class="clarify-run-btn secondary" id="settingsTestEmailBtn">Send Test Email</button>
-          <span class="settings-save-status" id="settingsTestEmailStatus"></span>
-        </div>
-        <div class="settings-group">
-          <h3>Retries &amp; Timing</h3>
-          <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work. These changes take effect on any already-running session or agent runner — no restart needed.</p>
-          <div class="settings-field">
-            <label for="settingsUsageLimitRetryWaitMin">Usage Limit Retry Wait (minutes)</label>
-            <p class="settings-field-desc">How long to wait before automatically retrying a clarify/implement/QA/verify step after the configured backend's subscription/token usage limit is hit.</p>
-            <input type="number" id="settingsUsageLimitRetryWaitMin" min="1" step="1">
-          </div>
-          <div class="settings-field">
-            <label for="settingsUsageLimitHeartbeatMin">Usage Limit Heartbeat Interval (minutes)</label>
-            <p class="settings-field-desc">How often a "still waiting" log line is printed while waiting out a usage limit, so a long wait doesn't look hung.</p>
-            <input type="number" id="settingsUsageLimitHeartbeatMin" min="1" step="1">
-          </div>
-          <div class="settings-field">
-            <label for="settingsServerOverloadRetryWaitMin">Server Overload Retry Wait (minutes)</label>
-            <p class="settings-field-desc">How long to wait before automatically retrying after the backend's API reports itself overloaded (e.g. a transient 529 response).</p>
-            <input type="number" id="settingsServerOverloadRetryWaitMin" min="1" step="1">
-          </div>
-          <div class="settings-field">
-            <label for="settingsPollIntervalSec">Implementation Poll Interval (seconds)</label>
-            <p class="settings-field-desc">How often the <code>tempa implement</code> agent runner checks for new work while idle.</p>
-            <input type="number" id="settingsPollIntervalSec" min="1" step="1">
-          </div>
-        </div>
-        <div class="settings-group">
-          <h3>Updates</h3>
-          <p class="settings-field-desc">Check whether a newer Tempa release has been published on GitHub, and update this installation in place.</p>
-          <div class="settings-update-row">
-            <div class="settings-update-info">
-              <span>Installed version: <strong id="settingsUpdateCurrent">—</strong></span>
-              <span id="settingsUpdateLatest"></span>
+          <div class="settings-group">
+            <h3>Start Implementation</h3>
+            <div class="settings-field">
+              <label>Start Implementation requires</label>
+              <p class="settings-field-desc">What the most recent clarification evaluation must show before Start
+                Implementation is allowed to run (clarification must have been run at least once either way).</p>
+              <div class="settings-radio-group" id="settingsImplementRequirementGroup">
+                <label class="settings-radio-row">
+                  <input type="radio" name="settingsImplementRequirement" value="no_critical_or_major"
+                    id="settingsImplementReqStrict">
+                  <span>
+                    <span class="settings-radio-option-label">No critical or major findings (default)</span>
+                    <span class="settings-radio-option-desc">The original, safest behavior — every critical and major
+                      finding must be resolved first.</span>
+                  </span>
+                </label>
+                <label class="settings-radio-row">
+                  <input type="radio" name="settingsImplementRequirement" value="no_critical"
+                    id="settingsImplementReqNoCritical">
+                  <span>
+                    <span class="settings-radio-option-label">No critical findings (major findings allowed)</span>
+                    <span class="settings-radio-option-desc">Only critical findings block Start Implementation; open
+                      major findings are carried into implementation instead.</span>
+                  </span>
+                </label>
+                <label class="settings-radio-row">
+                  <input type="radio" name="settingsImplementRequirement" value="none" id="settingsImplementReqNone">
+                  <span>
+                    <span class="settings-radio-option-label">No condition</span>
+                    <span class="settings-radio-option-desc">Start Implementation is never blocked by clarification
+                      findings, critical or major.</span>
+                  </span>
+                </label>
+              </div>
+              <div class="settings-warning hidden" id="settingsImplementRequirementWarning"></div>
             </div>
+          </div>
+        </div>
+        <div class="tab-panel hidden" id="settingsTabNotificationsPanel">
+          <div class="settings-group">
+            <h3>Email alerts</h3>
+            <p class="settings-field-desc">Email is sent only when Tempa needs a human. Automatic resume and recovery paths never send alerts.</p>
+            <div class="settings-field">
+              <label class="settings-switch-row" for="settingsEmailEnabled"><span class="settings-switch"><input type="checkbox" id="settingsEmailEnabled"><span class="settings-switch-track"><span class="settings-switch-thumb"></span></span></span><span>Enable email alerts</span></label>
+            </div>
+          <div id="settingsEmailDetails">
+              <div class="settings-field">
+                <label for="settingsEmailProvider">Email provider</label>
+                <select id="settingsEmailProvider"><option value="gmail">Gmail</option><option value="office365">Microsoft 365 / Office 365</option><option value="custom">Custom SMTP</option></select>
+                <p class="settings-field-desc" id="settingsEmailProviderGuidance"></p>
+              </div>
+            <div class="settings-grid-2">
+                <div class="settings-field"><label for="settingsEmailHost">SMTP host</label><input id="settingsEmailHost" type="text" placeholder="smtp.example.com" autocomplete="off"></div>
+                <div class="settings-field"><label for="settingsEmailPort">SMTP port</label><input id="settingsEmailPort" type="number" min="1" max="65535"></div>
+                <div class="settings-field"><label for="settingsEmailSecurity">SMTP security</label><select id="settingsEmailSecurity"><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None</option></select></div>
+                <div class="settings-field"><label for="settingsEmailUsername">SMTP username</label><input id="settingsEmailUsername" type="text" placeholder="you@example.com" autocomplete="username"></div>
+                <div class="settings-field"><label for="settingsEmailPassword">SMTP password or app password</label><input id="settingsEmailPassword" type="password" placeholder="Enter password" autocomplete="current-password"><p class="settings-field-desc">Stored locally in this workspace’s <code>.tempa/config.json</code>; do not commit or share that file.</p></div>
+                <div class="settings-field"><label for="settingsEmailFrom">From</label><input id="settingsEmailFrom" type="email" placeholder="tempa@example.com" autocomplete="email"></div>
+            </div>
+              <div class="settings-field"><label for="settingsEmailRecipients">Recipients</label><input id="settingsEmailRecipients" type="text" placeholder="owner@example.com, team@example.com"><p class="settings-field-desc">Comma-separated email addresses.</p></div>
+              <div class="settings-field">
+                <label>Alert events</label>
+                <p class="settings-field-desc">Choose exactly which situations should email you.</p>
+                <div class="settings-event-actions"><button type="button" class="clarify-run-btn secondary" id="settingsEmailSelectAllBtn">Select all</button><button type="button" class="clarify-run-btn secondary" id="settingsEmailClearAllBtn">Clear all</button></div>
+                <div class="settings-checkbox-group" id="settingsEmailEventList"></div>
+              </div>
+              <button type="button" class="clarify-run-btn secondary" id="settingsTestEmailBtn">Send Test Email</button>
+              <span class="settings-save-status" id="settingsTestEmailStatus"></span>
+          </div>
+          </div>
+        </div>
+        <div class="tab-panel hidden" id="settingsTabMaintenancePanel">
+          <div class="settings-group">
+            <h3>Updates</h3>
+            <p class="settings-field-desc">Check whether a newer Tempa release has been published on GitHub, and update this installation in place.</p>
+            <div class="settings-update-row">
+              <div class="settings-update-info">
+                <span>Installed version: <strong id="settingsUpdateCurrent">—</strong></span>
+                <span id="settingsUpdateLatest"></span>
+              </div>
+              <div class="settings-update-actions">
+                <button type="button" class="clarify-run-btn secondary" id="settingsCheckUpdateBtn">
+                  <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Check for Updates</span>
+                </button>
+                <button type="button" class="clarify-run-btn hidden" id="settingsUpdateBtn">
+                  <span><svg class="icon-svg"><use href="#i-arrow-up"></use></svg></span><span>Update Now</span>
+                </button>
+              </div>
+            </div>
+            <p class="settings-save-status" id="settingsUpdateStatus"></p>
+          </div>
+          <div class="settings-group">
+            <h3>Restart Server</h3>
+            <p class="settings-field-desc">Stop and relaunch the dashboard server on the same port. Use this after updating Tempa so the running process picks up the new code.</p>
             <div class="settings-update-actions">
-              <button type="button" class="clarify-run-btn secondary" id="settingsCheckUpdateBtn">
-                <span><svg class="icon-svg"><use href="#i-refresh-cw"></use></svg></span><span>Check for Updates</span>
-              </button>
-              <button type="button" class="clarify-run-btn hidden" id="settingsUpdateBtn">
-                <span><svg class="icon-svg"><use href="#i-arrow-up"></use></svg></span><span>Update Now</span>
+              <button type="button" class="clarify-run-btn secondary" id="settingsRestartBtn">
+                <span><svg class="icon-svg"><use href="#i-power"></use></svg></span><span>Restart Server</span>
               </button>
             </div>
+            <p class="settings-save-status" id="settingsRestartStatus"></p>
           </div>
-          <p class="settings-save-status" id="settingsUpdateStatus"></p>
-        </div>
-        <div class="settings-group">
-          <h3>Restart Server</h3>
-          <p class="settings-field-desc">Stop and relaunch the dashboard server on the same port. Use this after updating Tempa so the running process picks up the new code.</p>
-          <div class="settings-update-actions">
-            <button type="button" class="clarify-run-btn secondary" id="settingsRestartBtn">
-              <span><svg class="icon-svg"><use href="#i-power"></use></svg></span><span>Restart Server</span>
-            </button>
-          </div>
-          <p class="settings-save-status" id="settingsRestartStatus"></p>
         </div>
         <div class="settings-actions">
           <button type="button" class="clarify-run-btn" id="settingsSaveBtn">
             <span><svg class="icon-svg"><use href="#i-save"></use></svg></span><span>Save Settings</span>
           </button>
           <span class="settings-save-status" id="settingsSaveStatus"></span>
+          <span class="settings-dirty-hint hidden" id="settingsDirtyHint">Unsaved changes</span>
+          <span class="settings-muted-hint hidden" id="settingsNothingToSave">Nothing to save on this tab.</span>
         </div>
       </div>
       <div id="principlesPane" class="pane settings-pane hidden">
