@@ -584,12 +584,29 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
-        # No server-side precondition gate on mode == "finalize" (there used to be one
-        # requiring a fresh zero-critical evaluate on record): `clarify --finalize` answers
-        # its own pre-existing backlog first — every finding still missing an answer gets
-        # filled in with its own recommendation — and carries the whole lot into its loop as
-        # the pending overlay (see _prepare_finalize_backlog in tempa_clarify.py). So it's
-        # always safe to start, the same as "run"/"apply".
+        if mode == "finalize":
+            # Server-side gate, not just a disabled button client-side — mirrors the
+            # implement gate below. `tempa clarify --finalize` itself has no awareness
+            # of this precondition and would happily run regardless.
+            unanswered, answered = _clarify_files_overview(
+                self.server.clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
+            )
+            dashboard_config = _load_dashboard_config()
+            findings = _latest_evaluation_findings(
+                unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0)
+            )
+            last_action = dashboard_config.get("last_clarification_action")
+            allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
+            if not _clarify_finalize_status(
+                findings, last_action, allow_finalize_with_critical=allow_finalize_with_critical
+            )["ready"]:
+                error = ("Cannot finalize yet — run Start Clarification once more and confirm "
+                         "it shows zero critical findings first.")
+                if findings["critical"] > 0 and not allow_finalize_with_critical:
+                    error += (" Or enable \"Allow finalizing with critical findings\" in "
+                              "Settings to skip this requirement.")
+                self._send_json(409, {"ok": False, "error": error})
+                return
         if not _start_clarify_run(self.server, mode):
             self._send_json(409, {"ok": False, "error": "A clarification run is already in progress."})
             return

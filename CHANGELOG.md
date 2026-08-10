@@ -75,6 +75,19 @@ once the first tagged release is cut.
   run limits.** Like "Max Finalize Clarification Round", the new no-progress limit is read
   once when the finalize run starts, so changing either one mid-run now says so and names
   each changed setting.
+- **"Finalized Clarification" is gated again on a fresh, zero-critical evaluation**
+  — reversing part of `0.4.5`. The button (Home and Clarification Overview) and
+  `POST /api/clarify/run` (mode=`finalize`) now require: clarification has run at least
+  once, the most recent result came from Start/Continue Clarification (not just Apply
+  Answers), and that result shows 0 critical findings. `0.4.5`'s backlog auto-resolution
+  (unanswered findings filled in with their own recommendation before Finalize's loop
+  starts) is unchanged — only the button/endpoint gate that `0.4.5` turned informational
+  is being restored.
+- **Settings' "Allow finalizing with critical findings" now waives every readiness
+  requirement above, not just the critical-findings one.** With it on, Finalized
+  Clarification is clickable even before clarification has ever been run — its own
+  evaluate/answer/apply loop establishes and then resolves the finding set unsupervised,
+  so there's nothing left to check up front.
 
 ### Fixed
 

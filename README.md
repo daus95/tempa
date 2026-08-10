@@ -347,23 +347,25 @@ the right direction.
 
 **Finalized Clarification** automates the rest of that loop (evaluate + answer, repeating
 until clean, then one apply and one verification pass) — click it to let Tempa finish off any
-remaining major/minor findings on its own. It's clickable whenever no clarify run is already
-in progress; the **Finalize readiness** panel above it is *informational*, telling you how
-much Finalize will have to do unsupervised rather than blocking it:
+remaining major/minor findings on its own. It only becomes clickable once the **Finalize
+readiness** panel above it is fully satisfied (and no clarify run is already in progress):
 
 - Clarification has been run at least once.
 - The latest result came from **Start Clarification** itself, not just **Apply Answers** —
   applying edits the PRD, not the finding record, so a fresh evaluation is what actually
   confirms nothing critical is left.
-- That evaluation shows 0 critical findings. Starting Finalize with criticals still open
-  means its automation resolves them for you, unattended — which is why the readiness panel
-  calls it out. Settings' **Allow finalizing with critical findings** switch changes how
-  this line reads (`allow_finalize_with_critical` in
-  [docs/config-json.md](docs/config-json.md)); it doesn't change whether the button works.
+- That evaluation shows 0 critical findings.
 - What backlog is left. Unanswered findings get filled in with their own recommendation
   before the loop starts; anything already answered is carried into every round and written
-  into the PRD by the single apply at the end. Either way a backlog isn't something you have
-  to clean up by hand beforehand.
+  into the PRD by the single apply at the end. This line is informational only, not part of
+  the gate above — a backlog isn't something you have to clean up by hand beforehand.
+
+Settings' **Allow finalizing with critical findings** switch
+(`allow_finalize_with_critical` in [docs/config-json.md](docs/config-json.md)) waives all
+three requirements above, not just the critical-findings one — with it on, **Finalized
+Clarification** is clickable even before clarification has ever been run once, since its
+own evaluate/answer/apply loop is what establishes and then resolves the finding set,
+unsupervised.
 
 **When to switch to Finalize:** after a few manual rounds, once you notice the system's
 recommended answers over the last 2 iterations are already consistent/accurate with what you

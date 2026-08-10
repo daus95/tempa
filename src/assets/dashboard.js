@@ -567,11 +567,11 @@ function renderHomeWorkflow() {
   homeStartClarifyBtn.title = homeBlockedByAnswers ? "Answer the remaining findings first." : "";
   homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
   homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
-  // Not gated on state.clarifyFinalize.ready — `clarify --finalize` answers its own
-  // pre-existing backlog (unanswered findings filled in with their recommendation) and
-  // carries it as the pending overlay, so it's safe to start regardless of the most
-  // recent evaluate's outcome. See the matching change in renderFinalizeGate above.
-  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  // Mirrors renderFinalizeGate's gate above: disabled until clarification has run, the
+  // latest result is a fresh evaluate, and it shows zero critical findings (or the
+  // Settings override is on) — state.clarifyFinalize.ready, computed server-side by
+  // _clarify_finalize_status in dashboard_clarify_parse.py.
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
@@ -1131,14 +1131,11 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
 });
 
 // Status snapshot shown above "Finalized Clarification" — see _clarify_finalize_status()
-// in dashboard_clarify_parse.py for the server-side source of truth this mirrors. This
-// used to also gate whether the button could be clicked at all (requiring a fresh
-// zero-critical evaluate on record); it no longer does — `clarify --finalize` answers its
-// own pre-existing backlog first (findings with no answer get filled in with their own
-// recommendation) and carries the lot into its loop as the pending overlay, so it's safe
-// to start regardless of what state clarification is currently in. The checklist below
-// is purely informational now: it shows what the most recent evaluate pass found, not
-// a precondition.
+// in dashboard_clarify_parse.py for the server-side source of truth this mirrors. The
+// checklist below IS the precondition: the button stays disabled until every item here
+// is satisfied (a fresh evaluate on record, zero critical findings — or the Settings
+// override — see st.ready below and _handle_clarify_run_start in dashboard_server.py,
+// which enforces the same thing server-side).
 // The finalize checklist's last row: what Finalize would still have to do to the backlog
 // before/within its loop. Unanswered findings get filled in with their own recommendation;
 // everything already answered rides along as the pending overlay and is written into the
@@ -1180,10 +1177,24 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
     finalizeRoundProgress.classList.add("hidden");
   }
   const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
+  // The Settings override waives every requirement below, not just the critical-findings
+  // one — see _clarify_finalize_status in dashboard_clarify_parse.py, where `ready` is
+  // just `allowFinalizeWithCritical` once it's on. Reflect that here too: with it on,
+  // show every row as satisfied (bypassed) rather than leaving stale unchecked boxes next
+  // to an enabled button.
   renderGateChecklist(finalizeGateList, [
-    { ok: st.hasRun, label: "Clarification has been run at least once" },
-    { ok: st.lastAction === "evaluate",
-      label: "Most recent result comes from Start Clarification, not just Apply Answers" },
+    { ok: st.hasRun || st.allowFinalizeWithCritical,
+      label: st.hasRun
+        ? "Clarification has been run at least once"
+        : st.allowFinalizeWithCritical
+          ? "Clarification hasn't been run yet — allowed via the Settings override"
+          : "Clarification has been run at least once" },
+    { ok: st.lastAction === "evaluate" || st.allowFinalizeWithCritical,
+      label: st.lastAction === "evaluate"
+        ? "Most recent result comes from Start Clarification, not just Apply Answers"
+        : st.allowFinalizeWithCritical
+          ? "Most recent result isn't from Start Clarification — allowed via the Settings override"
+          : "Most recent result comes from Start Clarification, not just Apply Answers" },
     { ok: criticalOk,
       label: st.critical === 0
         ? "Most recent evaluation shows 0 critical findings"
@@ -1193,12 +1204,12 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
           : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
     { ok: true, label: finalizeBacklogLabel(hasUnanswered) },
   ]);
-  // Only actually-in-progress runs disable this button now — the checklist above is
-  // informational, not a precondition (see the comment above this function). While a
+  // Disabled while a run is in progress OR the checklist above isn't fully satisfied yet
+  // (st.ready — see _clarify_finalize_status in dashboard_clarify_parse.py). While a
   // finalize run specifically is in progress, swap it for Stop Finalize entirely
   // (same Start/Stop toggle Implementation already has) rather than just disabling it.
   const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
-  finalizeClarifyBtn.disabled = runDisabled;
+  finalizeClarifyBtn.disabled = runDisabled || !st.ready;
   finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
   stopFinalizeClarifyBtn.classList.toggle("hidden", !finalizeRunning);
 

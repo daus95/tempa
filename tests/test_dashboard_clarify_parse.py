@@ -293,11 +293,19 @@ def test_clarify_finalize_status_allow_with_critical_overrides():
     assert result["allowFinalizeWithCritical"] is True
 
 
-def test_clarify_finalize_status_allow_with_critical_still_needs_fresh_evaluate():
+def test_clarify_finalize_status_allow_with_critical_waives_fresh_evaluate_too():
     result = dcp._clarify_finalize_status(
         {"critical": 2}, "apply", allow_finalize_with_critical=True
     )
-    assert result["ready"] is False
+    assert result["ready"] is True
+
+
+def test_clarify_finalize_status_allow_with_critical_ready_before_any_run():
+    result = dcp._clarify_finalize_status(
+        {"critical": 0}, None, allow_finalize_with_critical=True
+    )
+    assert result["hasRun"] is False
+    assert result["ready"] is True
 
 
 # ---------------------------------------------------------------------------

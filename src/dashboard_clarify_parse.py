@@ -260,14 +260,24 @@ def _clarify_finalize_status(
     pending_overlay_findings: int = 0,
 ) -> dict:
     """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
-    state, NOT a gate: the button itself is only disabled while a clarify run is already
-    in progress (see renderFinalizeGate in dashboard.js, and _handle_clarify_run_start in
-    dashboard_server.py, which deliberately has no server-side precondition for mode
-    "finalize"). "ready" is what the dashboard uses to decide whether to relabel Start
-    Clarification -> Continue Clarification and explain what Finalize would still have to
-    do unsupervised.
+    state, and also the actual precondition gate: the button (Home and Clarification
+    Overview) stays disabled, and POST /api/clarify/run (mode=finalize) returns 409,
+    until "ready" is true (see renderFinalizeGate/renderHomeWorkflow in dashboard.js,
+    and _handle_clarify_run_start in dashboard_server.py). "ready" is also what the
+    dashboard uses to decide whether to relabel Start Clarification -> Continue
+    Clarification and explain what's still blocking Finalize.
 
-    "ready" is True when all of:
+    "ready" is True when `allow_finalize_with_critical` is on (config.json's
+    "allow_finalize_with_critical", the dashboard Settings toggle; off by default) —
+    that override waives every other requirement below, so Finalize is clickable even
+    before clarification has ever been run: its own evaluate/apply loop is what
+    establishes and then resolves the finding set, unsupervised, so there's nothing
+    left to check up front. This setting never affects the separate Start
+    Implementation gate (_handle_implement_run_start), which is a real gate and
+    follows its own config.json setting, "implementation_start_requirement" — see
+    _implement_readiness_status below.
+
+    With the override off, "ready" is True when all of:
       - at least one clarification action has ever completed ("hasRun")
       - that most recent action was a fresh evaluate pass, not a bare apply
         ("lastAction" == "evaluate") — answering criticals and applying them isn't
@@ -277,15 +287,7 @@ def _clarify_finalize_status(
       - the most recent evaluation round's file shows zero critical findings
         (`findings`, from _latest_evaluation_findings — the actual tag count for
         that one round, not a self-reported opinion and not summed across every
-        past round) — unless `allow_finalize_with_critical` overrides
-        this (config.json's "allow_finalize_with_critical", the dashboard Settings
-        toggle; off by default). With it on, Finalize is allowed to start with
-        critical findings still open, so its automated evaluate/apply loop attempts
-        to resolve them unsupervised instead of requiring a human to answer them
-        first. This setting never affects the separate Start Implementation gate
-        (_handle_implement_run_start), which is a real gate and follows its own
-        config.json setting, "implementation_start_requirement" — see
-        _implement_readiness_status below.
+        past round)
 
     `last_action` is config.json's "last_clarification_action" (caller's
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
@@ -313,7 +315,7 @@ def _clarify_finalize_status(
     the "Finalized Clarification" button instead."""
     fresh_evaluate = last_action == "evaluate"
     critical_ok = findings["critical"] == 0 or allow_finalize_with_critical
-    ready = fresh_evaluate and critical_ok
+    ready = allow_finalize_with_critical or (fresh_evaluate and critical_ok)
     return {
         "hasRun": last_action is not None,
         "lastAction": last_action,
