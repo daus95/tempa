@@ -324,7 +324,9 @@ minor), grouped by file, under **Clarification** in the sidebar. Open a file to 
 findings inline: for each finding, choose **Follow the recommendation** or **I'll write my
 own answer** (a text box appears), then **Save**. Once clarification has run at least once,
 the button relabels to **Continue Clarification** (with a hint explaining what's still
-blocking it, if anything is) for the rest of this loop.
+blocking it, if anything is) for the rest of this loop. While a run is in progress the button
+swaps to **Stop Clarification** — click it (after a confirmation prompt) to cancel it early,
+the same process-tree kill **Stop Implementation** uses in Step 3 below.
 
 **You don't have to apply before continuing.** Saved answers are carried into every
 subsequent round as already-decided resolutions — the **Pending resolutions** card shows how
@@ -334,8 +336,17 @@ rewrite in between. Only findings you haven't answered yet hold up the next roun
 **Apply Answers** writes those resolutions into the PRD/spec whenever you want the documents
 themselves brought up to date. It's required once, before **Start Implementation** in Step 3:
 implementation reads the PRD, so decisions living only in a clarification file would be
-invisible to it. See
-[docs/clarify-modes.md](docs/clarify-modes.md#pending-resolutions-overlay) for the details.
+invisible to it. It auto-chains through the backlog one file at a time until everything's
+applied, so one click finishes the job; while it's running the button swaps to **Stop Apply
+Answers**, which skips the next queued file instead of waiting for it to start and killing it.
+See [docs/clarify-modes.md](docs/clarify-modes.md#pending-resolutions-overlay) for the
+details.
+
+The page splits into an **Overview** tab (the Unanswered/Fully answered file tables below)
+and a **Log** tab (raw console output for whichever run is in progress) — same pattern as the
+Implementation page's Status/Log tabs (see Step 3 below). The run buttons and readiness
+panels above them stay visible regardless of which tab is open, with a spinning status badge
+next to the buttons showing live clarify/apply/finalize progress either way.
 
 ![Tempa dashboard Clarification page, showing the Finalize readiness checklist and the Unanswered/Fully answered file tables](docs/assets/clarification.webp)
 
@@ -380,10 +391,10 @@ chasing down remaining minor findings.
 
 This can take a while — Finalize repeats the evaluate → answer cycle on its own until
 clean, which can mean several rounds depending on how much the PRD still needs resolving.
-Expand the **Clarification log** panel to watch it live (running status plus streamed
-console output) so you can tell it's still working rather than stuck. Unlike
-**Stop Implementation** in Step 3 below, there's no way to cancel a Finalize run mid-way —
-leave the dashboard open until it finishes on its own.
+Switch to the **Log** tab to watch it live (running status plus streamed console output) so
+you can tell it's still working rather than stuck. **Finalized Clarification** swaps to a
+**Stop Finalize** button while it runs — click it (after a confirmation prompt) if you want
+to cancel mid-way, the same process-tree kill **Stop Implementation** uses in Step 3 below.
 
 **Running out of tokens doesn't break the run.** If the configured backend's usage/session
 limit is hit mid-way — during **Start Clarification**, **Apply Answers**, **Finalized
