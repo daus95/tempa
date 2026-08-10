@@ -41,6 +41,8 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **The `01-simple-web-app` example PRD is now the tighter rewrite**, and its Down Payment
+  percentage is specified as whole-number entry only (`12`, not `12,3`).
 - **Clarification findings are now written short and in paragraphs instead of as one wall
   of text.** The evaluation prompt now caps every paragraph at ~3 sentences, requires a
   blank line between paragraphs (the renderer joins un-separated lines into a single
