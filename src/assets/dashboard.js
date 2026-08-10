@@ -177,8 +177,10 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
   clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
-  clarifyLogPanel = $("clarifyLogPanel"), clarifyLogBody = $("clarifyLogBody"),
-  clarifyLogStatus = $("clarifyLogStatus"),
+  clarifyLogBody = $("clarifyLogBody"),
+  clarifyTabOverviewBtn = $("clarifyTabOverviewBtn"), clarifyTabLogBtn = $("clarifyTabLogBtn"),
+  clarifyOverviewTabPanel = $("clarifyOverviewTabPanel"), clarifyLogTabPanel = $("clarifyLogTabPanel"),
+  clarifyRunStatus = $("clarifyRunStatus"),
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
   homeSelectFolderBtn = $("homeSelectFolderBtn"), homeWorkspacePath = $("homeWorkspacePath"),
   homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),
@@ -266,6 +268,7 @@ const state = {
   clarifyDirty: false,
   clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
   clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
+  clarifyTab: "overview",
   workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
   workspaceRoot: INITIAL_WORKSPACE_ROOT || "",
   workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
@@ -1259,6 +1262,22 @@ function clarifyRunStatusLabel(mode) {
   return "Running…";
 }
 
+// Persistent "a run is in progress" badge shown above the Overview/Log tabs — unlike the
+// log itself, it stays visible regardless of which tab is active, so switching to the
+// Overview tab during a run doesn't leave the user wondering if anything is happening.
+function renderClarifyRunStatus() {
+  const run = state.clarifyRun;
+  if (!run.running) {
+    clarifyRunStatus.classList.add("hidden");
+    clarifyRunStatus.innerHTML = "";
+    return;
+  }
+  const tick = run.progress ? formatClarifyLogLine(run.progress).msg : "";
+  clarifyRunStatus.innerHTML = iconSvg("loader-circle", "icon-spin") +
+    `<span>${escapeHtml(clarifyRunStatusLabel(run.mode))}${tick ? " — " + escapeHtml(tick) : ""}</span>`;
+  clarifyRunStatus.classList.remove("hidden");
+}
+
 // Turns one raw console line from `tempa clarify` into a {cls, icon, time, msg} for
 // user-friendly rendering — banners, [OK]/[!] markers, and the once-a-second
 // progress tick each get their own look instead of showing as raw log text.
@@ -1369,10 +1388,11 @@ async function pollClarifyRun() {
     // Always re-render, even with no new finalized lines: `progress` (the live
     // elapsed-time tick) changes every second on its own and isn't part of `lines`.
     state.clarifyRun.progress = data.progress;
+    state.clarifyRun.mode = data.mode;
     renderClarifyLog();
     state.clarifyRun.running = data.running;
+    renderClarifyRunStatus();
     syncClarifyLockState();
-    clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
     setClarifyRunButtonsDisabled(data.running);
     // Finalize's round counter, read fresh from config.json every poll (see
     // _handle_clarify_run_status) — ticks up live, round by round, instead of
@@ -1401,12 +1421,13 @@ async function startClarifyRun(mode) {
   // finalize run and show Stop Finalize instead of waiting for the next poll.
   state.clarifyRun.mode = mode;
   setClarifyRunButtonsDisabled(true);
-  clarifyLogPanel.classList.remove("hidden");
-  clarifyLogPanel.open = true;
   state.clarifyRun.lines = [];
   state.clarifyRun.progress = null;
   state.clarifyRun.nextIndex = 0;
-  clarifyLogStatus.textContent = clarifyRunStatusLabel(mode);
+  // Set optimistically, before the POST resolves, so the running badge appears the
+  // instant the button is clicked instead of waiting on a network round trip.
+  state.clarifyRun.running = true;
+  renderClarifyRunStatus();
   renderClarifyLog();
   try {
     const res = await fetch("/api/clarify/run", {
@@ -1416,15 +1437,16 @@ async function startClarifyRun(mode) {
     const data = await res.json();
     if (!data.ok) {
       toast(data.error || "Could not start clarification run.", true);
-      clarifyLogStatus.textContent = "";
+      state.clarifyRun.running = false;
+      renderClarifyRunStatus();
       setClarifyRunButtonsDisabled(false);
       return;
     }
-    state.clarifyRun.running = true;
     startClarifyPolling();
   } catch (e) {
     toast("Network error starting clarification run.", true);
-    clarifyLogStatus.textContent = "";
+    state.clarifyRun.running = false;
+    renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(false);
   }
 }
@@ -1438,15 +1460,15 @@ async function checkClarifyRunOnLoad() {
     state.clarifyRun.nextIndex = data.next;
     state.clarifyRun.mode = data.mode;
     state.clarifyRun.progress = data.progress;
-    clarifyLogPanel.classList.remove("hidden");
+    state.clarifyRun.running = data.running;
     renderClarifyLog();
-    clarifyLogStatus.textContent = data.running ? clarifyRunStatusLabel(data.mode) : "";
+    renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(data.running);
     if (data.mode === "finalize" && data.maxRound > 0) {
       finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
       finalizeRoundProgress.classList.remove("hidden");
     }
-    if (data.running) { clarifyLogPanel.open = true; startClarifyPolling(); }
+    if (data.running) startClarifyPolling();
   } catch (e) { /* ignore — buttons stay enabled */ }
 }
 
@@ -1471,6 +1493,16 @@ startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
 stopFinalizeClarifyBtn.addEventListener("click", stopFinalizeClarifyRun);
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
+
+function setClarifyTab(tab) {
+  state.clarifyTab = tab;
+  clarifyTabOverviewBtn.classList.toggle("active", tab === "overview");
+  clarifyTabLogBtn.classList.toggle("active", tab === "log");
+  clarifyOverviewTabPanel.classList.toggle("hidden", tab !== "overview");
+  clarifyLogTabPanel.classList.toggle("hidden", tab !== "log");
+}
+clarifyTabOverviewBtn.addEventListener("click", () => setClarifyTab("overview"));
+clarifyTabLogBtn.addEventListener("click", () => setClarifyTab("log"));
 
 // ---------------------------------------------------------------------------
 // Implementation run (Start/Stop Implementation + Status/Log tabs)
