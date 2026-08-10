@@ -11,6 +11,8 @@ Task:
 5. Write the full verification report to file: ${output_file}
 
 Report format:
+- Before the title, on its own line: <!-- tempa:verify-result passed=<N> warned=<N> failed=<N> -->
+  (N = counts of ✅ / ⚠️ / ❌ items respectively — used by the dashboard, do not omit)
 - Title: Verification Report — ${epic}
 - Verification date
 - Summary (total ✅ / ⚠️ / ❌)

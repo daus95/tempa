@@ -10,6 +10,12 @@ once the first tagged release is cut.
 
 ### Added
 
+- **Verification in the dashboard.** Each epic on the Implementation page now has a Verify
+  button (with a confirmation dialog) that runs `tempa verify <epic>` as a background
+  session — unlike Implementation/Clarification, more than one epic can verify at once. A
+  new "Verification" section lists every run (running/completed/failed, plus a Passed/
+  Issues Found result once the report is in), and clicking a run opens its markdown report,
+  with Stop (while running) and Delete actions.
 - **"Restart Server" button in Settings**, next to Check for Updates. Stops the running
   dashboard process and relaunches it bound to the same port (retrying briefly to reclaim
   it), then automatically reloads the page once the new instance is back up — no more

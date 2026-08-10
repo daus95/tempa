@@ -86,6 +86,9 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home",
     server.any_saved = False
     server.clarify_run = _new_clarify_run_state()
     server.implement_run = _new_implement_run_state()
+    # Keyed per-epic (unlike clarify_run/implement_run's single global slot) since more
+    # than one epic's verification may run at once — see dashboard_verify.py.
+    server.verify_runs = {}
 
     bound_port = server.server_address[1]
     url = f"http://127.0.0.1:{bound_port}/"
