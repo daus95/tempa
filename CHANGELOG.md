@@ -17,6 +17,12 @@ once the first tagged release is cut.
   used to land on a different, unpredictable port). Blocked with a 409 while a clarify or
   implementation run is in progress, same as Update Now; a confirmation dialog explains the
   impact before it runs.
+- **Stop Clarification / Stop Apply Answers buttons.** Start Clarification and Apply
+  Answers now swap to a Stop button while running, matching the existing Stop Finalize —
+  a confirmation dialog, then the same process-tree kill. Apply Answers additionally
+  respects Stop between its auto-chained batches (one backlog file at a time): a Stop
+  clicked in that gap skips the next batch instead of waiting for it to start and then
+  killing it.
 
 ### Changed
 

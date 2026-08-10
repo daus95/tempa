@@ -625,7 +625,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_clarify_run_stop(self) -> None:
         if not _stop_clarify_run(self.server):
-            self._send_json(409, {"ok": False, "error": "Finalized Clarification is not running."})
+            self._send_json(409, {"ok": False, "error": "No clarification run is currently in progress."})
             return
         self._send_json(200, {"ok": True})
 
