@@ -421,6 +421,10 @@ console output — any `session_*.txt`/`qa_*.txt`/`process_*.txt` filename it me
 clickable and opens that file in a viewer modal, see [docs/logging.md](docs/logging.md);
 **Stop Implementation** is available while it's running.
 
+![Tempa dashboard Implementation page, Status tab, showing live epic/feature progress and QA results](docs/assets/implement-status.webp)
+
+![Tempa dashboard Implementation page, Log tab, showing the raw console output](docs/assets/implement-log.webp)
+
 Once any epic has actually run, the button relabels itself to **Continue Implementation** —
 the run resumes the existing plan rather than starting anything — and clicking it resets any
 epic left in the `failed` state back to `pending` first (the same thing
