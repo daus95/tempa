@@ -26,6 +26,9 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **README now shows Implementation page screenshots.** The Step 3 — Start Implementation
+  section includes example screenshots of the Status and Log tabs
+  (`docs/assets/implement-status.webp`, `docs/assets/implement-log.webp`).
 - **Clarification page now splits into Overview/Log tabs**, same pattern as the
   Implementation page's Status/Log tabs — the Unanswered/Fully answered tables live under
   Overview, the run log lives under Log. The run buttons and readiness panels (Evaluation
