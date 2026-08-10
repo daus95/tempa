@@ -240,6 +240,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
   settingsUpdateStatus = $("settingsUpdateStatus"),
+  settingsRestartBtn = $("settingsRestartBtn"), settingsRestartStatus = $("settingsRestartStatus"),
   homePrinciplesBtn = $("homePrinciplesBtn"), homeStepPrinciplesStatus = $("homeStepPrinciplesStatus"),
   principlesEditor = $("principlesEditor"), principlesSaveBtn = $("principlesSaveBtn"),
   principlesSaveStatus = $("principlesSaveStatus");
@@ -2069,6 +2070,52 @@ settingsUpdateBtn.addEventListener("click", async () => {
   } finally {
     settingsUpdateBtn.disabled = false;
     settingsCheckUpdateBtn.disabled = false;
+  }
+});
+
+async function waitForServerAndReload() {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    try {
+      const res = await fetch("/", { cache: "no-store" });
+      if (res.ok) { window.location.reload(); return; }
+    } catch (e) {
+      // Still down (old process gone, new one not listening yet) -- keep polling.
+    }
+  }
+  settingsRestartStatus.textContent =
+    "The server did not come back on this address. It may be on a different port -- check the console/terminal.";
+  settingsRestartStatus.classList.add("err");
+  settingsRestartBtn.disabled = false;
+}
+
+settingsRestartBtn.addEventListener("click", async () => {
+  const ok = await confirmModal(
+    "This will stop and relaunch the dashboard server on the same port. " +
+    "Any in-progress page state will be lost and the page will reload automatically once the server is back.",
+    { title: "Restart Server", okLabel: "Restart", danger: true });
+  if (!ok) return;
+  settingsRestartBtn.disabled = true;
+  settingsRestartStatus.textContent = "Restarting…";
+  settingsRestartStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/server/restart", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      settingsRestartStatus.textContent = data.error || "Restart failed.";
+      settingsRestartStatus.classList.add("err");
+      toast(data.error || "Restart failed.", true);
+      settingsRestartBtn.disabled = false;
+      return;
+    }
+    settingsRestartStatus.textContent = "Waiting for the server to come back…";
+    await waitForServerAndReload();
+  } catch (e) {
+    settingsRestartStatus.textContent = "Network error while restarting.";
+    settingsRestartStatus.classList.add("err");
+    toast("Network error while restarting.", true);
+    settingsRestartBtn.disabled = false;
   }
 });
 

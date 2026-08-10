@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **"Restart Server" button in Settings**, next to Check for Updates. Stops the running
+  dashboard process and relaunches it bound to the same port (retrying briefly to reclaim
+  it), then automatically reloads the page once the new instance is back up — no more
+  manually closing the dashboard and re-running `tempa dashboard` after an update (which
+  used to land on a different, unpredictable port). Blocked with a 409 while a clarify or
+  implementation run is in progress, same as Update Now; a confirmation dialog explains the
+  impact before it runs.
+
 ## [0.6.0] - 2026-08-10
 
 ### Added

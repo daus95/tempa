@@ -29,6 +29,7 @@ absolute paths.
 
 from __future__ import annotations
 
+import time
 import webbrowser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -40,13 +41,23 @@ from dashboard_runs import _new_clarify_run_state, _new_implement_run_state
 from dashboard_server import _DashboardHandler
 from dashboard_spec import build_tree
 
+# How many times to retry binding to a specific `port` (e.g. when restarting on the same
+# port a just-exited process held) before giving up and falling back to an ephemeral one.
+_REBIND_ATTEMPTS = 5
+_REBIND_DELAY_SEC = 0.5
 
-def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> bool:
-    """Serve the dashboard on a random 127.0.0.1 port, open it in the default
-    browser, and block until interrupted with Ctrl+C. `initial_view` is one of
-    "home" | "specification" | "clarification" and controls which sidebar section
-    is expanded/shown on first paint. Returns True iff at least one clarification
-    answer was saved during the session."""
+
+def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home",
+                   port: int = 0, open_browser: bool = True) -> bool:
+    """Serve the dashboard and block until interrupted with Ctrl+C. `initial_view` is one
+    of "home" | "specification" | "clarification" and controls which sidebar section is
+    expanded/shown on first paint. `port` defaults to 0 (a fresh OS-assigned ephemeral
+    port); passing a specific port retries binding it a few times, falling back to
+    ephemeral if it can't be reclaimed (e.g. the previous holder hasn't fully released it
+    yet) -- used when self-relaunching via "Restart Server" to keep the same port/URL.
+    `open_browser` controls whether a browser tab is opened automatically; a relaunch
+    started via "Restart Server" should not pop a second one. Returns True iff at least
+    one clarification answer was saved during the session."""
     prd_dir = prd_dir.resolve() if prd_dir.exists() else prd_dir
     clar_dir = clar_dir.resolve() if clar_dir.exists() else clar_dir
 
@@ -57,7 +68,18 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     page_html = _render_page(prd_dir, clar_dir, spec_tree, clarify_unanswered, clarify_answered,
                              initial_view)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
+    server = None
+    attempts = _REBIND_ATTEMPTS if port else 1
+    for attempt in range(attempts):
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", port), _DashboardHandler)
+            break
+        except OSError:
+            if attempt < attempts - 1:
+                time.sleep(_REBIND_DELAY_SEC)
+    if server is None:
+        print(f"Could not rebind port {port}; falling back to a new port.")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
     server.prd_dir = prd_dir
     server.clar_dir = clar_dir
     server.page_html = page_html
@@ -65,11 +87,11 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     server.clarify_run = _new_clarify_run_state()
     server.implement_run = _new_implement_run_state()
 
-    port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}/"
+    bound_port = server.server_address[1]
+    url = f"http://127.0.0.1:{bound_port}/"
     print(f"Dashboard: {url}")
     print("Press Ctrl+C to stop.")
-    if not webbrowser.open(url):
+    if open_browser and not webbrowser.open(url):
         print("Could not open a browser automatically -- open the URL above manually.")
 
     try:
