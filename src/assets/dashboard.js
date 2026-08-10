@@ -168,7 +168,6 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
   stopFinalizeClarifyBtn = $("stopFinalizeClarifyBtn"),
-  openUnansweredBtn = $("openUnansweredBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   finalizeRoundProgress = $("finalizeRoundProgress"),
@@ -190,7 +189,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeStep2FileList = $("homeStep2FileList"),
   homeAddFileBtn = $("homeAddFileBtn"), homeAddFolderBtn = $("homeAddFolderBtn"),
   homeStartClarifyBtn = $("homeStartClarifyBtn"), homeFinalizeClarifyBtn = $("homeFinalizeClarifyBtn"),
-  homeOpenUnansweredBtn = $("homeOpenUnansweredBtn"), homeApplyAnswersBtn = $("homeApplyAnswersBtn"),
+  homeApplyAnswersBtn = $("homeApplyAnswersBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
@@ -553,8 +552,8 @@ function renderHomeWorkflow() {
   } else {
     homeClarifyRoundBadge.classList.add("hidden");
   }
-  // Mirrors the Clarification page's own Start/Continue Clarification + Answer Findings
-  // behavior (see setClarifyRunButtonsDisabled) so the two pages never disagree.
+  // Mirrors the Clarification page's own Start/Continue Clarification behavior (see
+  // setClarifyRunButtonsDisabled) so the two pages never disagree.
   const homeHasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
   const homeHasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
   const homeNeedsContinue = state.clarifyFinalize.hasRun && !state.clarifyFinalize.ready;
@@ -565,7 +564,6 @@ function renderHomeWorkflow() {
     homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
   homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers;
   homeStartClarifyBtn.title = homeBlockedByAnswers ? "Answer the remaining findings first." : "";
-  homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
   homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
   // Mirrors renderFinalizeGate's gate above: disabled until clarification has run, the
   // latest result is a fresh evaluate, and it shows zero critical findings (or the
@@ -672,9 +670,6 @@ homeAddFolderBtn.addEventListener("click", () => { addFolderInput.value = ""; ad
 homeStartClarifyBtn.addEventListener("click", async () => {
   await selectTop("clarification");
   startClarifyRun("run");
-});
-homeOpenUnansweredBtn.addEventListener("click", () => {
-  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
 });
 homeApplyAnswersBtn.addEventListener("click", async () => {
   await selectTop("clarification");
@@ -1254,7 +1249,6 @@ function setClarifyRunButtonsDisabled(disabled) {
   startClarifyBtn.disabled = disabled || blockedByAnswers;
   startClarifyBtn.title = blockedByAnswers ? "Answer the remaining findings first." : "";
   applyAnswersBtn.disabled = disabled || !hasUnapplied;
-  openUnansweredBtn.disabled = disabled || !hasUnanswered;
   renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
 }
 
@@ -1476,11 +1470,6 @@ startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
 stopFinalizeClarifyBtn.addEventListener("click", stopFinalizeClarifyRun);
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
-// With multiple unanswered files, just jump into the first one — same as clicking a
-// row in the "Unanswered" table below, this is only meant to get the user started.
-openUnansweredBtn.addEventListener("click", () => {
-  if (state.clarifyUnanswered.length) openClarifyFile(state.clarifyUnanswered[0]);
-});
 
 // ---------------------------------------------------------------------------
 // Implementation run (Start/Stop Implementation + Status/Log tabs)
