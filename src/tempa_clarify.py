@@ -336,7 +336,7 @@ def _clarification_backlog(clar_dir: Path, applied_hashes: dict) -> tuple[list[P
         items, _ = parse_file(p, text, 0)
         if not items:
             continue
-        if any(not it.existing_answer for it in items):
+        if any(not it.resolved_answer for it in items):
             unanswered.append(p)
             continue
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -346,11 +346,13 @@ def _clarification_backlog(clar_dir: Path, applied_hashes: dict) -> tuple[list[P
 
 
 def _fill_unanswered_with_recommendations(paths: list[Path]) -> int:
-    """For every finding in `paths` that has no answer yet, write its own
-    Recommendation text verbatim into the "Your answer" section — mechanically,
-    with no agent/LLM call — the same content the dashboard's "Follow the
-    recommendation" button would save for that finding. Findings that already have
-    an answer, or (unexpectedly) have no recommendation text, are left untouched.
+    """For every finding in `paths` that has no answer yet, mark it as "follow the
+    recommendation" — mechanically, with no agent/LLM call — the same outcome the
+    dashboard's "Follow the recommendation" button records for that finding: a
+    `mode="recommendation"` marker with an EMPTY body, not a copy of the recommendation
+    text (see ClarificationItem.resolved_answer, which reconstructs the full text for
+    anything that reads "the answer"). Findings that already have an answer (per
+    resolved_answer), or (unexpectedly) have no recommendation text, are left untouched.
     Returns how many findings were filled in."""
     filled = 0
     for p in paths:
@@ -364,12 +366,12 @@ def _fill_unanswered_with_recommendations(paths: list[Path]) -> int:
         # offsets — computed against the original text — stay valid for the items
         # processed after it.
         for it in sorted(items, key=lambda i: i.answer_start, reverse=True):
-            if it.existing_answer or not it.recommendation:
+            if it.resolved_answer or not it.recommendation:
                 continue
             if it.has_markers:
-                replacement = f"<!-- clarify:answer-start -->\n{it.recommendation}\n<!-- clarify:answer-end -->"
+                replacement = '<!-- clarify:answer-start mode="recommendation" -->\n\n<!-- clarify:answer-end -->'
             else:
-                replacement = it.recommendation
+                replacement = '\n<!-- clarify:answer-start mode="recommendation" -->\n\n<!-- clarify:answer-end -->\n'
             new_text = new_text[: it.answer_start] + replacement + new_text[it.answer_end:]
             filled += 1
         if new_text != text:

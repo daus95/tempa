@@ -108,6 +108,14 @@ once the first tagged release is cut.
   `clarification_*`/`apply_clarification_*` logs (and `verify_*`/`plan_epics_*`) rendered as
   plain text. It now keys off the `_<YYYYMMDD>_<HHMMSS>.txt` suffix every Tempa log filename
   ends with, so any future log prefix linkifies too.
+- **"Follow the recommendation" no longer duplicates the recommendation text into the saved
+  answer**, and reopening a clarification file now shows it as "Follow the recommendation"
+  selected again instead of falling back to "own answer" with the (duplicated) text
+  prefilled. The choice is now recorded via a `mode="recommendation"` marker with an empty
+  body instead of a copy of the recommendation text — cutting the on-disk/prompt token cost
+  of every followed recommendation roughly in half. Applies to both the dashboard's per-item
+  save and the CLI/finalize backlog's mechanical auto-fill. Forward-only: files saved before
+  this change keep rendering as "own answer", same as before.
 
 ## [0.5.8] - 2026-08-09
 
