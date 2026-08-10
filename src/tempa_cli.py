@@ -294,7 +294,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("update", parents=[common], add_help=False)
     p.add_argument("--yes", action="store_true")
 
-    sub.add_parser("dashboard", parents=[common], add_help=False)
+    p = sub.add_parser("dashboard", parents=[common], add_help=False)
+    p.add_argument("--port", type=int, default=0)
+    p.add_argument("--no-browser", action="store_true")
 
     p = sub.add_parser("spec", parents=[common], add_help=False)
     p.add_argument("--show", action="store_true")
@@ -421,7 +423,7 @@ def run() -> None:
     elif cli_args.command == "update":
         run_update()
     elif cli_args.command == "dashboard":
-        run_dashboard_command()
+        run_dashboard_command(port=cli_args.port, open_browser=not cli_args.no_browser)
     elif cli_args.command == "spec":
         if not cli_args.show:
             print("Usage: tempa spec --show")

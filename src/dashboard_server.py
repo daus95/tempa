@@ -12,6 +12,8 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -423,6 +425,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_principles_save()
         elif parsed.path == "/api/update/run":
             self._handle_update_run()
+        elif parsed.path == "/api/server/restart":
+            self._handle_server_restart()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -1052,3 +1056,41 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         import tempa_commands
         self._send_json(200, {"ok": True, "output": output, "version": tempa_commands.get_local_version()})
+
+    def _handle_server_restart(self) -> None:
+        """Stop this dashboard process and relaunch a fresh one bound to the same port,
+        so the browser can reload the same URL once it's back up. Spawns the replacement
+        as a detached process (it must outlive this one exiting) *before* this server
+        gives up its socket, so the new process's own bind-retry loop
+        (run_dashboard()'s `port` handling in dashboard_ui.py) bridges the brief window
+        where both are momentarily contending for the port."""
+        if self.server.clarify_run["running"] or self.server.implement_run["running"]:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot restart while a clarify or implementation run is in progress.",
+            })
+            return
+        port = self.server.server_address[1]
+        tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
+        cmd = [sys.executable, str(tempa_py), "dashboard", "--port", str(port), "--no-browser"]
+        popen_kwargs = {}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        try:
+            subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=True, **popen_kwargs,
+            )
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not start the new server process: {e}"})
+            return
+        self._send_json(200, {"ok": True, "port": port})
+
+        def _shutdown_after_response() -> None:
+            time.sleep(0.3)
+            self.server.shutdown()
+
+        threading.Thread(target=_shutdown_after_response, daemon=True).start()

@@ -744,7 +744,11 @@ def run_spec_show() -> None:
     run_dashboard(prd_dir, _resolve_clar_dir(config), initial_view="specification")
 
 
-def run_dashboard_command() -> None:
-    """`tempa dashboard` — open the web dashboard on the Home view."""
+def run_dashboard_command(port: int = 0, open_browser: bool = True) -> None:
+    """`tempa dashboard` — open the web dashboard on the Home view. `port` and
+    `open_browser` are used internally by the dashboard's own "Restart Server" button to
+    relaunch itself on the same port without popping a second browser tab; they're not
+    documented CLI flags meant for everyday use."""
     config = load_config()
-    run_dashboard(_resolve_prd_dir(config), _resolve_clar_dir(config), initial_view="home")
+    run_dashboard(_resolve_prd_dir(config), _resolve_clar_dir(config), initial_view="home",
+                  port=port, open_browser=open_browser)
