@@ -41,6 +41,13 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **Clarification findings are now written short and in paragraphs instead of as one wall
+  of text.** The evaluation prompt now caps every paragraph at ~3 sentences, requires a
+  blank line between paragraphs (the renderer joins un-separated lines into a single
+  block, which is what produced the unreadable slabs), splits Where into "what's wrong"
+  and "what it breaks", limits Question to one sentence with the options as bullets, and
+  makes Recommendation lead with the resolution itself. Findings cards also got more
+  generous line spacing and paragraph margins to match.
 - **Continue Clarification is no longer blocked by unapplied answers.** Only findings you
   haven't answered yet hold up the next round. Applying is now something you do when you
   want the PRD documents themselves brought up to date — and once, before starting
@@ -88,6 +95,10 @@ once the first tagged release is cut.
   Clarification is clickable even before clarification has ever been run — its own
   evaluate/answer/apply loop establishes and then resolves the finding set unsupervised,
   so there's nothing left to check up front.
+- **Removed the "Answer Findings" button from the Home and Clarification Overview
+  pages.** It only ever jumped into the first unanswered file; both pages already let
+  you click the specific file you want to answer (Home's per-file list in step 2, and
+  the Unanswered/Fully answered table rows on the Clarification Overview page).
 
 ### Fixed
 
