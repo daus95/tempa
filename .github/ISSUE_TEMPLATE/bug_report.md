@@ -18,7 +18,7 @@ Steps to reproduce the behavior:
 **Environment**
 - OS: [e.g. Windows 11, macOS 14, Ubuntu 22.04]
 - Python version: [`python --version`]
-- Claude CLI version: [`claude --version`]
+- Backend CLI + version (whichever is configured for the affected stage): [`claude --version` / `copilot --version` / `codex --version`]
 - Tempa version/commit: [`git rev-parse --short HEAD`, if running from a clone]
 
 **Logs**
