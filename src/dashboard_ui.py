@@ -54,7 +54,8 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home") -> 
     clarify_unanswered, clarify_answered = _clarify_files_overview(
         clar_dir, _load_clarify_applied_hashes(), _load_clarify_file_timings()
     )
-    page_html = _render_page(prd_dir, spec_tree, clarify_unanswered, clarify_answered, initial_view)
+    page_html = _render_page(prd_dir, clar_dir, spec_tree, clarify_unanswered, clarify_answered,
+                             initial_view)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
     server.prd_dir = prd_dir

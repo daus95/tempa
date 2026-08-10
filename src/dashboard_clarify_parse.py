@@ -257,16 +257,27 @@ def _latest_evaluation_findings(files: list[dict], clean_since: float = 0) -> di
 def _clarify_finalize_status(
     findings: dict, last_action: str | None, round_: int = 0, max_round: int = 0,
     allow_finalize_with_critical: bool = False, finalize_round: int = 0,
+    pending_overlay_findings: int = 0,
 ) -> dict:
     """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
-    state, NOT a gate: the button itself is only disabled while a clarify run is already
-    in progress (see renderFinalizeGate in dashboard.js, and _handle_clarify_run_start in
-    dashboard_server.py, which deliberately has no server-side precondition for mode
-    "finalize"). "ready" is what the dashboard uses to decide whether to relabel Start
-    Clarification -> Continue Clarification and explain what Finalize would still have to
-    do unsupervised.
+    state, and also the actual precondition gate: the button (Home and Clarification
+    Overview) stays disabled, and POST /api/clarify/run (mode=finalize) returns 409,
+    until "ready" is true (see renderFinalizeGate/renderHomeWorkflow in dashboard.js,
+    and _handle_clarify_run_start in dashboard_server.py). "ready" is also what the
+    dashboard uses to decide whether to relabel Start Clarification -> Continue
+    Clarification and explain what's still blocking Finalize.
 
-    "ready" is True when all of:
+    "ready" is True when `allow_finalize_with_critical` is on (config.json's
+    "allow_finalize_with_critical", the dashboard Settings toggle; off by default) —
+    that override waives every other requirement below, so Finalize is clickable even
+    before clarification has ever been run: its own evaluate/apply loop is what
+    establishes and then resolves the finding set, unsupervised, so there's nothing
+    left to check up front. This setting never affects the separate Start
+    Implementation gate (_handle_implement_run_start), which is a real gate and
+    follows its own config.json setting, "implementation_start_requirement" — see
+    _implement_readiness_status below.
+
+    With the override off, "ready" is True when all of:
       - at least one clarification action has ever completed ("hasRun")
       - that most recent action was a fresh evaluate pass, not a bare apply
         ("lastAction" == "evaluate") — answering criticals and applying them isn't
@@ -276,21 +287,21 @@ def _clarify_finalize_status(
       - the most recent evaluation round's file shows zero critical findings
         (`findings`, from _latest_evaluation_findings — the actual tag count for
         that one round, not a self-reported opinion and not summed across every
-        past round) — unless `allow_finalize_with_critical` overrides
-        this (config.json's "allow_finalize_with_critical", the dashboard Settings
-        toggle; off by default). With it on, Finalize is allowed to start with
-        critical findings still open, so its automated evaluate/apply loop attempts
-        to resolve them unsupervised instead of requiring a human to answer them
-        first. This setting never affects the separate Start Implementation gate
-        (_handle_implement_run_start), which is a real gate and follows its own
-        config.json setting, "implementation_start_requirement" — see
-        _implement_readiness_status below.
+        past round)
 
     `last_action` is config.json's "last_clarification_action" (caller's
     responsibility to load it, e.g. via dashboard_config._load_dashboard_config()) —
     stamped by tempa.py right after each `clarify` (evaluate) / `clarify --apply`
     (apply) / `clarify --finalize` (both, alternating) run — see run_clarify_once(),
     _run_apply_step(), and run_clarify_finalize() there.
+
+    `pending_overlay_findings` (pending_overlay_stats()["findings"]) is reported back for
+    display only and deliberately does NOT affect "ready": finalize CONSUMES the pending
+    overlay — every evaluate pass in its loop carries it, and its compaction step is what
+    writes it into the PRD — so treating an unapplied overlay as "not ready to finalize"
+    would pin the button to "Continue Clarification" exactly when finalize is the thing that
+    would resolve it. The gate that does require an empty overlay is Start Implementation
+    (_implement_readiness_status below), because implementation reads the PRD itself.
 
     `round_`/`max_round`/`finalize_round` are config.json's "last_clarification_round" /
     "max_clarification_run" / "last_finalize_round" — passed straight through so the
@@ -304,7 +315,7 @@ def _clarify_finalize_status(
     the "Finalized Clarification" button instead."""
     fresh_evaluate = last_action == "evaluate"
     critical_ok = findings["critical"] == 0 or allow_finalize_with_critical
-    ready = fresh_evaluate and critical_ok
+    ready = allow_finalize_with_critical or (fresh_evaluate and critical_ok)
     return {
         "hasRun": last_action is not None,
         "lastAction": last_action,
@@ -314,10 +325,13 @@ def _clarify_finalize_status(
         "maxRound": max_round,
         "finalizeRound": finalize_round,
         "allowFinalizeWithCritical": allow_finalize_with_critical,
+        "pendingOverlay": pending_overlay_findings,
     }
 
 
-def _implement_readiness_status(findings: dict, has_run: bool, requirement: str) -> dict:
+def _implement_readiness_status(
+    findings: dict, has_run: bool, requirement: str, pending_overlay_findings: int = 0,
+) -> dict:
     """Whether "Start Implementation" is currently allowed to run, per config.json's
     "implementation_start_requirement" (the dashboard Settings "Start Implementation
     requires" control; one of tempa_config.IMPLEMENTATION_START_REQUIREMENTS):
@@ -331,6 +345,16 @@ def _implement_readiness_status(findings: dict, has_run: bool, requirement: str)
     never run has zero findings simply from having no clarification files yet, which
     would otherwise trivially satisfy every requirement level, including the default.
 
+    `pending_overlay_findings` (pending_overlay_stats()["findings"]) also gates regardless
+    of `requirement`, including "none". That setting expresses how strict to be about OPEN
+    QUESTIONS; this is a different thing — a correctness invariant. Implementation reads the
+    PRD/spec documents, so an answer that has been recorded but not yet applied
+    (`clarify --apply`) is invisible to it: the epic would be built from a specification the
+    user has already decided against. Since clarification no longer has to apply after every
+    round (answers are carried in the evaluate prompt as a pending overlay — see
+    pending_resolutions), this is the only thing left forcing the PRD to be current before
+    any code gets written.
+
     This is the single source of truth shared by the server-side gate
     (_handle_implement_run_start in dashboard_server.py) and every dashboard surface
     that shows Start Implementation readiness (Home step 3, the Clarification
@@ -343,7 +367,8 @@ def _implement_readiness_status(findings: dict, has_run: bool, requirement: str)
         "critical": findings["critical"],
         "major": findings["major"],
         "requirement": requirement,
-        "ready": has_run and critical_ok and major_ok,
+        "pendingOverlay": pending_overlay_findings,
+        "ready": has_run and critical_ok and major_ok and pending_overlay_findings == 0,
     }
 
 
@@ -378,3 +403,89 @@ def _clarify_files_overview(
     unanswered.sort(key=lambda f: f["started_at"], reverse=True)
     answered.sort(key=lambda f: f["started_at"], reverse=True)
     return unanswered, answered
+
+
+@dataclass
+class PendingResolution:
+    """One already-decided-but-not-yet-applied finding: its question and the answer
+    recorded for it. See pending_resolutions."""
+    file_name: str
+    started_at: float
+    round_index: int
+    raw_id: str
+    severity: str
+    title: str
+    where: str
+    question: str
+    answer: str
+
+
+def pending_resolutions(clar_dir: Path, applied_hashes: dict) -> list[PendingResolution]:
+    """Every ANSWERED clarification finding whose answer isn't in the PRD yet — the
+    "pending overlay" carried into each clarification evaluation so the PRD no longer has
+    to be rewritten (`clarify --apply`) after every round just to keep evaluating.
+
+    Membership is exactly the answered half of what an apply pass would write: an item
+    counts iff it has an answer AND its file's current content hash doesn't match
+    `applied_hashes` (config.json's "clarify_applied_hashes", the only record of applied
+    state there is — see _record_clarify_applied_state in tempa_clarify.py). So an empty
+    result means every recorded answer is already reflected in the PRD/spec, which is what
+    the Start Implementation gate keys off (_implement_readiness_status below).
+
+    A partially-answered file contributes its answered items and skips the rest — those
+    answers are decided and absent from the PRD regardless of what else in the file is
+    still open, and _clarification_backlog already sends such files to apply for the same
+    reason. A file edited after a previous apply re-contributes everything it holds: the
+    hash no longer matches, so the PRD can no longer be trusted to reflect it.
+
+    Ordered OLDEST ROUND FIRST (by _file_started_at, then name). The order is load-bearing:
+    prompt/clarification.md tells the agent that a later round's decision supersedes an
+    earlier one, which only works if the rounds arrive in chronological order. Filenames
+    happen to sort chronologically too, but that's the naming convention's doing, not a
+    guarantee — sort on the parsed timestamp."""
+    contributing: list[tuple[Path, float, list[ClarificationItem]]] = []
+    for path in sorted(clar_dir.glob("*.md")) if clar_dir.exists() else []:
+        if path.name.lower() == "claude.md":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        items, _ = parse_file(path, text, 0)
+        if not items:
+            continue
+        if applied_hashes.get(path.name) == hashlib.sha256(text.encode("utf-8")).hexdigest():
+            continue
+        answered = [it for it in items if it.existing_answer]
+        if answered:
+            contributing.append((path, _file_started_at(path), answered))
+
+    contributing.sort(key=lambda entry: (entry[1], entry[0].name))
+    pending: list[PendingResolution] = []
+    for round_index, (path, started_at, items) in enumerate(contributing, start=1):
+        for it in items:
+            pending.append(PendingResolution(
+                file_name=path.name, started_at=started_at, round_index=round_index,
+                raw_id=it.raw_id, severity=it.severity, title=it.title,
+                where=it.where, question=it.question, answer=it.existing_answer,
+            ))
+    return pending
+
+
+def pending_overlay_stats(clar_dir: Path, applied_hashes: dict) -> dict:
+    """How big the pending overlay is: {"files", "findings", "chars"} — what the dashboard
+    shows on the "Pending resolutions" card and what the Start Implementation gate checks
+    ("findings" == 0 means the PRD is up to date).
+
+    "chars" is an APPROXIMATION of the rendered block's size (the sum of the text actually
+    carried, plus a per-item allowance for labels), not a byte-exact measurement: the block
+    is rendered by _render_pending_overlay in tempa_prompts.py, which belongs to the CLI
+    half and is deliberately not imported here. It's only ever displayed as a rounded "~N KB"
+    hint, so a few percent either way costs nothing."""
+    pending = pending_resolutions(clar_dir, applied_hashes)
+    chars = sum(len(p.title) + len(p.where) + len(p.question) + len(p.answer) + 48 for p in pending)
+    return {
+        "files": len({p.file_name for p in pending}),
+        "findings": len(pending),
+        "chars": chars,
+    }

@@ -144,15 +144,17 @@ def _start_clarify_run(server, mode: str) -> bool:
 
     If more than one fully-answered clarification file is still waiting to be applied
     when "apply" is requested, this keeps re-running `clarify --apply` — one file's worth
-    of backlog at a time — until every ready file is applied, INSTEAD of chaining to a
-    fresh evaluate after only the first one. Only once nothing is left to apply does it
-    chain into a fresh "run" (evaluate) pass — see run_once()/worker() below — since
-    applying never re-verifies against the live PRD itself, so only a fresh evaluate can
-    report what's actually left. Both readiness surfaces are computed from that (the
-    finalize-readiness panel via _clarify_finalize_status, and the real Start
-    Implementation gate via _implement_readiness_status, both in
-    dashboard_clarify_parse.py). Without this, users who only ever click Apply see stale
-    critical/major counts with no clear next step."""
+    of backlog at a time — until every ready file is applied, so one click finishes the
+    job the user actually asked for.
+
+    It does NOT chain into a fresh evaluate afterwards. That used to happen because
+    Continue Clarification was blocked until everything was applied, which left anyone who
+    only ever clicked Apply staring at stale critical/major counts with no way forward.
+    Continuing no longer requires an apply at all (answers ride into the next round as the
+    pending overlay — see pending_resolutions in dashboard_clarify_parse.py), so spending a
+    full evaluate session after every apply is exactly the per-round cost this design
+    removes. The user runs Continue Clarification when they want fresh numbers; until they
+    do, last_clarification_action stays "apply" and the button says so."""
     run = server.clarify_run
     with run["lock"]:
         if run["running"]:
@@ -177,8 +179,8 @@ def _start_clarify_run(server, mode: str) -> bool:
                     # clarification round right away, but only if stdin is a tty — DEVNULL
                     # guarantees it never is, so a dashboard-triggered apply can't block
                     # forever waiting for a keypress no one can give it. (The dashboard
-                    # instead auto-chains a fresh evaluate itself — see below — rather
-                    # than asking.)
+                    # leaves that call to the user: Continue Clarification is one click
+                    # away and no longer requires an apply first.)
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace",
@@ -214,8 +216,7 @@ def _start_clarify_run(server, mode: str) -> bool:
                 with run["lock"]:
                     run["lines"].append(
                         f"{remaining} more fully-answered clarification file(s) still "
-                        "need to be applied — running Apply Answers again before "
-                        "evaluating..."
+                        "need to be applied — running Apply Answers again..."
                     )
                     run["progress"] = None
                 returncode = run_once(_CLARIFY_RUN_ARGS["apply"])
@@ -229,20 +230,17 @@ def _start_clarify_run(server, mode: str) -> bool:
                     with run["lock"]:
                         run["lines"].append(
                             f"Apply Answers isn't clearing the remaining "
-                            f"{next_remaining} file(s) — stopping the auto-apply loop "
-                            "and evaluating with what's been applied so far."
+                            f"{next_remaining} file(s) — stopping the auto-apply loop. "
+                            "Review those file(s) by hand."
                         )
                     break
                 remaining = next_remaining
             if returncode == 0:
                 with run["lock"]:
                     run["lines"].append(
-                        "Apply finished — automatically starting a new Start Clarification "
-                        "run to refresh critical/major status..."
+                        "Apply finished. Run Continue Clarification when you want a fresh "
+                        "evaluation of the updated PRD."
                     )
-                    run["mode"] = "run"
-                    run["progress"] = None
-                returncode = run_once(_CLARIFY_RUN_ARGS["run"])
         with run["lock"]:
             run["running"] = False
             run["progress"] = None

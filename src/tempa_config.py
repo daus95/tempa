@@ -226,6 +226,7 @@ DEFAULT_CONFIG = {
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 5,
     "implement_no_progress_rounds": 2,
+    "clarify_overlay_warn_findings": 25,
     "usage_limit_retry_wait_sec": 1800,
     "usage_limit_heartbeat_sec": 300,
     "server_overloaded_retry_wait_sec": 300,
@@ -555,6 +556,17 @@ def get_finalize_no_progress_rounds(config: dict) -> int | float:
     rounds in a row may fail to reduce the critical+major finding count before the loop
     gives up and asks for human answers (see run_clarify_finalize) — defaulting to 5."""
     return _get_positive_number(config, "finalize_no_progress_rounds", DEFAULT_CONFIG["finalize_no_progress_rounds"])
+
+
+def get_clarify_overlay_warn_findings(config: dict) -> int | float:
+    """Return config.json's "clarify_overlay_warn_findings" — how many answered-but-not-yet-
+    applied clarification findings may pile up before the dashboard suggests compacting them
+    into the PRD with Apply Answers (see pending_overlay_stats in dashboard_clarify_parse.py)
+    — defaulting to 25. A warning only: nothing is ever applied automatically, and carrying a
+    larger overlay is legitimate — it just makes every evaluation prompt bigger."""
+    return _get_positive_number(
+        config, "clarify_overlay_warn_findings", DEFAULT_CONFIG["clarify_overlay_warn_findings"]
+    )
 
 
 def get_poll_interval_sec(config: dict) -> int | float:

@@ -14,6 +14,8 @@ const INITIAL_IMPLEMENT_READINESS = /*__IMPLEMENT_READINESS__*/null;
 const INITIAL_PRINCIPLES_SET = /*__PRINCIPLES_SET__*/null;
 const INITIAL_BACKENDS_STATUS = /*__BACKENDS_STATUS__*/null;
 const INITIAL_SKIP_MINOR_FINDINGS = /*__SKIP_MINOR_FINDINGS__*/null;
+const INITIAL_CLARIFY_PENDING_OVERLAY = /*__CLARIFY_PENDING_OVERLAY__*/null;
+const INITIAL_CLARIFY_OVERLAY_WARN_THRESHOLD = /*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null;
 
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
@@ -171,6 +173,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   finalizeRoundProgress = $("finalizeRoundProgress"),
   skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
+  clarifyOverlayCard = $("clarifyOverlayCard"), clarifyOverlayBadge = $("clarifyOverlayBadge"),
+  clarifyOverlayHint = $("clarifyOverlayHint"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
   implementReadyBanner = $("implementReadyBanner"), implementReadyBannerText = $("implementReadyBannerText"),
   clarifyStartImplementBtn = $("clarifyStartImplementBtn"),
@@ -270,7 +274,15 @@ const state = {
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,
       finalizeRound: 0, allowFinalizeWithCritical: false },
   implementReadiness: INITIAL_IMPLEMENT_READINESS ||
-    { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false },
+    { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false,
+      pendingOverlay: 0 },
+  // Answered clarification findings not yet written into the PRD ({files, findings, chars}).
+  // They're carried into every clarification round as already-decided resolutions, so they
+  // don't block clarifying — but they DO block Start Implementation, which reads the PRD.
+  // Must be re-assigned everywhere the sibling clarify.* fields are (see refreshSpecTree,
+  // refreshClarifyList, and the refresh button) or the card below goes stale after a run.
+  clarifyPendingOverlay: INITIAL_CLARIFY_PENDING_OVERLAY || { files: 0, findings: 0, chars: 0 },
+  clarifyOverlayWarnThreshold: INITIAL_CLARIFY_OVERLAY_WARN_THRESHOLD || 25,
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
@@ -330,7 +342,7 @@ function showModal({ title = "Confirm", message = "", okLabel = "OK", danger = f
 // confirmModal resolves true/false; promptModal resolves the entered string, or null on
 // cancel; alertModal is a single-button (no Cancel) notice, resolved once acknowledged.
 // threeWayModal is for a Cancel/middle-choice/main-choice prompt (e.g. Cancel / Save /
-// Save & Apply): resolves "cancel" (Cancel, Escape, or overlay click), extraLabel's
+// Save & Clarify): resolves "cancel" (Cancel, Escape, or overlay click), extraLabel's
 // choice as the string "extra", or okLabel's choice as "ok".
 function confirmModal(message, opts) {
   return showModal({ message, prompt: false, ...opts });
@@ -546,19 +558,20 @@ function renderHomeWorkflow() {
   const homeHasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
   const homeHasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
   const homeNeedsContinue = state.clarifyFinalize.hasRun && !state.clarifyFinalize.ready;
-  const homeBlockedByAnswers = homeNeedsContinue && (homeHasUnanswered || homeHasUnapplied);
+  // Only unanswered findings block — answered-but-unapplied ones ride into the next round
+  // as already-decided resolutions. Same rule as setClarifyRunButtonsDisabled.
+  const homeBlockedByAnswers = homeNeedsContinue && homeHasUnanswered;
   homeStartClarifyBtn.querySelector("span:last-child").textContent =
     homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
   homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers;
-  homeStartClarifyBtn.title = homeBlockedByAnswers
-    ? "Answer the remaining findings or apply your saved answers first." : "";
+  homeStartClarifyBtn.title = homeBlockedByAnswers ? "Answer the remaining findings first." : "";
   homeOpenUnansweredBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnanswered;
   homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
-  // Not gated on state.clarifyFinalize.ready — `clarify --finalize` now resolves its
-  // own pre-existing backlog (unanswered findings filled in with their recommendation,
-  // then applied) before its loop starts, so it's safe to start regardless of the most
-  // recent evaluate's outcome. See the matching change in renderFinalizeGate above.
-  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running;
+  // Mirrors renderFinalizeGate's gate above: disabled until clarification has run, the
+  // latest result is a fresh evaluate, and it shows zero critical findings (or the
+  // Settings override is on) — state.clarifyFinalize.ready, computed server-side by
+  // _clarify_finalize_status in dashboard_clarify_parse.py.
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
@@ -883,23 +896,20 @@ function formatClarifyDuration(seconds) {
 }
 
 function statusCell(file) {
-  return file.answered === file.total
-    ? `<span class="status-complete">${iconSvg("circle-check")} Complete</span>`
-    : `<span class="status-pending">${iconSvg("circle-dashed")} ${file.answered}/${file.total}</span>`;
+  if (file.answered === file.total) {
+    return `<span class="clarify-status-stack">` +
+      `<span class="status-complete">${iconSvg("circle-check")} Complete</span>` +
+      (file.applied ? `<span class="clarify-applied-badge">${iconSvg("circle-check")} Applied</span>` : "") +
+      `</span>`;
+  }
+  return `<span class="status-pending">${iconSvg("circle-dashed")} ${file.answered}/${file.total}</span>`;
 }
 
-function appliedCell(file) {
-  return file.applied
-    ? `<span class="clarify-applied-badge">${iconSvg("circle-check")} Applied</span>`
-    : '<button type="button" class="clarify-apply-btn">Apply Answer</button>';
-}
-
-function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
+function renderClarifyOverviewRows(tbody, files, emptyMessage) {
   tbody.innerHTML = "";
-  const colspan = showApplied ? 5 : 4;
   if (!files.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="${colspan}" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
+    tr.innerHTML = `<td colspan="4" class="empty-note">${escapeHtml(emptyMessage)}</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -908,17 +918,8 @@ function renderClarifyOverviewRows(tbody, files, emptyMessage, showApplied) {
     tr.innerHTML = `<td>${escapeHtml(file.name)}</td>` +
       `<td>${formatClarifyStartedAt(file.started_at)}</td>` +
       `<td>${findingsCell(file)}</td>` +
-      `<td>${statusCell(file)}</td>` +
-      (showApplied ? `<td>${appliedCell(file)}</td>` : "");
+      `<td>${statusCell(file)}</td>`;
     tr.addEventListener("click", () => openClarifyRowDetail(file));
-    if (showApplied && !file.applied) {
-      // This file's own row also offers a one-off Apply — same underlying `tempa
-      // clarify --apply` as the top Apply Answers button (it always applies every
-      // answered file's current answers, there's no way to scope it to just this one).
-      const applyBtn = tr.querySelector(".clarify-apply-btn");
-      applyBtn.disabled = state.clarifyRun.running;
-      applyBtn.addEventListener("click", (e) => { e.stopPropagation(); startClarifyRun("apply"); });
-    }
     tbody.appendChild(tr);
   }
 }
@@ -959,11 +960,38 @@ async function openClarifyRowDetail(file) {
 function renderClarifyOverview() {
   skipMinorFindingsToggle.checked = !!state.skipMinorFindings;
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
-    "No unanswered files.", false);
+    "No unanswered files.");
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
-    "No fully answered files yet.", true);
+    "No fully answered files yet.");
   setClarifyRunButtonsDisabled(state.clarifyRun.running);
+  renderPendingOverlayCard();
   renderImplementReadyBanner();
+}
+
+// "Pending resolutions" card: answered findings that aren't in the PRD yet. They don't
+// block clarifying (they're carried into every round as already-decided resolutions), so
+// this is informational — until the count passes clarify_overlay_warn_findings, at which
+// point it also points out that every evaluation is now carrying that much extra text.
+// Nothing is ever applied automatically; Apply Answers stays the user's call.
+function renderPendingOverlayCard() {
+  const overlay = state.clarifyPendingOverlay;
+  const threshold = state.clarifyOverlayWarnThreshold;
+  clarifyOverlayCard.classList.toggle("hidden", !overlay.findings);
+  if (!overlay.findings) return;
+  clarifyOverlayBadge.textContent = `${overlay.findings} pending`;
+  clarifyOverlayBadge.classList.remove("hidden");
+  const size = overlay.chars >= 1024 ? ` (~${Math.round(overlay.chars / 1024)} KB)` : "";
+  let text = `${overlay.findings} answered finding(s) across ${overlay.files} clarification ` +
+    `round(s)${size} aren't in the PRD yet. They're carried into every clarification round as ` +
+    "already-decided resolutions, so you can keep clarifying without applying. Click Apply " +
+    "Answers to write them in — required before Start Implementation.";
+  const warn = overlay.findings >= threshold;
+  if (warn) {
+    text += " That's a lot to carry — applying now keeps each evaluation cheaper and the PRD " +
+      "authoritative.";
+  }
+  clarifyOverlayCard.classList.toggle("warn", warn);
+  clarifyOverlayHint.textContent = text;
 }
 
 // Shared copy for state.implementReadiness (see _implement_readiness_status in
@@ -983,7 +1011,14 @@ function implementReadyMessage(ir) {
     "resolved during implementation.";
 }
 
+// The pending-overlay branch comes first when it's the only thing blocking: reporting a
+// findings count to someone whose latest round found none reads as "0 findings must be
+// resolved", which is both wrong and unactionable. Mirrors the server-side wording in
+// _handle_implement_run_start (dashboard_server.py).
 function implementBlockedMessage(ir) {
+  if (ir.pendingOverlay && ir.critical === 0 && ir.major === 0) {
+    return `${ir.pendingOverlay} answered finding(s) still need writing into the PRD — click Apply Answers.`;
+  }
   if (ir.requirement === "no_critical") {
     return `Still ${ir.critical} critical finding(s) that must be resolved.`;
   }
@@ -992,6 +1027,9 @@ function implementBlockedMessage(ir) {
 
 function implementBlockedToast(ir) {
   if (!ir.hasRun) return "Run clarification first.";
+  if (ir.pendingOverlay && ir.critical === 0 && ir.major === 0) {
+    return "Apply your answers to the PRD first — implementation reads the PRD, not the clarification files.";
+  }
   if (ir.requirement === "no_critical") return "There are still critical findings — resolve clarification first.";
   return "There are still critical/major findings — resolve clarification first.";
 }
@@ -1093,15 +1131,28 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
 });
 
 // Status snapshot shown above "Finalized Clarification" — see _clarify_finalize_status()
-// in dashboard_clarify_parse.py for the server-side source of truth this mirrors. This
-// used to also gate whether the button could be clicked at all (requiring a fresh
-// zero-critical evaluate on record); it no longer does — `clarify --finalize` now
-// resolves its own pre-existing backlog first (files answered-but-not-applied get
-// applied; files with unanswered findings get each one filled in with its own
-// recommendation, then applied) before its evaluate/apply loop starts, so it's safe
-// to start regardless of what state clarification is currently in. The checklist below
-// is purely informational now: it shows what the most recent evaluate pass found, not
-// a precondition.
+// in dashboard_clarify_parse.py for the server-side source of truth this mirrors. The
+// checklist below IS the precondition: the button stays disabled until every item here
+// is satisfied (a fresh evaluate on record, zero critical findings — or the Settings
+// override — see st.ready below and _handle_clarify_run_start in dashboard_server.py,
+// which enforces the same thing server-side).
+// The finalize checklist's last row: what Finalize would still have to do to the backlog
+// before/within its loop. Unanswered findings get filled in with their own recommendation;
+// everything already answered rides along as the pending overlay and is written into the
+// PRD by Finalize's single compaction pass at the end (see run_clarify_finalize).
+function finalizeBacklogLabel(hasUnanswered) {
+  const pending = state.clarifyPendingOverlay.findings;
+  if (hasUnanswered) {
+    return "Unanswered findings above will be filled in with their own recommendation " +
+      "before Finalize's loop starts";
+  }
+  if (pending > 0) {
+    return `${pending} already-decided resolution(s) will be carried into every evaluation and ` +
+      "written into the PRD in one pass at the end";
+  }
+  return "No pending backlog — the PRD already contains every recorded answer";
+}
+
 function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const st = state.clarifyFinalize;
   // Just the round count so far — manual clarification isn't bounded by Max Finalize
@@ -1126,10 +1177,24 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
     finalizeRoundProgress.classList.add("hidden");
   }
   const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
+  // The Settings override waives every requirement below, not just the critical-findings
+  // one — see _clarify_finalize_status in dashboard_clarify_parse.py, where `ready` is
+  // just `allowFinalizeWithCritical` once it's on. Reflect that here too: with it on,
+  // show every row as satisfied (bypassed) rather than leaving stale unchecked boxes next
+  // to an enabled button.
   renderGateChecklist(finalizeGateList, [
-    { ok: st.hasRun, label: "Clarification has been run at least once" },
-    { ok: st.lastAction === "evaluate",
-      label: "Most recent result comes from Start Clarification, not just Apply Answers" },
+    { ok: st.hasRun || st.allowFinalizeWithCritical,
+      label: st.hasRun
+        ? "Clarification has been run at least once"
+        : st.allowFinalizeWithCritical
+          ? "Clarification hasn't been run yet — allowed via the Settings override"
+          : "Clarification has been run at least once" },
+    { ok: st.lastAction === "evaluate" || st.allowFinalizeWithCritical,
+      label: st.lastAction === "evaluate"
+        ? "Most recent result comes from Start Clarification, not just Apply Answers"
+        : st.allowFinalizeWithCritical
+          ? "Most recent result isn't from Start Clarification — allowed via the Settings override"
+          : "Most recent result comes from Start Clarification, not just Apply Answers" },
     { ok: criticalOk,
       label: st.critical === 0
         ? "Most recent evaluation shows 0 critical findings"
@@ -1137,18 +1202,14 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
           ? `Most recent evaluation still shows ${st.critical} critical finding(s) — allowed via ` +
             "the Settings override"
           : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
-    { ok: true,
-      label: (hasUnanswered || hasUnapplied)
-        ? "Any unanswered/unapplied backlog above will be resolved automatically " +
-          "(unanswered findings filled in with their own recommendation) before Finalize's loop starts"
-        : "No unanswered/unapplied backlog — Finalize's loop can start right away" },
+    { ok: true, label: finalizeBacklogLabel(hasUnanswered) },
   ]);
-  // Only actually-in-progress runs disable this button now — the checklist above is
-  // informational, not a precondition (see the comment above this function). While a
+  // Disabled while a run is in progress OR the checklist above isn't fully satisfied yet
+  // (st.ready — see _clarify_finalize_status in dashboard_clarify_parse.py). While a
   // finalize run specifically is in progress, swap it for Stop Finalize entirely
   // (same Start/Stop toggle Implementation already has) rather than just disabling it.
   const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
-  finalizeClarifyBtn.disabled = runDisabled;
+  finalizeClarifyBtn.disabled = runDisabled || !st.ready;
   finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
   stopFinalizeClarifyBtn.classList.toggle("hidden", !finalizeRunning);
 
@@ -1161,9 +1222,11 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
     needsContinue ? "Continue Clarification" : "Start Clarification";
   if (!needsContinue) {
     finalizeGateHint.classList.add("hidden");
-  } else if (hasUnanswered || hasUnapplied) {
+  } else if (hasUnanswered) {
+    // Deliberately NOT `|| hasUnapplied`: saved-but-unapplied answers are carried into the
+    // next round as already-decided resolutions, so they're no reason to stop clarifying.
     finalizeGateHint.textContent =
-      "Answer the remaining findings or apply your saved answers before continuing clarification.";
+      "Answer the remaining findings before continuing clarification.";
     finalizeGateHint.classList.remove("hidden");
   } else if (st.critical > 0) {
     finalizeGateHint.textContent =
@@ -1182,17 +1245,17 @@ function setClarifyRunButtonsDisabled(disabled) {
   const hasUnanswered = state.clarifyUnanswered.some((f) => f.total > f.answered);
   const hasUnapplied = state.clarifyAnswered.some((f) => !f.applied);
   const needsContinue = st.hasRun && !st.ready;
-  const blockedByAnswers = needsContinue && (hasUnanswered || hasUnapplied);
+  // Only UNANSWERED findings block another round. Answered-but-unapplied ones don't:
+  // they're carried into the next evaluation as already-decided resolutions (see
+  // pending_resolutions in dashboard_clarify_parse.py), so requiring an apply pass first
+  // would just be a full PRD rewrite standing between the user and the next round.
+  // hasUnapplied is still computed — Apply Answers and the finalize checklist need it.
+  const blockedByAnswers = needsContinue && hasUnanswered;
   startClarifyBtn.disabled = disabled || blockedByAnswers;
-  startClarifyBtn.title = blockedByAnswers
-    ? "Answer the remaining findings or apply your saved answers first." : "";
+  startClarifyBtn.title = blockedByAnswers ? "Answer the remaining findings first." : "";
   applyAnswersBtn.disabled = disabled || !hasUnapplied;
   openUnansweredBtn.disabled = disabled || !hasUnanswered;
   renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
-  // Per-row "Apply Answer" buttons are (re)created by renderClarifyOverviewRows, which
-  // already stamps them with the disabled state current at render time — but a run can
-  // start/stop without the table re-rendering, so also sync any already-in-the-DOM ones.
-  clarifyAnsweredTbody.querySelectorAll(".clarify-apply-btn").forEach((btn) => { btn.disabled = disabled; });
 }
 
 function clarifyRunStatusLabel(mode) {
@@ -2352,6 +2415,8 @@ async function refreshSpecTree() {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
+      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
       state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       state.backendsStatus = data.backends || {};
@@ -2617,17 +2682,19 @@ async function saveClarifyFile() {
       ' finding(s), or switch them back to "Follow the recommendation".', { title: "Answers incomplete" });
     return;
   }
-  // Ask before saving, not after: applying re-runs an evaluate afterward (see
-  // _start_clarify_run's auto-chain in dashboard_runs.py), so it's worth knowing up
-  // front whether that longer round-trip is about to start. Cancel aborts the save
-  // entirely (the textarea edits stay in place, dirty), unlike "Save" which saves but
-  // skips applying.
+  // Plain Save is the primary action: saved answers are carried into the next
+  // clarification round as already-decided resolutions (see pending_resolutions in
+  // dashboard_clarify_parse.py). Save & Clarify does that same save and then jumps
+  // straight into the next Continue Clarification run, for anyone who wants to keep
+  // moving without an extra trip back to the overview. Cancel aborts the save
+  // entirely (the textarea edits stay in place, dirty).
   const choice = await threeWayModal(
-    "Apply these answers to the PRD right after saving?",
-    { title: "Apply Answers", extraLabel: "Save", okLabel: "Save & Apply" }
+    "Save these answers now? They'll be carried into the next clarification round even " +
+    "before they're written into the PRD. Save & Clarify also starts that next round right away.",
+    { title: "Save Answers", extraLabel: "Save & Clarify", okLabel: "Save" }
   );
   if (choice === "cancel") return;
-  const applyAfterSave = choice === "ok";
+  const continueAfterSave = choice === "extra";
   saveBtn.disabled = true;
   try {
     const res = await fetch("/api/clarify/save", {
@@ -2641,9 +2708,9 @@ async function saveClarifyFile() {
     updateToolbar();
     toast(`Saved ${state.selectedClarifyPath} (${data.answered}/${data.total} answered)`);
     await refreshClarifyList();
-    if (applyAfterSave) {
+    if (continueAfterSave) {
       await selectTop("clarification");
-      startClarifyRun("apply");
+      startClarifyRun("run");
     }
   } catch (e) {
     toast("Network error while saving.", true);
@@ -2664,6 +2731,8 @@ async function refreshClarifyList() {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
+      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
       state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();
@@ -2706,6 +2775,8 @@ $("refreshBtn").addEventListener("click", async () => {
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;
+      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
+      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
       state.skipMinorFindings = !!data.clarify.skipMinorFindings;
       state.principlesSet = !!(data.principles && data.principles.set);
       renderSidebar();

@@ -4,7 +4,7 @@
     --text: #1f2328; --muted: #6b7280; --accent: #2563eb; --accent-soft: #e8f0fe;
     --hover: #eef1f5; --sel: #dbe7ff; --sel-text: #16418f;
     --code-bg: #f5f6f8; --danger: #b91c1c; --ok: #15803d;
-    --critical: #b91c1c; --major: #c2410c; --minor: #a16207;
+    --critical: #dc2626; --major: #946f08; --minor: #57606a;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -282,8 +282,14 @@
   .clarify-overview-pane tbody tr:hover td { background: var(--hover); }
   .clarify-overview-pane .count-ok { color: var(--ok); }
   .clarify-overview-pane .count-pending { color: var(--major); font-weight: 600; }
-  .clarify-overview-pane .status-complete { color: var(--ok); font-weight: 600; }
-  .clarify-overview-pane .status-pending { color: var(--major); font-weight: 600; }
+  .clarify-overview-pane .status-complete, .clarify-overview-pane .status-pending {
+    display: inline-flex; align-items: center; gap: 4px; font-weight: 600;
+  }
+  .clarify-overview-pane .status-complete .icon-svg, .clarify-overview-pane .status-pending .icon-svg {
+    width: 14px; height: 14px; vertical-align: 0;
+  }
+  .clarify-overview-pane .status-complete { color: var(--ok); }
+  .clarify-overview-pane .status-pending { color: var(--major); }
   .findings-icon { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px;
     cursor: default; }
   .findings-icon-glyph { line-height: 1; }
@@ -297,11 +303,10 @@
   .clarify-run-btn:disabled { opacity: 0.5; cursor: default; }
   .clarify-run-btn.secondary { background: var(--panel); color: var(--text); border-color: var(--border-strong); }
   .clarify-run-btn.secondary:hover:not(:disabled) { opacity: 1; border-color: var(--accent); }
-  .clarify-apply-btn { padding: 3px 10px; font-size: 0.78rem; font-weight: 600;
-    background: var(--accent); color: #fff; border-color: var(--accent); }
-  .clarify-apply-btn:hover:not(:disabled) { opacity: 0.9; }
-  .clarify-apply-btn:disabled { opacity: 0.5; cursor: default; }
-  .clarify-applied-badge { color: var(--ok); font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+  .clarify-status-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .clarify-applied-badge { display: inline-flex; align-items: center; gap: 4px; color: var(--ok);
+    font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+  .clarify-applied-badge .icon-svg { width: 13px; height: 13px; vertical-align: 0; }
   .clarify-log { max-width: 860px; margin-bottom: 24px; border: 1px solid var(--border-strong);
     border-radius: 8px; background: var(--panel); }
   .clarify-log summary { cursor: pointer; padding: 9px 14px; font-weight: 600; font-size: 0.88rem;
@@ -331,6 +336,11 @@
   .gate-panel { max-width: 860px; margin-bottom: 18px; border: 1px solid var(--border-strong);
     border-radius: 8px; background: var(--panel); padding: 14px 16px; }
   .gate-panel h3 { margin: 0 0 10px; font-size: 0.88rem; }
+  /* Pending-resolution overlay past clarify_overlay_warn_findings — a nudge to Apply
+     Answers, not an error: the state is legitimate, just increasingly expensive. */
+  .gate-panel.warn { border-color: var(--danger); }
+  .gate-panel.warn .gate-hint { color: var(--danger); }
+  .gate-panel > .gate-hint:last-child { margin-bottom: 0; }
   .clarify-round-badge { font-weight: 400; color: var(--muted); font-size: 0.8rem;
     margin-left: 6px; }
   .gate-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }

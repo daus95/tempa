@@ -10,6 +10,22 @@ once the first tagged release is cut.
 
 ### Added
 
+- **Answers are now carried into the next clarification round without applying them first**
+  ("pending resolutions overlay"). Every answered finding whose answer isn't in the PRD yet
+  is embedded in the evaluation prompt as an already-decided resolution, with rules the
+  agent must follow: don't re-raise settled points, a later round supersedes an earlier one,
+  and report contradictions between decisions as new findings. This removes the full
+  PRD-rewriting agent session that used to be mandatory between every pair of clarification
+  rounds.
+- **"Pending resolutions" card on the Clarification page**, showing how many answered
+  findings (across how many rounds, and roughly how much text) are riding along unapplied.
+  Past `clarify_overlay_warn_findings` (new config.json key, default `25`) it also suggests
+  applying. Nothing is ever applied automatically.
+- **Start Implementation now requires every recorded answer to have been applied to the
+  PRD.** Implementation reads the PRD documents, so a decision that only exists in a
+  clarification file would be invisible to it. Enforced server-side, and at every
+  `implementation_start_requirement` level including `"none"` — with a message naming the
+  pending count when it's the only thing blocking.
 - **Unanswered/Fully answered panels now update live during a Finalized Clarification
   run**, right after each round's evaluate or apply step succeeds, instead of only once
   the whole (possibly multi-round) run finishes.
@@ -25,6 +41,33 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **Continue Clarification is no longer blocked by unapplied answers.** Only findings you
+  haven't answered yet hold up the next round. Applying is now something you do when you
+  want the PRD documents themselves brought up to date — and once, before starting
+  implementation.
+- **Save is the primary action in the answer dialog**, with Save & Clarify as the secondary
+  choice (they were the other way round, and the secondary choice used to apply to the PRD —
+  it now starts the next Continue Clarification round instead). Saving alone is enough to
+  keep clarifying.
+- **Critical/major/minor finding colors are now clearly distinct** (red/yellow/gray) instead
+  of three similarly-dark red-orange-brown shades that were hard to tell apart at a glance,
+  especially at icon size.
+- **The Fully Answered table no longer has a per-file Apply column/button.** Applying is done
+  from the **Apply Answers** button at the top of the page, which already applies every ready
+  file in one click — the per-row button was a redundant, easy-to-miss way to do the same
+  thing one file at a time. A file's Status cell now shows an **Applied** badge under
+  **Complete** once it's been applied.
+- **`clarify --finalize` no longer applies after every round.** It now loops
+  evaluate → auto-answer until an evaluation reports no critical/major findings, then writes
+  the whole accumulated set of answers into the PRD in a single apply ("compaction"), then
+  runs one verification evaluation over the result. A dirty verification re-enters the loop
+  and compacts a second time; beyond that the run stops and asks for a human. The
+  no-progress convergence counter resets after each compaction, since the PRD it was
+  measuring has just been rewritten. **Stopping a finalize run mid-way now leaves the
+  answers unapplied rather than a partially-updated PRD.**
+- **The dashboard no longer auto-runs an evaluation after Apply Answers.** That chain existed
+  because continuing was blocked until everything was applied; it isn't anymore, so the extra
+  evaluate session is pure cost. Apply still drains its full backlog in one click.
 - **`finalize_no_progress_rounds` now defaults to `5`** (was `2`), giving Finalized
   Clarification more attempts before it concludes the remaining findings need a human
   decision. Existing config.json files keep whatever value they already have.
@@ -32,6 +75,19 @@ once the first tagged release is cut.
   run limits.** Like "Max Finalize Clarification Round", the new no-progress limit is read
   once when the finalize run starts, so changing either one mid-run now says so and names
   each changed setting.
+- **"Finalized Clarification" is gated again on a fresh, zero-critical evaluation**
+  — reversing part of `0.4.5`. The button (Home and Clarification Overview) and
+  `POST /api/clarify/run` (mode=`finalize`) now require: clarification has run at least
+  once, the most recent result came from Start/Continue Clarification (not just Apply
+  Answers), and that result shows 0 critical findings. `0.4.5`'s backlog auto-resolution
+  (unanswered findings filled in with their own recommendation before Finalize's loop
+  starts) is unchanged — only the button/endpoint gate that `0.4.5` turned informational
+  is being restored.
+- **Settings' "Allow finalizing with critical findings" now waives every readiness
+  requirement above, not just the critical-findings one.** With it on, Finalized
+  Clarification is clickable even before clarification has ever been run — its own
+  evaluate/answer/apply loop establishes and then resolves the finding set unsupervised,
+  so there's nothing left to check up front.
 
 ### Fixed
 

@@ -574,3 +574,26 @@ def test_workspace_is_writable_read_only_dir_returns_false(tmp_path):
         assert tempa_config.workspace_is_writable(str(root)) is False
     finally:
         root.chmod(0o700)  # restore so tmp_path cleanup can remove it
+
+
+# ---------------------------------------------------------------------------
+# get_clarify_overlay_warn_findings — when the dashboard suggests compacting the
+# pending-resolution overlay into the PRD (warning only, never auto-applied).
+# ---------------------------------------------------------------------------
+
+def test_clarify_overlay_warn_findings_defaults_when_absent():
+    default = tempa_config.DEFAULT_CONFIG["clarify_overlay_warn_findings"]
+    assert tempa_config.get_clarify_overlay_warn_findings({}) == default
+
+
+def test_clarify_overlay_warn_findings_honors_a_positive_int():
+    assert tempa_config.get_clarify_overlay_warn_findings({"clarify_overlay_warn_findings": 4}) == 4
+
+
+@pytest.mark.parametrize("value", [0, -1, "x", True, None])
+def test_clarify_overlay_warn_findings_rejects_non_positive_and_junk(value):
+    # True is an int in Python but is never a meaningful threshold — _get_positive_number
+    # excludes bools explicitly.
+    default = tempa_config.DEFAULT_CONFIG["clarify_overlay_warn_findings"]
+    assert tempa_config.get_clarify_overlay_warn_findings(
+        {"clarify_overlay_warn_findings": value}) == default

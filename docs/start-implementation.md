@@ -9,6 +9,32 @@ tempa implement --replan        # force a fresh plan first, then continue implem
 tempa implement --features 4    # cap at 4 features per session (overrides config)
 ```
 
+## Prerequisite: the PRD must be current
+
+The dashboard's **Start Implementation** button is gated (client-side *and* server-side in
+`_handle_implement_run_start`) on two things beyond the configured
+`implementation_start_requirement`:
+
+- Clarification has been run at least once.
+- **Every recorded clarification answer has been applied to the PRD** — i.e. the pending
+  resolution overlay is empty (see
+  [clarify-modes.md](clarify-modes.md#pending-resolutions-overlay)).
+
+That second condition holds at **every** requirement level, including `"none"`. The setting
+expresses how strict to be about *open questions*; this is a different thing. Implementation
+reads the PRD/spec documents, so a decision recorded in a clarification file but never
+applied is invisible to it — the epic would be built from a specification the user has
+already decided against. Since clarification no longer applies after every round, this gate
+is the only thing left forcing the documents to be current before any code is written.
+
+When it's the only thing blocking, the button and the 409 response say exactly that
+("N answered clarification finding(s) … haven't been written into the PRD yet"), and
+**Apply Answers** clears it — a no-op apply on an already-matching PRD is cheap and simply
+re-stamps `clarify_applied_hashes`. There is deliberately no override.
+
+Running `tempa implement` from the CLI bypasses this (the command itself has no awareness of
+clarification state), so apply first when driving it by hand.
+
 ## Flow
 
 When run, the harness first checks `config.json`: if there's no task yet (epic/feature) —

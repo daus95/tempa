@@ -17,6 +17,7 @@ from dashboard_clarify_parse import (
     _clarify_finalize_status,
     _implement_readiness_status,
     _latest_evaluation_findings,
+    pending_overlay_stats,
 )
 from dashboard_config import (
     _load_dashboard_config,
@@ -58,8 +59,13 @@ def spec_guide_page() -> str:
     return html.replace("/*__CSS__*/", css)
 
 
-def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
+def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
                   clarify_answered: list[dict], initial_view: str) -> str:
+    """`clar_dir` is only needed for the pending-overlay stats, which have to be computed
+    here rather than derived from `clarify_unanswered`/`clarify_answered`: those carry
+    per-file counts, while the overlay is a per-FINDING set (a partially-answered file
+    contributes its answered items). Computing it from the same source as /api/tree is what
+    keeps the first paint and the first refresh from disagreeing."""
     tree_json = json.dumps(spec_tree, ensure_ascii=False)
     unanswered_json = json.dumps(clarify_unanswered, ensure_ascii=False)
     answered_json = json.dumps(clarify_answered, ensure_ascii=False)
@@ -79,14 +85,21 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
     max_round = dashboard_config.get("max_clarification_run") or 0
     finalize_round = dashboard_config.get("last_finalize_round") or 0
     allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
+    overlay = pending_overlay_stats(clar_dir, dashboard_config.get("clarify_applied_hashes", {}) or {})
+    pending_overlay_json = json.dumps(overlay, ensure_ascii=False)
+    overlay_warn_threshold_json = json.dumps(
+        tempa_config.get_clarify_overlay_warn_findings(dashboard_config)
+    )
     clarify_finalize_json = json.dumps(
         _clarify_finalize_status(
-            latest_findings, last_action, round_, max_round, allow_finalize_with_critical, finalize_round),
+            latest_findings, last_action, round_, max_round, allow_finalize_with_critical,
+            finalize_round, overlay["findings"]),
         ensure_ascii=False,
     )
     implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
     implement_readiness_json = json.dumps(
-        _implement_readiness_status(latest_findings, last_action is not None, implementation_requirement),
+        _implement_readiness_status(
+            latest_findings, last_action is not None, implementation_requirement, overlay["findings"]),
         ensure_ascii=False,
     )
     backends_status_json = json.dumps(
@@ -108,6 +121,8 @@ def render_page(prd_dir: Path, spec_tree: dict, clarify_unanswered: list[dict],
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
         .replace("/*__IMPLEMENT_READINESS__*/null", implement_readiness_json)
+        .replace("/*__CLARIFY_PENDING_OVERLAY__*/null", pending_overlay_json)
+        .replace("/*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null", overlay_warn_threshold_json)
         .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)
         .replace("/*__SKIP_MINOR_FINDINGS__*/null", skip_minor_findings_json)
     )

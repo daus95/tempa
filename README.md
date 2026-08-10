@@ -322,13 +322,20 @@ database) — upload them here via **Add File**/**Add Folder**, or copy them str
 **Start Clarification** runs one evaluation pass and lists every finding (critical/major/
 minor), grouped by file, under **Clarification** in the sidebar. Open a file to answer its
 findings inline: for each finding, choose **Follow the recommendation** or **I'll write my
-own answer** (a text box appears), then **Save**. Once a file is fully answered, click
-**Apply Answers** to write those resolutions back into the PRD/spec — applying automatically
-chains straight into a fresh evaluation pass afterward, so you don't have to trigger it
-yourself. Once clarification has run at least once, the button relabels to **Continue
-Clarification** (with a hint explaining what's still blocking it, if anything is) for the
-rest of this loop. This loop (evaluate → answer → apply → re-evaluate) is the dashboard
-version of Workflow Step 3 below.
+own answer** (a text box appears), then **Save**. Once clarification has run at least once,
+the button relabels to **Continue Clarification** (with a hint explaining what's still
+blocking it, if anything is) for the rest of this loop.
+
+**You don't have to apply before continuing.** Saved answers are carried into every
+subsequent round as already-decided resolutions — the **Pending resolutions** card shows how
+many are waiting — so the loop is simply evaluate → answer → evaluate, with no full PRD
+rewrite in between. Only findings you haven't answered yet hold up the next round.
+
+**Apply Answers** writes those resolutions into the PRD/spec whenever you want the documents
+themselves brought up to date. It's required once, before **Start Implementation** in Step 3:
+implementation reads the PRD, so decisions living only in a clarification file would be
+invisible to it. See
+[docs/clarify-modes.md](docs/clarify-modes.md#pending-resolutions-overlay) for the details.
 
 ![Tempa dashboard Clarification page, showing the Finalize readiness checklist and the Unanswered/Fully answered file tables](docs/assets/clarification.webp)
 
@@ -338,25 +345,27 @@ recommended answers can still be off. Important decisions (application purpose, 
 process, tech stack, etc.) need your direct input first, so the PRD starts off pointed in
 the right direction.
 
-**Finalized Clarification** automates the rest of that loop (evaluate + apply, repeating
-until clean) — click it to let Tempa finish off any remaining major/minor findings on its
-own. It's clickable whenever no clarify run is already in progress; the **Finalize
-readiness** panel above it is *informational*, telling you how much Finalize will have to
-do unsupervised rather than blocking it:
+**Finalized Clarification** automates the rest of that loop (evaluate + answer, repeating
+until clean, then one apply and one verification pass) — click it to let Tempa finish off any
+remaining major/minor findings on its own. It only becomes clickable once the **Finalize
+readiness** panel above it is fully satisfied (and no clarify run is already in progress):
 
 - Clarification has been run at least once.
 - The latest result came from **Start Clarification** itself, not just **Apply Answers** —
   applying edits the PRD, not the finding record, so a fresh evaluation is what actually
   confirms nothing critical is left.
-- That evaluation shows 0 critical findings. Starting Finalize with criticals still open
-  means its automation resolves them for you, unattended — which is why the readiness panel
-  calls it out. Settings' **Allow finalizing with critical findings** switch changes how
-  this line reads (`allow_finalize_with_critical` in
-  [docs/config-json.md](docs/config-json.md)); it doesn't change whether the button works.
-- Whether any unanswered/unapplied backlog is left. Finalize clears it first — unanswered
-  findings get filled in with their own recommendation, then everything ready is applied —
-  before its evaluate → apply loop starts, so a backlog isn't something you have to clean up
-  by hand beforehand.
+- That evaluation shows 0 critical findings.
+- What backlog is left. Unanswered findings get filled in with their own recommendation
+  before the loop starts; anything already answered is carried into every round and written
+  into the PRD by the single apply at the end. This line is informational only, not part of
+  the gate above — a backlog isn't something you have to clean up by hand beforehand.
+
+Settings' **Allow finalizing with critical findings** switch
+(`allow_finalize_with_critical` in [docs/config-json.md](docs/config-json.md)) waives all
+three requirements above, not just the critical-findings one — with it on, **Finalized
+Clarification** is clickable even before clarification has ever been run once, since its
+own evaluate/answer/apply loop is what establishes and then resolves the finding set,
+unsupervised.
 
 **When to switch to Finalize:** after a few manual rounds, once you notice the system's
 recommended answers over the last 2 iterations are already consistent/accurate with what you
@@ -369,7 +378,7 @@ may still remain, and that's **fine**: they'll be resolved anyway during impleme
 (Step 3 below). So once it finishes, you can move straight on to implementation without
 chasing down remaining minor findings.
 
-This can take a while — Finalize repeats the evaluate → apply cycle on its own until
+This can take a while — Finalize repeats the evaluate → answer cycle on its own until
 clean, which can mean several rounds depending on how much the PRD still needs resolving.
 Expand the **Clarification log** panel to watch it live (running status plus streamed
 console output) so you can tell it's still working rather than stuck. Unlike
@@ -400,7 +409,11 @@ findings* (majors carried into implementation) or to *no condition* at all — s
 `implementation_start_requirement` in [docs/config-json.md](docs/config-json.md). Either
 way, clarification must have been run at least once: a workspace with no clarification file
 yet has zero findings simply from having nothing to count, which would otherwise satisfy
-every level trivially. The requirement is enforced server-side too, not just by a greyed-out
+every level trivially. **Every answer must also have been applied to the PRD** — implementation
+reads the PRD documents, so a decision that only exists in a clarification file would be
+invisible to it. That condition holds at every setting level, including *no condition*; if
+it's the only thing blocking, the button explains exactly that and **Apply Answers** clears
+it. The requirement is enforced server-side too, not just by a greyed-out
 button, so it holds for the dashboard regardless of what the page shows. The
 **Implementation** section's
 **Status** tab shows live epic/feature progress and QA results; **Log** shows the raw
@@ -523,10 +536,11 @@ tempa clarify          # evaluate: system writes questions + recommended answers
 
 Once the evaluation finishes, Tempa opens the **clarification-answer web UI** on the result
 file so you can answer right there (add `--noui` to skip it). Clicking **Save** asks whether
-to apply those answers to the PRD right away (**Save & Apply**) or just save them for now
-(plain **Save**) — applying automatically chains straight into a fresh evaluation pass
-afterward, the same as the dashboard's **Apply Answers** button (see
-[Dashboard Step 2 — Clarification](#step-2--clarification) above).
+to also start the next clarification round right away (**Save & Clarify**) or just save the
+answers for now (plain **Save**) — either way they're carried into the next round; **Save &
+Clarify** just skips the trip back to the overview to kick it off. Writing the answers into
+the PRD itself is a separate step, done from the dashboard's **Apply Answers** button (see
+[Dashboard Step 2 — Clarification](#step-2--clarification) above) or `tempa clarify --apply`.
 
 Prefer editing the markdown file by hand instead? That still works: edit the result file
 yourself, then run `tempa clarify --apply` to apply it back into the PRD — run this way,
