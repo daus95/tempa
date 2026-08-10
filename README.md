@@ -171,8 +171,8 @@ Implementation runs on OpenAI Codex CLI:
 Whichever you use must already be installed, on `PATH`, and logged in yourself — Tempa only
 invokes it, it never manages credentials for you.
 
-Set it per stage from the dashboard's **Settings** page (a dropdown next to each stage's
-model field), or from the CLI:
+Set it per stage from the dashboard's **Settings → AI Models** tab (a dropdown next to each
+stage's model field), or from the CLI:
 
 ```bash
 tempa set-backend --clarify claude --plan copilot --implement codex
@@ -196,10 +196,18 @@ stage's backend changes mid-epic and the exact reasoning-effort levels per backe
 see [docs/ai-models.md](docs/ai-models.md).
 
 Not sure which of the three are actually usable on this machine? The dashboard's Home page
-and Settings page both show a live ✅/⬜ **CLI backend availability** checklist — installed
-on `PATH` and able to write to the current workspace — with a **Detect CLI Backends** button
-in Settings to re-check after installing or logging into one. See
+and Settings → **AI Models** tab both show a live ✅/⬜ **CLI backend availability** checklist
+— installed on `PATH` and able to write to the current workspace — with a **Detect CLI
+Backends** button there to re-check after installing or logging into one. See
 [docs/cli-availability.md](docs/cli-availability.md).
+
+The Settings page is organized into five tabs: **AI Models** (backend/model/reasoning effort
+per stage), **Runs** (run limits, retry waits and poll interval), **Guardrails** (what
+clarification findings may block Finalized Clarification and Start Implementation),
+**Notifications** (email alerts) and **Maintenance** (updates, restart server). One **Save
+Settings** button at the bottom writes every tab at once, and it stays visible while you
+scroll — it tells you when there are unsaved changes, including on a tab you're not looking
+at.
 
 ---
 
@@ -278,12 +286,13 @@ nothing injected. Full reference: [docs/architecture-principles.md](docs/archite
 
 ### Updates
 
-Settings has an **Updates** card showing your installed version against the latest published
-GitHub release. Click **Check for Updates** to refresh that comparison, and — only when a
-newer release actually exists — **Update Now** to download and apply it in place, no terminal
-needed. After a successful update, restart the running `tempa dashboard`/`tempa implement`
-process (not just reload this page) so it picks up the new code; the dashboard tells you this
-explicitly once the update finishes. Full reference: [docs/updates.md](docs/updates.md).
+Settings → **Maintenance** has an **Updates** card showing your installed version against the
+latest published GitHub release. Click **Check for Updates** to refresh that comparison, and
+— only when a newer release actually exists — **Update Now** to download and apply it in
+place, no terminal needed. After a successful update, restart the running `tempa
+dashboard`/`tempa implement` process (not just reload this page) so it picks up the new
+code; the dashboard tells you this explicitly once the update finishes. Full reference:
+[docs/updates.md](docs/updates.md).
 
 ### Step 1 — Upload Specification
 
@@ -371,7 +380,7 @@ readiness** panel above it is fully satisfied (and no clarify run is already in 
   into the PRD by the single apply at the end. This line is informational only, not part of
   the gate above — a backlog isn't something you have to clean up by hand beforehand.
 
-Settings' **Allow finalizing with critical findings** switch
+Settings → Guardrails tab → **Allow finalizing with critical findings** switch
 (`allow_finalize_with_critical` in [docs/config-json.md](docs/config-json.md)) waives all
 three requirements above, not just the critical-findings one — with it on, **Finalized
 Clarification** is clickable even before clarification has ever been run once, since its
@@ -415,8 +424,8 @@ Once the most recent clarification evaluation satisfies the configured requireme
 **Start Implementation** unlocks (on the Home page, the **Clarification** overview, and the
 **Implementation** section) — click it to run the same automated plan → implement → QA loop
 as `tempa implement`. By default that requirement is **no critical and no major findings**,
-but Settings' **Start Implementation requires** control can relax it to *no critical
-findings* (majors carried into implementation) or to *no condition* at all — see
+but Settings → Guardrails tab → **Start Implementation requires** can relax it to *no
+critical findings* (majors carried into implementation) or to *no condition* at all — see
 `implementation_start_requirement` in [docs/config-json.md](docs/config-json.md). Either
 way, clarification must have been run at least once: a workspace with no clarification file
 yet has zero findings simply from having nothing to count, which would otherwise satisfy
@@ -595,7 +604,7 @@ short delay (5 minutes by default), then retries the interrupted epic/QA automat
 the same way it waits out a usage limit (30 minutes by default). Since the epic being
 worked on is left resumable, the retry continues where it left off instead of starting the
 epic over. These wait durations, along with the agent runner's poll interval, are
-configurable from dashboard Settings' "Retries & Timing" card.
+configurable from dashboard Settings → Runs tab → "Retries & Timing" card.
 
 Before that retry resumes, Tempa also resets any epic the interrupted session left marked
 `failed` in `config.json` back to `pending` — exactly what `tempa implement --reset-failed`
@@ -646,9 +655,9 @@ recovering from problems, manual verification): see
   differentiated per stage, default table, how to change them:
   [docs/ai-models.md](docs/ai-models.md)
 - **CLI Backend Availability** — how the dashboard's ✅/⬜ readiness checklist (Home +
-  Settings) is computed, what "ready" means, and the **Detect CLI Backends** button:
+  Settings → AI Models) is computed, what "ready" means, and the **Detect CLI Backends** button:
   [docs/cli-availability.md](docs/cli-availability.md)
-- **Checking for Updates** — how the Settings page's Updates card (and the CLI equivalents)
+- **Checking for Updates** — how the Settings page's Maintenance tab (and the CLI equivalents)
   check and apply new releases, and why a restart is required afterward:
   [docs/updates.md](docs/updates.md)
 - **Command Reference** — full list of every command:

@@ -1,13 +1,13 @@
 # Checking for Updates
 
 See [README.md](../README.md) for a summary. This document explains how to check for and
-apply Tempa updates — both the dashboard's **Settings → Updates** card and the CLI
+apply Tempa updates — both the dashboard's **Settings → Maintenance tab → Updates** card and the CLI
 equivalents (`tempa version`, `tempa check-update`, `tempa update`) — and what has to happen
 afterward for the update to actually take effect.
 
 ## Where it's shown
 
-- **Settings page → Updates card** — shows the installed version against the latest
+- **Settings → Maintenance tab → Updates card** — shows the installed version against the latest
   published GitHub release, with a **Check for Updates** button and, only when a newer
   release actually exists, an **Update Now** button.
 - **CLI** — `tempa version`, `tempa check-update`, `tempa update [--yes]` do the same three
@@ -51,7 +51,7 @@ map these live in:
   query GitHub's latest-release API. Shared by both the CLI and the dashboard.
 - `tempa_commands.run_update()` — the CLI's confirm → download → extract → copy-over flow
   behind `tempa update`.
-- `GET /api/update/status` (`dashboard_server.py`) — what the Settings page's Updates card
+- `GET /api/update/status` (`dashboard_server.py`) — what the Settings page's Maintenance tab
   calls to compare installed vs. latest.
 - `POST /api/update/run` — runs `tempa.py update --yes` as a subprocess rather than calling
   `run_update()` in-process, so a failed update can't take the dashboard server down with it.

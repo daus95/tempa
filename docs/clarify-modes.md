@@ -245,11 +245,11 @@ whole PRD *and* was handed the entire overlay, which is exactly what the apply h
 Evaluate rounds themselves never resume — a fresh read of the PRD every round is what makes
 them trustworthy.
 
-If `finalize_no_progress_rounds` (default `5`, dashboard Settings' "Max Finalize No-Progress
-Round") rounds in a row fail to reduce the critical+major count, the loop stops on its own
-instead of running to `max_clarification_run` — those findings likely need a human decision
-(`tempa answer`) rather than more automated answering. Raise that setting if you'd rather the
-automation kept trying for longer. The counter resets after a compaction: the PRD has just
+If `finalize_no_progress_rounds` (default `5`, dashboard Settings → Runs tab → "Max Finalize
+No-Progress Round") rounds in a row fail to reduce the critical+major count, the loop stops
+on its own instead of running to `max_clarification_run` — those findings likely need a
+human decision (`tempa answer`) rather than more automated answering. Raise that setting if
+you'd rather the automation kept trying for longer. The counter resets after a compaction: the PRD has just
 been rewritten, so a count from before it says nothing about progress.
 
 The verification round is a full evaluation and counts as a normal round — it increments

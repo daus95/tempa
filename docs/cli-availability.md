@@ -1,9 +1,9 @@
 # CLI Backend Availability
 
 See [README.md](../README.md) for a summary. This document explains the dashboard's **CLI
-backend availability** check — the ✅/⬜ checklist shown on the Home page and the Settings
-page's AI Backend & Model section — what "ready" actually means, where it's shown, and how
-it's computed.
+backend availability** check — the ✅/⬜ checklist shown on the Home page and on
+Settings → AI Models tab → AI Backend & Model — what "ready" actually means, where it's
+shown, and how it's computed.
 
 ## What "ready" means
 
@@ -34,11 +34,12 @@ configured `implement`-stage backend end-to-end (a real Write/Read/Delete test),
   working-folder path, so availability is visible as soon as a workspace is open. Before a
   workspace is open (or right after `tempa close-folder`), all three show "no workspace open
   yet" instead of a writability verdict.
-- **Settings page** — the same checklist appears at the top of **AI Backend & Model**, above
-  the three per-stage backend dropdowns (Clarification / Planning / Implementation). Any
+- **Settings page** — the same checklist appears on the **AI Models** tab, at the top of
+  **AI Backend & Model**, above the four per-stage backend dropdowns (Clarifications /
+  Clarify — Apply / Auto-Answer / Planning / Implementation). Any
   backend that isn't ready is also flagged inline in each dropdown's option label (e.g.
   `GitHub Copilot CLI (not ready)`), so it's visible right where you're choosing.
-- **Detect CLI Backends button** — next to the Settings checklist, this re-runs both checks
+- **Detect CLI Backends button** — next to that checklist, this re-runs both checks
   on demand and updates the checklist and dropdown labels immediately, without reloading the
   rest of the Settings form (so any unsaved model/effort edits aren't lost). Use it right
   after installing a CLI, logging into one, or fixing the workspace folder's permissions.

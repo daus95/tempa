@@ -212,7 +212,7 @@ isn't safe:
 A successful reorder resets the epic back to `pending` (dropping out of the "resume any
 `on_progress` epic first" priority — see Epic Status Lifecycle above — so the promoted
 dependency actually goes next) and logs what happened; a new `implementation_auto_reordered`
-email alert event fires too (dashboard Settings → notifications), purely informational.
+email alert event fires too (dashboard Settings → Notifications tab), purely informational.
 
 This operates at the epic level only: the whole named epic gets fully implemented (every
 feature in it) before the stuck epic resumes, even if only one of its features was actually

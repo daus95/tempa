@@ -432,7 +432,6 @@
   .settings-checkbox-name { flex: 1 1 auto; min-width: 0; font-weight: 600; font-size: 0.89rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .settings-event-actions { display: flex; gap: 8px; margin: 0 0 10px; }
   .settings-event-actions .clarify-run-btn { padding: 5px 9px; font-size: 0.82rem; }
-  @media (max-width: 620px) { .settings-checkbox-group { grid-template-columns: 1fr; } }
   .principles-editor { width: 100%; min-height: 340px; resize: vertical; padding: 12px 14px;
     font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace; tab-size: 4;
     border: 1px solid var(--border-strong); border-radius: 6px;
@@ -444,6 +443,71 @@
   .settings-update-info { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
   .settings-update-info span:last-child { color: var(--muted); font-size: 0.85rem; }
   .settings-update-actions { display: flex; align-items: center; gap: 10px; }
+
+  /* ---- settings page: tabbed layout ----
+     Same idiom as .impl-pane: the pane itself never scrolls (overriding .pane's
+     overflow:auto) so the header, the tab bar and the Save bar stay pinned while the active
+     .tab-panel is the scroll container. Scoped to a modifier class rather than baked into
+     .settings-pane because #principlesPane shares that class and genuinely wants the
+     pane-scrolls behavior — its textarea has no inner scroller of its own. */
+  .settings-pane-tabbed { padding: 20px clamp(16px, 3vw, 36px) 0; display: flex;
+    flex-direction: column; height: 100%; overflow: hidden; box-sizing: border-box; }
+  .settings-pane-tabbed > .settings-header { flex: none; margin-bottom: 16px; }
+  .settings-pane-tabbed > .tab-bar { flex-wrap: wrap; width: 100%; max-width: 720px;
+    margin-left: auto; margin-right: auto; }
+  /* Bottom breathing room lives inside the scroller — on the pane it would be dead space
+     below the pinned Save bar (same reason as #implStatusPanel above). */
+  .settings-pane-tabbed > .tab-panel { padding-bottom: 24px; }
+  /* Reads as a bar of its own, so the content scrolling past behind it doesn't look like
+     it continues below the Save button. */
+  .settings-pane-tabbed > .settings-actions { flex: none; width: 100%; padding: 12px 0;
+    border-top: 1px solid var(--border); background: var(--bg); }
+  /* Amber dot rather than amber text: --major isn't redefined for dark mode, so as body
+     text it lands at ~3.3:1 on the dark background. As a 7px indicator that's fine. */
+  .settings-dirty-hint { display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text); font-size: 0.88rem; font-weight: 600; }
+  .settings-dirty-hint::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--major); }
+  .settings-muted-hint { color: var(--muted); font-size: 0.88rem; }
+
+  /* Long field descriptions keep their first sentence inline and park the rest here, so the
+     controls aren't buried under prose for someone who already knows what the field does. */
+  .settings-more { max-width: 640px; margin: -2px 0 8px; }
+  .settings-more > summary { display: inline-flex; align-items: center; gap: 4px;
+    width: fit-content; cursor: pointer; list-style: none; color: var(--accent);
+    font-size: 0.82rem; font-weight: 600; }
+  .settings-more > summary::-webkit-details-marker { display: none; }
+  .settings-more > summary::before { content: "\25B8"; font-size: 0.75em; }
+  .settings-more[open] > summary::before { content: "\25BE"; }
+  .settings-more > summary:hover { text-decoration: underline; }
+  .settings-more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .settings-more p { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; max-width: 640px; }
+
+  /* Column captions for the four backend/model/effort rows. Reusing the control class names
+     on the <span>s makes them inherit the exact flex bases the real controls use, so the
+     captions line up with the columns instead of approximating them. */
+  .settings-stage-head { margin-bottom: 6px; }
+  .settings-stage-head span { min-width: 0; color: var(--muted); font-size: 0.72rem;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .settings-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 18px; align-items: start; }
+  .settings-grid-2 > .settings-field { min-width: 0; }
+  .settings-grid-2 > .settings-field select,
+  .settings-grid-2 > .settings-field input[type="number"],
+  .settings-grid-2 > .settings-field input[type="text"],
+  .settings-grid-2 > .settings-field input[type="email"],
+  .settings-grid-2 > .settings-field input[type="password"] { max-width: none; }
+
+  /* The column captions only mean anything while a stage row is still on one line; once
+     .settings-inline-row wraps they'd float above the wrong controls. Every control keeps
+     its own accessible label either way. */
+  @media (max-width: 980px) { .settings-stage-head { display: none; } }
+  @media (max-width: 620px) {
+    .settings-checkbox-group { grid-template-columns: 1fr; }
+    .settings-grid-2 { grid-template-columns: 1fr; }
+    .settings-pane-tabbed > .tab-bar .tab-btn { padding: 8px 10px; font-size: 0.9rem; }
+  }
 
   /* ---- toast ---- */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);

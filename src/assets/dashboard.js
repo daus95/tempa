@@ -245,6 +245,17 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
   settingsUpdateStatus = $("settingsUpdateStatus"),
   settingsRestartBtn = $("settingsRestartBtn"), settingsRestartStatus = $("settingsRestartStatus"),
+  settingsPane = $("settingsPane"),
+  settingsTabModelsBtn = $("settingsTabModelsBtn"), settingsTabRunsBtn = $("settingsTabRunsBtn"),
+  settingsTabGuardrailsBtn = $("settingsTabGuardrailsBtn"),
+  settingsTabNotificationsBtn = $("settingsTabNotificationsBtn"),
+  settingsTabMaintenanceBtn = $("settingsTabMaintenanceBtn"),
+  settingsTabModelsPanel = $("settingsTabModelsPanel"), settingsTabRunsPanel = $("settingsTabRunsPanel"),
+  settingsTabGuardrailsPanel = $("settingsTabGuardrailsPanel"),
+  settingsTabNotificationsPanel = $("settingsTabNotificationsPanel"),
+  settingsTabMaintenancePanel = $("settingsTabMaintenancePanel"),
+  settingsEmailDetails = $("settingsEmailDetails"),
+  settingsDirtyHint = $("settingsDirtyHint"), settingsNothingToSave = $("settingsNothingToSave"),
   homePrinciplesBtn = $("homePrinciplesBtn"), homeStepPrinciplesStatus = $("homeStepPrinciplesStatus"),
   principlesEditor = $("principlesEditor"), principlesSaveBtn = $("principlesSaveBtn"),
   principlesSaveStatus = $("principlesSaveStatus");
@@ -296,6 +307,10 @@ const state = {
   // Drives the Start -> Continue Implementation relabeling of all three buttons.
   implementStarted: false,
   implTab: "status",
+  settingsTab: "models",
+  // Whether the form currently differs from the config it was last filled from — one Save
+  // writes every tab, so the user needs to know edits are pending on a tab they can't see.
+  settingsDirty: false,
   implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
 };
 
@@ -1775,6 +1790,41 @@ stopImplementBtn.addEventListener("click", stopImplementRun);
 // ---------------------------------------------------------------------------
 // Settings (AI backend + model + run limits, backed by config.json)
 // ---------------------------------------------------------------------------
+// Same Status/Log tab mechanic as the Implementation and Clarification pages, just driven
+// off a table because there are five pairs rather than two. The active tab deliberately
+// survives leaving and re-entering Settings, like implTab/clarifyTab do.
+const SETTINGS_TABS = {
+  models: [settingsTabModelsBtn, settingsTabModelsPanel],
+  runs: [settingsTabRunsBtn, settingsTabRunsPanel],
+  guardrails: [settingsTabGuardrailsBtn, settingsTabGuardrailsPanel],
+  notifications: [settingsTabNotificationsBtn, settingsTabNotificationsPanel],
+  maintenance: [settingsTabMaintenanceBtn, settingsTabMaintenancePanel],
+};
+
+function setSettingsTab(tab) {
+  state.settingsTab = tab;
+  for (const [name, [btn, panel]] of Object.entries(SETTINGS_TABS)) {
+    btn.classList.toggle("active", name === tab);
+    panel.classList.toggle("hidden", name !== tab);
+  }
+  updateSettingsSaveBar();
+}
+
+for (const [name, [btn]] of Object.entries(SETTINGS_TABS)) {
+  btn.addEventListener("click", () => setSettingsTab(name));
+}
+
+// Updates and Restart Server run immediately and aren't part of the save payload, so an
+// idle Maintenance tab says so instead of offering a Save that would do nothing visible.
+// Pending edits made on another tab bring the button back — Save posts every tab at once,
+// so hiding the only way to commit them there would be a trap.
+function updateSettingsSaveBar() {
+  const nothingToSave = state.settingsTab === "maintenance" && !state.settingsDirty;
+  settingsDirtyHint.classList.toggle("hidden", !state.settingsDirty);
+  settingsSaveBtn.classList.toggle("hidden", nothingToSave);
+  settingsNothingToSave.classList.toggle("hidden", !nothingToSave);
+}
+
 // Each backend's model field stays free text (typing any id always works), but which
 // suggestions the <datalist> offers depends on the backend picked for that stage — see
 // populateModelDatalist / the "change" listener wired in wireBackendModelStage below.
@@ -1850,6 +1900,16 @@ function updateSmtpProvider(applyPreset) {
     settingsEmailSecurity.value = preset.security;
   }
 }
+
+// SMTP credentials, recipients and the alert-event grid are the bulk of this tab and mean
+// nothing while alerts are off, so they collapse out of the way. They are still submitted
+// and reloaded exactly as before — the save payload reads the elements directly, and
+// display:none doesn't change that.
+function updateEmailDetailsVisibility() {
+  settingsEmailDetails.classList.toggle("hidden", !settingsEmailEnabled.checked);
+}
+
+settingsEmailEnabled.addEventListener("change", updateEmailDetailsVisibility);
 
 const EMAIL_ALERT_EVENTS = [
   ["authentication_required", "Authentication required", "The configured AI CLI login or API key must be renewed."],
@@ -2031,10 +2091,13 @@ function fillSettingsForm(config) {
   settingsEmailRecipients.value = (email.recipients || []).join(", ");
   renderEmailEventChoices(email.events || []);
   updateSmtpProvider(false);
+  updateEmailDetailsVisibility();
   settingsUsageLimitRetryWaitMin.value = Math.round((config.usage_limit_retry_wait_sec ?? 1800) / 60);
   settingsUsageLimitHeartbeatMin.value = Math.round((config.usage_limit_heartbeat_sec ?? 300) / 60);
   settingsServerOverloadRetryWaitMin.value = Math.round((config.server_overloaded_retry_wait_sec ?? 300) / 60);
   settingsPollIntervalSec.value = config.poll_interval_sec ?? 60;
+  // Last, so the snapshot covers every field this function just wrote.
+  clearSettingsDirty();
 }
 
 async function renderSettings() {
@@ -2180,6 +2243,78 @@ settingsRestartBtn.addEventListener("click", async () => {
   }
 });
 
+// Doubles as the dirty-check snapshot (see recomputeSettingsDirty): this object *is* the
+// definition of "what a Save would write", so comparing it against the config the form was
+// last filled from is exactly the right test for whether anything is pending.
+function buildSettingsPayload() {
+  return {
+    models: {
+      clarify: settingsModelClarify.value,
+      clarify_apply: settingsModelClarifyApply.value,
+      plan: settingsModelPlan.value,
+      implement: settingsModelImplement.value,
+    },
+    backends: {
+      clarify: settingsBackendClarify.value,
+      clarify_apply: settingsBackendClarifyApply.value,
+      plan: settingsBackendPlan.value,
+      implement: settingsBackendImplement.value,
+    },
+    reasoning_efforts: {
+      clarify: settingsEffortClarify.value,
+      clarify_apply: settingsEffortClarifyApply.value,
+      plan: settingsEffortPlan.value,
+      implement: settingsEffortImplement.value,
+    },
+    features_per_session: settingsFeaturesPerSession.value,
+    max_session_run: settingsMaxSessionRun.value,
+    max_clarification_run: settingsMaxClarificationRun.value,
+    finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
+    allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
+    implementation_start_requirement: selectedImplementRequirement(),
+    notifications: { email: {
+      enabled: settingsEmailEnabled.checked, provider: settingsEmailProvider.value,
+      smtp_host: settingsEmailHost.value,
+      smtp_port: settingsEmailPort.value, security: settingsEmailSecurity.value,
+      smtp_username: settingsEmailUsername.value, smtp_password: settingsEmailPassword.value,
+      from: settingsEmailFrom.value,
+      recipients: settingsEmailRecipients.value.split(",").map(v => v.trim()).filter(Boolean),
+      events: selectedEmailEvents(),
+    } },
+    usage_limit_retry_wait_sec: Number(settingsUsageLimitRetryWaitMin.value) * 60,
+    usage_limit_heartbeat_sec: Number(settingsUsageLimitHeartbeatMin.value) * 60,
+    server_overloaded_retry_wait_sec: Number(settingsServerOverloadRetryWaitMin.value) * 60,
+    poll_interval_sec: Number(settingsPollIntervalSec.value),
+  };
+}
+
+// Snapshot of the payload as of the last fill, rather than a sticky "something changed"
+// flag: the two confirm-gated controls below revert themselves when the user backs out of
+// the modal, and only a value comparison notices that the form is unmodified again.
+let settingsBaseline = null;
+
+function recomputeSettingsDirty() {
+  const dirty = settingsBaseline !== null && JSON.stringify(buildSettingsPayload()) !== settingsBaseline;
+  if (dirty === state.settingsDirty) return;
+  state.settingsDirty = dirty;
+  // "Saved." sitting next to "Unsaved changes" reads as a contradiction.
+  if (dirty) { settingsSaveStatus.textContent = ""; settingsSaveStatus.classList.remove("err"); }
+  updateSettingsSaveBar();
+}
+
+function clearSettingsDirty() {
+  settingsBaseline = JSON.stringify(buildSettingsPayload());
+  state.settingsDirty = false;
+  updateSettingsSaveBar();
+}
+
+// Both events bubble, so one pair of listeners covers every control on every tab —
+// including the alert-event checkboxes, which are rebuilt from scratch on each fill.
+// fillSettingsForm assigns .value/.checked programmatically, which fires neither event,
+// so repopulating the form can't trip this.
+settingsPane.addEventListener("input", recomputeSettingsDirty);
+settingsPane.addEventListener("change", recomputeSettingsDirty);
+
 settingsSaveBtn.addEventListener("click", async () => {
   settingsSaveBtn.disabled = true;
   settingsSaveStatus.textContent = "";
@@ -2188,45 +2323,7 @@ settingsSaveBtn.addEventListener("click", async () => {
     const res = await fetch("/api/config/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        models: {
-          clarify: settingsModelClarify.value,
-          clarify_apply: settingsModelClarifyApply.value,
-          plan: settingsModelPlan.value,
-          implement: settingsModelImplement.value,
-        },
-        backends: {
-          clarify: settingsBackendClarify.value,
-          clarify_apply: settingsBackendClarifyApply.value,
-          plan: settingsBackendPlan.value,
-          implement: settingsBackendImplement.value,
-        },
-        reasoning_efforts: {
-          clarify: settingsEffortClarify.value,
-          clarify_apply: settingsEffortClarifyApply.value,
-          plan: settingsEffortPlan.value,
-          implement: settingsEffortImplement.value,
-        },
-        features_per_session: settingsFeaturesPerSession.value,
-        max_session_run: settingsMaxSessionRun.value,
-        max_clarification_run: settingsMaxClarificationRun.value,
-        finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
-        allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
-        implementation_start_requirement: selectedImplementRequirement(),
-        notifications: { email: {
-          enabled: settingsEmailEnabled.checked, provider: settingsEmailProvider.value,
-          smtp_host: settingsEmailHost.value,
-          smtp_port: settingsEmailPort.value, security: settingsEmailSecurity.value,
-          smtp_username: settingsEmailUsername.value, smtp_password: settingsEmailPassword.value,
-          from: settingsEmailFrom.value,
-          recipients: settingsEmailRecipients.value.split(",").map(v => v.trim()).filter(Boolean),
-          events: selectedEmailEvents(),
-        } },
-        usage_limit_retry_wait_sec: Number(settingsUsageLimitRetryWaitMin.value) * 60,
-        usage_limit_heartbeat_sec: Number(settingsUsageLimitHeartbeatMin.value) * 60,
-        server_overloaded_retry_wait_sec: Number(settingsServerOverloadRetryWaitMin.value) * 60,
-        poll_interval_sec: Number(settingsPollIntervalSec.value),
-      }),
+      body: JSON.stringify(buildSettingsPayload()),
     });
     const data = await res.json();
     if (!data.ok) {
@@ -2270,8 +2367,16 @@ settingsTestEmailBtn.addEventListener("click", async () => {
 });
 
 settingsEmailProvider.addEventListener("change", () => updateSmtpProvider(true));
-settingsEmailSelectAllBtn.addEventListener("click", () => renderEmailEventChoices(EMAIL_ALERT_EVENTS.map(([value]) => value)));
-settingsEmailClearAllBtn.addEventListener("click", () => renderEmailEventChoices([]));
+// These rebuild the checkbox list wholesale rather than ticking boxes, so no "change"
+// reaches the delegated listener — the dirty state has to be recomputed by hand.
+settingsEmailSelectAllBtn.addEventListener("click", () => {
+  renderEmailEventChoices(EMAIL_ALERT_EVENTS.map(([value]) => value));
+  recomputeSettingsDirty();
+});
+settingsEmailClearAllBtn.addEventListener("click", () => {
+  renderEmailEventChoices([]);
+  recomputeSettingsDirty();
+});
 
 // Explain the meaning and consequences before letting the user actually turn this on —
 // reverts the switch if they back out. The warning banner stays visible below the field
@@ -2293,7 +2398,10 @@ settingsAllowFinalizeWithCritical.addEventListener("change", async () => {
     "below.\n\nEnable anyway? (Remember to click Save Settings to apply.)",
     { title: "Allow Finalizing With Critical Findings?", okLabel: "Enable", danger: true });
   if (!ok) {
+    // Reverting programmatically fires no "change", so the delegated listener never sees
+    // the switch go back — without this the "Unsaved changes" hint would stick forever.
     settingsAllowFinalizeWithCritical.checked = false;
+    recomputeSettingsDirty();
     return;
   }
   settingsAllowFinalizeWithCriticalWarning.classList.remove("hidden");
@@ -2348,6 +2456,8 @@ for (const input of settingsImplementRequirementInputs) {
       for (const i of settingsImplementRequirementInputs) {
         i.checked = i.value === (lastImplementRequirement || "no_critical_or_major");
       }
+      // Same reason as the allow-finalize revert: restoring .checked fires no event.
+      recomputeSettingsDirty();
       return;
     }
     lastImplementRequirement = value;
