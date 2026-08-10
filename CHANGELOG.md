@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-10
+
 ### Added
 
 - **Answers are now carried into the next clarification round without applying them first**
