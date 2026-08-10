@@ -77,9 +77,10 @@ def _new_clarify_run_state() -> dict:
         "progress": None,
         "returncode": None,
         "process": None,
-        # Only meaningful for mode "finalize" — see _stop_clarify_run. "run"/"apply"
-        # are short, self-resolving passes with no Stop button, so nothing ever sets
-        # this for them.
+        # Set by _stop_clarify_run for any mode. Its live Popen (if any) is killed
+        # immediately regardless of mode; "apply" additionally reads this back between
+        # its auto-chained batches (see worker() below) to skip the next batch instead
+        # of starting it.
         "stop_requested": False,
     }
 
@@ -189,10 +190,12 @@ def _start_clarify_run(server, mode: str) -> bool:
                 with run["lock"]:
                     run["lines"].append(f"[error] Could not start clarify process: {e}")
                 return -1
-            # Tracked so Stop Finalize can kill it (see _stop_clarify_run) — mode
-            # "finalize" is a single subprocess for its whole evaluate/apply loop
-            # (the rounds happen inside tempa_clarify.py, not as separate Popen calls
-            # here), so one PID is all Stop ever needs to kill.
+            # Tracked so Stop (see _stop_clarify_run) can kill it. "run" and "finalize"
+            # are each a single subprocess for their whole session (finalize's rounds
+            # happen inside tempa_clarify.py, not as separate Popen calls here), so one
+            # PID is all Stop ever needs to kill. "apply" is spread across multiple
+            # Popen calls below (one per backlog batch) — Stop kills whichever one is
+            # live, and the stop_requested check below skips any batch still queued.
             with run["lock"]:
                 run["process"] = process
             for raw_line in _read_process_stdout(process):
@@ -212,8 +215,20 @@ def _start_clarify_run(server, mode: str) -> bool:
         returncode = run_once(_CLARIFY_RUN_ARGS[mode])
         if mode == "apply" and returncode == 0:
             remaining = _unapplied_answered_count(server)
+            # Distinguishes "the loop exited because everything's applied" (the only
+            # case that should print the "Apply finished" message below) from a stop
+            # mid-loop — otherwise the message would follow right after "Apply Answers
+            # stopped...", contradicting it. returncode alone can't tell them apart:
+            # it's still 0 either way, since the last individual batch succeeded.
+            stopped = False
             while returncode == 0 and remaining > 0:
                 with run["lock"]:
+                    if run["stop_requested"]:
+                        stopped = True
+                        run["lines"].append(
+                            f"Apply Answers stopped — {remaining} remaining file(s) were not applied."
+                        )
+                        break
                     run["lines"].append(
                         f"{remaining} more fully-answered clarification file(s) still "
                         "need to be applied — running Apply Answers again..."
@@ -235,7 +250,7 @@ def _start_clarify_run(server, mode: str) -> bool:
                         )
                     break
                 remaining = next_remaining
-            if returncode == 0:
+            if returncode == 0 and not stopped:
                 with run["lock"]:
                     run["lines"].append(
                         "Apply finished. Run Continue Clarification when you want a fresh "
@@ -251,24 +266,27 @@ def _start_clarify_run(server, mode: str) -> bool:
 
 
 def _stop_clarify_run(server) -> bool:
-    """Kill the running `tempa clarify --finalize` subprocess. Mirrors
-    _stop_implement_run below (same `taskkill /T /F` on Windows, to also take out
-    the backend CLI child it spawns, not just the immediate process).
+    """Kill the currently running `tempa clarify` subprocess, whichever mode ("run",
+    "finalize", or "apply") is active. Mirrors _stop_implement_run below (same
+    `taskkill /T /F` on Windows, to also take out the backend CLI child it spawns, not
+    just the immediate process).
 
-    Only mode "finalize" can be stopped this way — "run"/"apply" are short,
-    self-resolving passes with no Stop button on the dashboard, so they're left
-    alone even if somehow already running. Returns False if finalize isn't what's
-    currently running."""
+    Sets stop_requested regardless of mode: for "apply" it also stops worker()'s
+    auto-chain loop from starting its next backlog batch (see _start_clarify_run); for
+    "run"/"finalize" it's read by nothing else, since each is already a single Popen
+    call and killing that process is the whole story. Returns False if no clarify run
+    is currently in progress."""
     run = server.clarify_run
     with run["lock"]:
-        if not (run["running"] and run["mode"] == "finalize"):
+        if not run["running"]:
             return False
         run["stop_requested"] = True
         process = run["process"]
     if process is None:
         # Nothing to kill right now (e.g. the brief gap before the first Popen call
-        # completes) — `stop_requested` is already set above, defense in depth in
-        # case that ever matters.
+        # completes, or between apply's auto-chained batches) — `stop_requested` is
+        # already set above, which is what actually stops the next apply batch in that
+        # second case.
         return True
     try:
         if sys.platform == "win32":

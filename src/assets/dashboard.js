@@ -166,9 +166,11 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   specFileCountEl = $("specFileCount"),
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
-  startClarifyBtn = $("startClarifyBtn"), finalizeClarifyBtn = $("finalizeClarifyBtn"),
+  startClarifyBtn = $("startClarifyBtn"), stopClarifyBtn = $("stopClarifyBtn"),
+  finalizeClarifyBtn = $("finalizeClarifyBtn"),
   stopFinalizeClarifyBtn = $("stopFinalizeClarifyBtn"),
-  applyAnswersBtn = $("applyAnswersBtn"), finalizeGateList = $("finalizeGateList"),
+  applyAnswersBtn = $("applyAnswersBtn"), stopApplyAnswersBtn = $("stopApplyAnswersBtn"),
+  finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   finalizeRoundProgress = $("finalizeRoundProgress"),
   skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
@@ -1253,6 +1255,15 @@ function setClarifyRunButtonsDisabled(disabled) {
   startClarifyBtn.disabled = disabled || blockedByAnswers;
   startClarifyBtn.title = blockedByAnswers ? "Answer the remaining findings first." : "";
   applyAnswersBtn.disabled = disabled || !hasUnapplied;
+  // While "run"/"apply" specifically is in progress, swap the Start/Apply button for its
+  // Stop counterpart entirely (same Start/Stop toggle Implementation and Finalize already
+  // use) rather than just disabling it.
+  const runRunning = disabled && state.clarifyRun.mode === "run";
+  const applyRunning = disabled && state.clarifyRun.mode === "apply";
+  startClarifyBtn.classList.toggle("hidden", runRunning);
+  stopClarifyBtn.classList.toggle("hidden", !runRunning);
+  applyAnswersBtn.classList.toggle("hidden", applyRunning);
+  stopApplyAnswersBtn.classList.toggle("hidden", !applyRunning);
   renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
 }
 
@@ -1472,27 +1483,45 @@ async function checkClarifyRunOnLoad() {
   } catch (e) { /* ignore — buttons stay enabled */ }
 }
 
-async function stopFinalizeClarifyRun() {
-  if (!(state.clarifyRun.running && state.clarifyRun.mode === "finalize")) return;
-  const ok = await confirmModal("Stop the Finalized Clarification run that is currently in progress?",
-    { title: "Stop Finalize", okLabel: "Stop", danger: true });
+// One handler for all three Stop buttons — /api/clarify/stop is already mode-agnostic
+// (it just kills whatever's running), so the only per-mode thing left is copy + which
+// button to disable while the request is in flight.
+const CLARIFY_STOP_CONFIRM = {
+  run: { title: "Stop Clarification",
+    text: "Stop the Clarification run that is currently in progress?" },
+  apply: { title: "Stop Apply Answers",
+    text: "Stop the Apply Answers run that is currently in progress?" },
+  finalize: { title: "Stop Finalize",
+    text: "Stop the Finalized Clarification run that is currently in progress?" },
+};
+const CLARIFY_STOP_ERROR_LABEL = { run: "Clarification", apply: "Apply Answers", finalize: "Finalized Clarification" };
+const CLARIFY_STOP_BUTTONS = { run: stopClarifyBtn, apply: stopApplyAnswersBtn, finalize: stopFinalizeClarifyBtn };
+
+async function stopClarifyRun() {
+  const mode = state.clarifyRun.mode;
+  if (!(state.clarifyRun.running && mode && CLARIFY_STOP_CONFIRM[mode])) return;
+  const { title, text } = CLARIFY_STOP_CONFIRM[mode];
+  const ok = await confirmModal(text, { title, okLabel: "Stop", danger: true });
   if (!ok) return;
-  stopFinalizeClarifyBtn.disabled = true;
+  const btn = CLARIFY_STOP_BUTTONS[mode];
+  btn.disabled = true;
   try {
     const res = await fetch("/api/clarify/stop", { method: "POST" });
     const data = await res.json();
-    if (!data.ok) toast(data.error || "Could not stop Finalized Clarification.", true);
+    if (!data.ok) toast(data.error || `Could not stop ${CLARIFY_STOP_ERROR_LABEL[mode]}.`, true);
   } catch (e) {
-    toast("Network error stopping Finalized Clarification.", true);
+    toast(`Network error stopping ${CLARIFY_STOP_ERROR_LABEL[mode]}.`, true);
   } finally {
-    stopFinalizeClarifyBtn.disabled = false;
+    btn.disabled = false;
   }
 }
 
 startClarifyBtn.addEventListener("click", () => startClarifyRun("run"));
+stopClarifyBtn.addEventListener("click", stopClarifyRun);
 finalizeClarifyBtn.addEventListener("click", () => startClarifyRun("finalize"));
-stopFinalizeClarifyBtn.addEventListener("click", stopFinalizeClarifyRun);
+stopFinalizeClarifyBtn.addEventListener("click", stopClarifyRun);
 applyAnswersBtn.addEventListener("click", () => startClarifyRun("apply"));
+stopApplyAnswersBtn.addEventListener("click", stopClarifyRun);
 
 function setClarifyTab(tab) {
   state.clarifyTab = tab;
