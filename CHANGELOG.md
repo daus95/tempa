@@ -34,6 +34,15 @@ once the first tagged release is cut.
   clarify/apply/finalize progress regardless of which tab is open, so switching to Overview
   during a run no longer hides the fact that something is happening.
 
+### Fixed
+
+- **Apply Answers' auto-chain loop no longer logs "Apply finished" after stalling.**
+  When the loop stopped early because a batch wasn't clearing the remaining backlog (not
+  because everything was applied), it still printed "Apply finished. Run Continue
+  Clarification..." right after telling you it was stopping to let you review by hand —
+  contradicting itself. It now only prints "Apply finished" when the backlog is actually
+  cleared.
+
 ## [0.6.0] - 2026-08-10
 
 ### Added

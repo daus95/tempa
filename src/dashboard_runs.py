@@ -217,10 +217,12 @@ def _start_clarify_run(server, mode: str) -> bool:
             remaining = _unapplied_answered_count(server)
             # Distinguishes "the loop exited because everything's applied" (the only
             # case that should print the "Apply finished" message below) from a stop
-            # mid-loop — otherwise the message would follow right after "Apply Answers
-            # stopped...", contradicting it. returncode alone can't tell them apart:
-            # it's still 0 either way, since the last individual batch succeeded.
+            # mid-loop or a stalled (no-progress) exit — otherwise that message would
+            # follow right after "Apply Answers stopped..."/"...stopping the auto-apply
+            # loop", contradicting it. returncode alone can't tell them apart: it's
+            # still 0 in all three cases, since the last individual batch succeeded.
             stopped = False
+            stalled = False
             while returncode == 0 and remaining > 0:
                 with run["lock"]:
                     if run["stop_requested"]:
@@ -242,6 +244,7 @@ def _start_clarify_run(server, mode: str) -> bool:
                     # Not making progress (e.g. a file apply can't resolve) — stop
                     # looping rather than spinning forever, and evaluate with
                     # whatever has actually been applied so far.
+                    stalled = True
                     with run["lock"]:
                         run["lines"].append(
                             f"Apply Answers isn't clearing the remaining "
@@ -250,7 +253,7 @@ def _start_clarify_run(server, mode: str) -> bool:
                         )
                     break
                 remaining = next_remaining
-            if returncode == 0 and not stopped:
+            if returncode == 0 and not stopped and not stalled:
                 with run["lock"]:
                     run["lines"].append(
                         "Apply finished. Run Continue Clarification when you want a fresh "
