@@ -73,6 +73,14 @@ def test_is_usage_limit_text_weekly_limit_message():
     assert ts._is_usage_limit_text(text, tb.CLAUDE) is True
 
 
+def test_is_usage_limit_text_session_limit_message():
+    # Real CLI text seen in the wild: "You've hit your session limit · resets 1:30am
+    # (Asia/Jakarta)". Regression guard, same shape as the weekly-limit one above — this
+    # used to fall through as a plain error instead of triggering wait/retry.
+    text = "You've hit your session limit · resets 1:30am (Asia/Jakarta)"
+    assert ts._is_usage_limit_text(text, tb.CLAUDE) is True
+
+
 def test_is_usage_limit_text_one_backends_marker_does_not_match_another():
     # codex's marker text shouldn't accidentally trip claude's detector.
     codex_marker = tb.CODEX.usage_limit_markers[0]

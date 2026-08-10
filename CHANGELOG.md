@@ -54,6 +54,12 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **Claude Code's "session limit" wording is now recognized as a usage-limit stop.** The
+  live CLI text "You've hit your session limit · resets 1:30am (Asia/Jakarta)" didn't match
+  any of Claude's `usage_limit_markers` (only "weekly limit"/"5-hour limit"/"usage limit"
+  wordings were covered), so it fell through as a plain failure instead of triggering
+  `wait_out_usage_limit`. QA/implementation resumption kept retrying on every raw poll tick
+  (tens of seconds apart) instead of waiting out the configured retry delay.
 - **README and docs/clarify-modes.md no longer describe a Finalize run as uncancelable, or
   the Clarification page's log as an expandable panel.** Both were stale against the Stop
   Clarification/Stop Apply Answers buttons and the Overview/Log tab split added above —
