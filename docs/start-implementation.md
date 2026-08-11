@@ -175,6 +175,19 @@ by earlier versions. Only an epic that is `done` **and** `qa_passed: true` **and
 `require_fixing` before it touches any feature, so an in-flight or failed QA round is never
 overwritten.
 
+**A genuine QA pass also commits the workspace, by default.** Right after the reconciliation
+above, `run_qa_session` (`tempa_session.py`) checks whether this epic just landed a real pass
+(`status == "done"`, `qa_passed == true`, `qa_status == "done"`) and, if
+`commit_after_qa_pass` is enabled (default `true` — see [config-json.md](config-json.md) and
+dashboard Settings → Runs tab → "Version Control"), runs `git add -A` + `git commit` in
+`workspace.root` via `tempa_git.commit_workspace_changes`. This is a one-shot hook tied to the
+QA session that produced the pass — it doesn't also fire from `check_and_run`'s reconcile
+catch-all, since a real pass is only ever freshly observed once, right when that QA session
+ends. The outcome is always just logged, never fatal: a workspace that isn't a git
+repository, or has nothing to commit, is logged as "skipped"; a real git failure (e.g. no
+`user.name`/`user.email` configured) is logged as "failed" — neither stops the run or marks
+the epic `failed`.
+
 ## Cross-Epic Dependencies (No-Forward-Progress Guard)
 
 Epics are implemented in plan order — normally that's fine, since later epics build on

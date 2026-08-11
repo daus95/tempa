@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Commit after QA pass.** Right after an epic's QA verdict lands as a genuine pass, Tempa
+  now runs `git commit` in the workspace, so a long unattended `implement` run leaves a
+  checkpoint per verified epic instead of one giant uncommitted diff at the end. On by
+  default; toggle it off in dashboard Settings → Runs tab → "Version Control" if you'd
+  rather commit by hand. Skipped silently (logged, not an error) if the workspace isn't a
+  git repository or there's nothing to commit.
+
 ## [0.6.1] - 2026-08-11
 
 ### Added

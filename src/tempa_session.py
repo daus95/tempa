@@ -30,6 +30,7 @@ from tempa_backend import AUTONOMOUS_SYSTEM_PROMPT, Backend, get_backend_def, re
 from tempa_config import (
     WORKING_DIR,
     get_backend,
+    get_commit_after_qa_pass,
     get_logs_dir,
     get_model,
     get_qa_dir,
@@ -37,10 +38,12 @@ from tempa_config import (
     get_server_overloaded_retry_wait_sec,
     get_usage_limit_heartbeat_sec,
     get_usage_limit_retry_wait_sec,
+    get_workspace,
     load_config,
     save_config,
     set_epic_session_id,
 )
+from tempa_git import commit_workspace_changes
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
 from tempa_maintenance import _epic_features_actually_done, reconcile_qa_passed_features_and_log
 from tempa_notifications import AttentionEventType, notify_attention
@@ -947,6 +950,20 @@ def run_qa_session(
         config = load_config()
         if reconcile_qa_passed_features_and_log(config):
             save_config(config)
+
+        epic = config["epic"][index]
+        if (epic.get("status") == "done" and epic.get("qa_passed")
+                and epic.get("qa_status") == "done" and get_commit_after_qa_pass(config)):
+            workspace_root = get_workspace(config).get("root", "")
+            label = epic.get("epic_name", session_label)
+            outcome, detail = commit_workspace_changes(
+                workspace_root, f"tempa: {label} — QA passed"
+            )
+            if outcome == "committed":
+                log(f"[{label}] committed workspace changes after QA pass: {detail}")
+            else:
+                log(f"[{label}] commit after QA pass {outcome}: {detail}")
+
         _state.running_thread = None
         _state.running_index = None
 

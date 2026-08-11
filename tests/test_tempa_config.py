@@ -448,6 +448,22 @@ def test_get_resume_implementation_sessions_ignores_non_bool_value():
 
 
 # ---------------------------------------------------------------------------
+# get_commit_after_qa_pass
+# ---------------------------------------------------------------------------
+
+def test_get_commit_after_qa_pass_defaults_true():
+    assert tempa_config.get_commit_after_qa_pass({}) is True
+
+
+def test_get_commit_after_qa_pass_respects_false():
+    assert tempa_config.get_commit_after_qa_pass({"commit_after_qa_pass": False}) is False
+
+
+def test_get_commit_after_qa_pass_ignores_non_bool_value():
+    assert tempa_config.get_commit_after_qa_pass({"commit_after_qa_pass": "nope"}) is True
+
+
+# ---------------------------------------------------------------------------
 # get_model — DEFAULT_MODELS now includes "clarify_apply"
 # ---------------------------------------------------------------------------
 

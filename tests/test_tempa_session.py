@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -868,3 +869,67 @@ def test_terminate_if_stuck_after_done_waits_for_done_event_before_grace_period(
     assert process.terminated is True
     assert 0.1 in poll_sleeps  # the wait-for-done polling actually happened
     assert 5 in poll_sleeps  # then the grace-period sleep
+
+
+# ---------------------------------------------------------------------------
+# run_qa_session — commit-after-QA-pass hook
+#
+# The backend session itself is stubbed out (real spawning is out of scope, per the
+# module docstring) via `ts._run_backend_session`; `ts.commit_workspace_changes` is
+# stubbed too, since its own real-git-repo behavior belongs to test_tempa_git.py — these
+# tests only cover whether run_qa_session decides to call it, and with what. `ts.load_config`
+# is also stubbed directly (the file-wide `_no_real_wait` autouse fixture above already
+# replaces it with a wait-durations-only stub, so these tests override it back to
+# something with the "epic"/"workspace" shape run_qa_session actually needs) rather than
+# going through a real config.json on disk.
+# ---------------------------------------------------------------------------
+
+def _stub_qa_backend_session(monkeypatch):
+    monkeypatch.setattr(ts, "_run_backend_session", lambda *a, **k: (0, Path("unused.log")))
+
+
+def test_run_qa_session_commits_after_genuine_qa_pass(monkeypatch, tmp_path):
+    commit = Mock(return_value=("committed", "abc123"))
+    monkeypatch.setattr(ts, "commit_workspace_changes", commit)
+    _stub_qa_backend_session(monkeypatch)
+    workspace_root = str(tmp_path / "workspace")
+    monkeypatch.setattr(ts, "load_config", lambda: {
+        "workspace": {"root": workspace_root},
+        "epic": [{"epic_name": "EPIC-01", "status": "done", "qa_passed": True, "qa_status": "done"}],
+    })
+
+    ts.run_qa_session(0, "prompt", "EPIC-01")
+
+    commit.assert_called_once()
+    args, _ = commit.call_args
+    assert args[0] == workspace_root
+    assert "EPIC-01" in args[1]
+
+
+def test_run_qa_session_skips_commit_when_disabled_in_config(monkeypatch, tmp_path):
+    commit = Mock()
+    monkeypatch.setattr(ts, "commit_workspace_changes", commit)
+    _stub_qa_backend_session(monkeypatch)
+    monkeypatch.setattr(ts, "load_config", lambda: {
+        "workspace": {"root": str(tmp_path / "workspace")},
+        "commit_after_qa_pass": False,
+        "epic": [{"epic_name": "EPIC-01", "status": "done", "qa_passed": True, "qa_status": "done"}],
+    })
+
+    ts.run_qa_session(0, "prompt", "EPIC-01")
+
+    commit.assert_not_called()
+
+
+def test_run_qa_session_skips_commit_when_qa_did_not_actually_pass(monkeypatch, tmp_path):
+    commit = Mock()
+    monkeypatch.setattr(ts, "commit_workspace_changes", commit)
+    _stub_qa_backend_session(monkeypatch)
+    monkeypatch.setattr(ts, "load_config", lambda: {
+        "workspace": {"root": str(tmp_path / "workspace")},
+        "epic": [{"epic_name": "EPIC-01", "status": "require_fixing", "qa_passed": False, "qa_status": "idle"}],
+    })
+
+    ts.run_qa_session(0, "prompt", "EPIC-01")
+
+    commit.assert_not_called()
