@@ -224,7 +224,6 @@ def _verify_detail(server, run_id: str) -> dict | None:
             return None
         with run["lock"]:
             running = run["running"]
-            returncode = run["returncode"]
         return {
             "id": run_id, "epic": epic, "timestamp": "",
             "status": "running" if running else "failed",
