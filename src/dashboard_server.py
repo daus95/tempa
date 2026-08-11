@@ -1,9 +1,9 @@
 """The dashboard HTTP handler.
 
 _DashboardHandler serves the single-page app and the /api/* GET/POST routes (spec browse/
-edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop, clear, workspace
-init/open/close, config get/save). All file access is confined to prd_dir / clar_dir via
-_resolve_within."""
+edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop, verify run/stop/
+delete, clear, workspace init/open/close, config get/save). All file access is confined to
+prd_dir / clar_dir / the verify report folder via _resolve_within."""
 
 from __future__ import annotations
 
@@ -50,6 +50,13 @@ from dashboard_runs import (
     _stop_implement_run,
 )
 from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within, build_tree
+from dashboard_verify import (
+    _delete_verify_run,
+    _list_verify_runs,
+    _start_verify_run,
+    _stop_verify_run,
+    _verify_detail,
+)
 from tempa_notifications import DEFAULT_ENABLED_EVENTS, send_test_email
 
 if sys.platform == "win32":
@@ -208,6 +215,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_update_status()
         elif route == "/api/log-file":
             self._handle_log_file(parse_qs(parsed.query))
+        elif route == "/api/verify/runs":
+            self._send_json(200, {"ok": True, "runs": _list_verify_runs(self.server)})
+        elif route == "/api/verify/detail":
+            self._handle_verify_detail(parse_qs(parsed.query))
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -296,6 +307,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self._send_json(200, {
             "ok": True, "name": target.name, "content": content, "truncated": truncated,
         })
+
+    def _handle_verify_detail(self, query: dict) -> None:
+        run_id = (query.get("id", [""])[0])
+        detail = _verify_detail(self.server, run_id)
+        if detail is None:
+            self._send_json(404, {"ok": False, "error": "Verification run not found."})
+            return
+        self._send_json(200, {"ok": True, **detail})
 
     def _handle_clarify_run_status(self, query: dict) -> None:
         try:
@@ -427,6 +446,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_update_run()
         elif parsed.path == "/api/server/restart":
             self._handle_server_restart()
+        elif parsed.path == "/api/verify/run":
+            self._handle_verify_run_start()
+        elif parsed.path == "/api/verify/stop":
+            self._handle_verify_run_stop()
+        elif parsed.path == "/api/verify/delete":
+            self._handle_verify_delete()
         else:
             self._send(404, "text/plain; charset=utf-8", b"Not found")
 
@@ -696,6 +721,42 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def _handle_implement_run_stop(self) -> None:
         if not _stop_implement_run(self.server):
             self._send_json(409, {"ok": False, "error": "Implementation is not running."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_verify_run_start(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        epic = (payload.get("epic") or "").strip()
+        if not epic:
+            self._send_json(400, {"ok": False, "error": "Missing epic."})
+            return
+        if not _start_verify_run(self.server, epic):
+            self._send_json(409, {"ok": False, "error": f'A verification run for "{epic}" is already in progress.'})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_verify_run_stop(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        epic = (payload.get("epic") or "").strip()
+        if not epic or not _stop_verify_run(self.server, epic):
+            self._send_json(409, {"ok": False, "error": "No verification run is currently in progress for that epic."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_verify_delete(self) -> None:
+        payload = self._read_json_body()
+        if payload is None or not isinstance(payload, dict):
+            self._send_json(400, {"ok": False, "error": "Malformed request."})
+            return
+        run_id = (payload.get("id") or "").strip()
+        if not run_id or not _delete_verify_run(run_id):
+            self._send_json(404, {"ok": False, "error": "Verification run not found."})
             return
         self._send_json(200, {"ok": True})
 

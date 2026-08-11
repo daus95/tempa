@@ -293,6 +293,30 @@
           <div class="clarify-log-body" id="implLogBody"></div>
         </div>
       </div>
+      <div id="verificationPane" class="pane verify-pane hidden">
+        <div class="impl-header">
+          <span class="impl-header-status">Verification runs for this workspace's epics — checks a spec against the current code without changing anything.</span>
+        </div>
+        <table class="verify-list-table">
+          <thead><tr><th>Epic</th><th>Started</th><th>Status</th><th>Result</th></tr></thead>
+          <tbody id="verifyListBody"></tbody>
+        </table>
+        <div class="clarify-log-empty hidden" id="verifyListEmpty">No verification runs yet. Click "Verify" on an epic from the Implementation page to start one.</div>
+      </div>
+      <div id="verificationDetailPane" class="pane verify-detail-pane hidden">
+        <div class="impl-header">
+          <a href="#" class="verify-back-link" id="verifyDetailBackLink">&larr; Back to Verification</a>
+          <span class="impl-header-status" id="verifyDetailHeader"></span>
+          <button type="button" class="clarify-run-btn secondary hidden" id="verifyDetailStopBtn">
+            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop</span>
+          </button>
+          <button type="button" class="clarify-run-btn secondary hidden" id="verifyDetailDeleteBtn">
+            <span><svg class="icon-svg"><use href="#i-trash-2"></use></svg></span><span>Delete</span>
+          </button>
+        </div>
+        <div id="verifyDetailStatus" class="clarify-log-empty hidden"></div>
+        <div id="verifyDetailBody" class="viewer markdown-body"></div>
+      </div>
       <div id="settingsPane" class="pane settings-pane settings-pane-tabbed hidden">
         <div class="settings-header">
           <h2>Settings</h2>

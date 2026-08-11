@@ -211,6 +211,34 @@
     font-size: 0.85rem; line-height: 1.5; }
   .impl-feature-list { margin-top: 8px; padding-left: 4px; }
   .impl-feature-row { display: flex; gap: 8px; font-size: 0.85rem; padding: 2px 0; color: var(--text); }
+  .impl-epic-verify-btn { margin-left: auto; padding: 4px 12px; font-size: 0.8rem; border-radius: 6px;
+    border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); cursor: pointer; }
+  .impl-epic-verify-btn:hover { opacity: 0.9; border-color: var(--accent); }
+
+  /* ---- verification page (list of runs + per-run detail/report) ---- */
+  /* Same "pane itself never scrolls, inner content is the scroller" treatment as
+     .impl-pane/.clarify-overview-pane. */
+  .verify-pane, .verify-detail-pane { padding: 20px clamp(16px, 3vw, 36px) 24px; display: flex;
+    flex-direction: column; height: 100%; overflow: auto; box-sizing: border-box; }
+  .verify-list-table { width: 100%; max-width: 860px; border-collapse: collapse; margin-top: 4px; }
+  .verify-list-table th, .verify-list-table td {
+    text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem;
+  }
+  .verify-list-table th { color: var(--muted); font-weight: 600; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.03em; }
+  .verify-list-row { cursor: pointer; }
+  .verify-list-row:hover td { background: var(--hover); }
+  .verify-status-badge, .verify-result-badge { display: inline-flex; align-items: center; gap: 4px;
+    font-weight: 600; font-size: 0.8rem; }
+  .verify-status-badge.running { color: var(--accent); }
+  .verify-status-badge.completed { color: var(--ok); }
+  .verify-status-badge.failed { color: var(--danger); }
+  .verify-result-badge.passed { color: var(--ok); }
+  .verify-result-badge.issues { color: var(--major); }
+  .verify-result-badge.unknown { color: var(--muted); }
+  .verify-back-link { color: var(--accent); font-size: 0.85rem; text-decoration: none; }
+  .verify-back-link:hover { text-decoration: underline; }
+  #verifyDetailStatus { max-width: 860px; }
 
   /* ---- rendered markdown (spec viewer) ---- */
   .markdown-body { max-width: 860px; }
