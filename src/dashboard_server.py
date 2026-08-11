@@ -378,6 +378,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": config.get("max_clarification_run"),
                 "finalize_no_progress_rounds": tempa_config.get_finalize_no_progress_rounds(config),
                 "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
+                "commit_after_qa_pass": tempa_config.get_commit_after_qa_pass(config),
                 "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
                 "notifications": {"email": tempa_config.get_email_notifications(config)},
                 "usage_limit_retry_wait_sec": tempa_config.get_usage_limit_retry_wait_sec(config),
@@ -961,6 +962,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": "Implementation Poll Interval must be a positive whole number."})
             return
         allow_finalize_with_critical = bool(payload.get("allow_finalize_with_critical"))
+        commit_after_qa_pass = bool(payload.get("commit_after_qa_pass"))
         implementation_start_requirement = payload.get("implementation_start_requirement")
         if implementation_start_requirement not in tempa_config.IMPLEMENTATION_START_REQUIREMENTS:
             self._send_json(400, {
@@ -1019,6 +1021,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         config["max_clarification_run"] = max_clarification_run
         config["finalize_no_progress_rounds"] = finalize_no_progress_rounds
         config["allow_finalize_with_critical"] = allow_finalize_with_critical
+        config["commit_after_qa_pass"] = commit_after_qa_pass
         config["implementation_start_requirement"] = implementation_start_requirement
         config["notifications"] = {"email": email}
         config["usage_limit_retry_wait_sec"] = usage_limit_retry_wait_sec
@@ -1047,6 +1050,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "max_clarification_run": max_clarification_run,
                 "finalize_no_progress_rounds": finalize_no_progress_rounds,
                 "allow_finalize_with_critical": allow_finalize_with_critical,
+                "commit_after_qa_pass": commit_after_qa_pass,
                 "implementation_start_requirement": implementation_start_requirement,
                 "notifications": {"email": email},
                 "usage_limit_retry_wait_sec": usage_limit_retry_wait_sec,

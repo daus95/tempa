@@ -439,6 +439,26 @@
             </div>
           </div>
           <div class="settings-group">
+            <h3>Version Control</h3>
+            <div class="settings-field">
+              <label class="settings-switch-row" for="settingsCommitAfterQaPass">
+                <span class="settings-switch">
+                  <input type="checkbox" id="settingsCommitAfterQaPass">
+                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+                </span>
+                <span>Commit after QA pass</span>
+              </label>
+              <p class="settings-field-desc">On by default. Right after an epic's QA verdict lands as a genuine pass,
+                Tempa runs <code>git commit</code> in the workspace so a long unattended run leaves a checkpoint per
+                verified epic instead of one giant uncommitted diff at the end.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>Skipped silently (logged, not an error) if the workspace isn't a git repository or there's nothing
+                  to commit. Turn this off if you'd rather commit by hand.</p>
+              </details>
+            </div>
+          </div>
+          <div class="settings-group">
             <h3>Retries &amp; Timing</h3>
             <p class="settings-field-desc">How long Tempa waits before automatically retrying after a usage limit or server overload, and how often the implementation agent runner checks for new work.</p>
             <details class="settings-more">

@@ -202,7 +202,8 @@ Backends** button there to re-check after installing or logging into one. See
 [docs/cli-availability.md](docs/cli-availability.md).
 
 The Settings page is organized into five tabs: **AI Models** (backend/model/reasoning effort
-per stage), **Runs** (run limits, retry waits and poll interval), **Guardrails** (what
+per stage), **Runs** (run limits, retry waits, poll interval, and whether Tempa commits the
+workspace to git after each epic passes QA), **Guardrails** (what
 clarification findings may block Finalized Clarification and Start Implementation),
 **Notifications** (email alerts) and **Maintenance** (updates, restart server). One **Save
 Settings** button at the bottom writes every tab at once, and it stays visible while you
@@ -444,6 +445,13 @@ clickable and opens that file in a viewer modal, see [docs/logging.md](docs/logg
 ![Tempa dashboard Implementation page, Status tab, showing live epic/feature progress and QA results](docs/assets/implement-status.webp)
 
 ![Tempa dashboard Implementation page, Log tab, showing the raw console output](docs/assets/implement-log.webp)
+
+**Commit after QA pass** (on by default — Settings → Runs tab → "Version Control") has Tempa
+`git commit` the workspace right after each epic's QA verdict lands as a genuine pass, so a
+long unattended run leaves a checkpoint per verified epic instead of one giant uncommitted
+diff at the end. It's skipped silently (logged, not an error) if the workspace isn't a git
+repository or there's nothing to commit; turn it off if you'd rather commit by hand. See
+`commit_after_qa_pass` in [docs/config-json.md](docs/config-json.md).
 
 Once any epic has actually run, the button relabels itself to **Continue Implementation** —
 the run resumes the existing plan rather than starting anything — and clicking it resets any

@@ -222,6 +222,7 @@ DEFAULT_CONFIG = {
     "reasoning_efforts": dict(DEFAULT_REASONING_EFFORTS),
     "features_per_session": 3,
     "resume_implementation_sessions": True,
+    "commit_after_qa_pass": True,
     "max_session_run": 30,
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 5,
@@ -548,6 +549,15 @@ def get_resume_implementation_sessions(config: dict) -> bool:
     already read) instead of always starting cold. An escape hatch for the rare case
     where resuming misbehaves for a given backend/workspace."""
     value = config.get("resume_implementation_sessions")
+    return bool(value) if isinstance(value, bool) else True
+
+
+def get_commit_after_qa_pass(config: dict) -> bool:
+    """Return config.json's "commit_after_qa_pass" (default True) — whether Tempa should
+    `git commit` the workspace right after an epic's QA verdict is a genuine pass (see
+    tempa_git.commit_workspace_changes, called from run_qa_session). An opt-out for
+    workspaces where the user would rather commit by hand."""
+    value = config.get("commit_after_qa_pass")
     return bool(value) if isinstance(value, bool) else True
 
 

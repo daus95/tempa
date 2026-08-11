@@ -232,6 +232,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsFinalizeNoProgressRounds = $("settingsFinalizeNoProgressRounds"),
+  settingsCommitAfterQaPass = $("settingsCommitAfterQaPass"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),
@@ -2287,6 +2288,7 @@ function fillSettingsForm(config) {
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
   settingsFinalizeNoProgressRounds.value = config.finalize_no_progress_rounds ?? 5;
+  settingsCommitAfterQaPass.checked = config.commit_after_qa_pass !== false;
   settingsAllowFinalizeWithCritical.checked = !!config.allow_finalize_with_critical;
   settingsAllowFinalizeWithCriticalWarning.classList.toggle("hidden", !config.allow_finalize_with_critical);
   const requirement = config.implementation_start_requirement || "no_critical_or_major";
@@ -2484,6 +2486,7 @@ function buildSettingsPayload() {
     max_session_run: settingsMaxSessionRun.value,
     max_clarification_run: settingsMaxClarificationRun.value,
     finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
+    commit_after_qa_pass: settingsCommitAfterQaPass.checked,
     allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
     implementation_start_requirement: selectedImplementRequirement(),
     notifications: { email: {
