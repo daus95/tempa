@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-11
+
 ### Added
 
 - **Verification in the dashboard.** Each epic on the Implementation page now has a Verify
@@ -884,7 +886,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/daus95/tempa/compare/v0.6.0...v0.6.1
 [0.5.1]: https://github.com/daus95/tempa/compare/v0.5.0...v0.5.1
 [0.4.4]: https://github.com/daus95/tempa/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/daus95/tempa/compare/v0.4.2...v0.4.3
