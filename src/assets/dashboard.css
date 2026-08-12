@@ -379,7 +379,7 @@
   .gate-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
   .gate-checklist { list-style: none; margin: 0; padding: 0; display: flex;
     flex-direction: column; gap: 6px; }
-  .gate-checklist + .clarify-run-btn { margin-top: 14px; }
+  .gate-checklist ~ .clarify-run-btn { margin-top: 14px; }
   .settings-backend-status { margin-bottom: 16px; }
   .gate-item { display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem; }
   .gate-item .icon { flex: none; }

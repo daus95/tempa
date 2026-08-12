@@ -208,35 +208,9 @@
           </button>
           <span class="clarify-run-status hidden" id="clarifyRunStatus"></span>
         </div>
-        <div class="gate-panel" id="skipMinorCard">
-          <h3>Evaluation scope</h3>
-          <div class="settings-field">
-            <label class="settings-switch-row" for="skipMinorFindingsToggle">
-              <span class="settings-switch">
-                <input type="checkbox" id="skipMinorFindingsToggle" checked>
-                <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-              </span>
-              <span>Only evaluate critical &amp; major findings</span>
-            </label>
-            <p class="gate-hint">When on, Start Clarification and Finalized Clarification skip minor
-              findings entirely instead of finding and reporting them.</p>
-          </div>
-        </div>
         <div class="gate-panel hidden" id="clarifyOverlayCard">
           <h3>Pending resolutions <span class="clarify-round-badge hidden" id="clarifyOverlayBadge"></span></h3>
           <p class="gate-hint" id="clarifyOverlayHint"></p>
-        </div>
-        <div class="gate-panel" id="finalizeGate">
-          <h3>Finalize readiness <span class="clarify-round-badge hidden" id="clarifyRoundBadge"></span></h3>
-          <p class="gate-hint hidden" id="finalizeGateHint"></p>
-          <ul class="gate-checklist" id="finalizeGateList"></ul>
-          <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
-            <span><svg class="icon-svg"><use href="#i-flag"></use></svg></span><span>Finalized Clarification</span>
-          </button>
-          <button type="button" class="clarify-run-btn secondary hidden" id="stopFinalizeClarifyBtn">
-            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Finalize</span>
-          </button>
-          <span class="clarify-round-badge hidden" id="finalizeRoundProgress"></span>
         </div>
         <div class="ready-banner hidden" id="implementReadyBanner">
           <div class="ready-banner-text" id="implementReadyBannerText"></div>
@@ -249,6 +223,32 @@
           <button type="button" class="tab-btn" id="clarifyTabLogBtn">Log</button>
         </div>
         <div class="tab-panel" id="clarifyOverviewTabPanel">
+          <div class="gate-panel" id="skipMinorCard">
+            <h3>Evaluation scope</h3>
+            <div class="settings-field">
+              <label class="settings-switch-row" for="skipMinorFindingsToggle">
+                <span class="settings-switch">
+                  <input type="checkbox" id="skipMinorFindingsToggle" checked>
+                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+                </span>
+                <span>Only evaluate critical &amp; major findings</span>
+              </label>
+              <p class="gate-hint">When on, Start Clarification and Finalized Clarification skip minor
+                findings entirely instead of finding and reporting them.</p>
+            </div>
+          </div>
+          <div class="gate-panel" id="finalizeGate">
+            <h3>Finalize readiness <span class="clarify-round-badge hidden" id="clarifyRoundBadge"></span></h3>
+            <p class="gate-hint hidden" id="finalizeGateHint"></p>
+            <ul class="gate-checklist" id="finalizeGateList"></ul>
+            <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
+              <span><svg class="icon-svg"><use href="#i-flag"></use></svg></span><span>Finalized Clarification</span>
+            </button>
+            <button type="button" class="clarify-run-btn secondary hidden" id="stopFinalizeClarifyBtn">
+              <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Finalize</span>
+            </button>
+            <span class="clarify-round-badge hidden" id="finalizeRoundProgress"></span>
+          </div>
           <div class="group">
             <h3>Unanswered</h3>
             <table>
