@@ -17,6 +17,17 @@ once the first tagged release is cut.
   rather commit by hand. Skipped silently (logged, not an error) if the workspace isn't a
   git repository or there's nothing to commit.
 
+### Fixed
+
+- **Clarification page: "Evaluation scope" and "Finalize readiness" cards moved into the
+  Overview tab.** They used to render in the pane header, above the Overview/Log tab bar,
+  so they stayed visible even while viewing the Log tab. They now live inside Overview only,
+  above the Unanswered/Fully answered tables.
+- **"Stop Finalize" button rendering flush against the readiness checklist above it.** The
+  spacing rule only targeted the checklist's immediate next sibling ("Finalized
+  Clarification"), so it never applied once that button was hidden and replaced by "Stop
+  Finalize" during a run. Both buttons now get consistent spacing.
+
 ## [0.6.1] - 2026-08-11
 
 ### Added
