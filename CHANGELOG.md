@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-15
+
 ### Fixed
 
 - **A healthy session no longer gets force-terminated ~2 minutes in, then reported as a
