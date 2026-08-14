@@ -1615,12 +1615,14 @@ function renderImplementStatus() {
     const features = (epic.features || []).map((f) =>
       `<div class="impl-feature-row"><span>${featureStatusIcon(f.status)}</span><span>${escapeHtml(f.id)} — ${escapeHtml(f.name)}</span></div>`
     ).join("");
-    // A "failed" epic that still carries blocked_reason means the no-progress guard gave up
-    // trying to fix it automatically (see _try_reorder_for_dependency in tempa_session.py) —
-    // surface its own explanation right on the card instead of leaving the user to go dig
-    // through the log, since that's the one thing they actually need to act on.
+    // A "failed" epic that still carries blocked_reason means one of the automatic guards gave
+    // up on it: no forward progress across resumed sessions (see _try_reorder_for_dependency in
+    // tempa_session.py), or a QA loop it never converged out of (tempa_qa_history.py). Each
+    // writes its own explanation, so the label stays neutral. Surface it right on the card
+    // instead of leaving the user to go dig through the log — it's the one thing they need to
+    // act on.
     const blockedReason = epic.status === "failed" && epic.blocked_reason
-      ? `<div class="impl-epic-blocked-reason">⚠ Blocked — no progress across resumed sessions:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
+      ? `<div class="impl-epic-blocked-reason">⚠ Halted:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
       : "";
     card.innerHTML =
       `<div class="impl-epic-header">` +
@@ -2132,7 +2134,8 @@ const EMAIL_ALERT_EVENTS = [
   ["implementation_auto_reordered", "Implementation auto-reordered", "An epic was stuck waiting on a not-yet-implemented epic and Tempa reordered the plan automatically — informational, no action needed unless it recurs."],
   ["plan_failed", "Planning failed", "Tempa could not generate or review the implementation plan."],
   ["session_limit_reached", "Implementation run limit reached", "An epic reached the configured anti-loop session limit."],
-  ["qa_limit_reached", "QA run limit reached", "QA reached its configured limit and was skipped; review is required."],
+  ["qa_limit_reached", "QA run limit reached", "An epic reached its configured QA run limit without ever passing and was marked failed; review is required."],
+  ["qa_oscillation_detected", "QA loop detected", "An epic keeps failing QA in circles — each round's fix undoes an earlier one — so the run was stopped."],
   ["clarification_answers_required", "Clarification answers required", "Critical or major specification findings need a human decision."],
   ["clarification_limit_reached", "Clarification run limit reached", "Finalized clarification stopped with unresolved findings."],
   ["clarification_failed", "Clarification failed", "A non-retryable evaluation or apply pass stopped."],

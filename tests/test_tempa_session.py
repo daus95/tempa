@@ -1025,3 +1025,130 @@ def test_run_qa_session_skips_commit_when_qa_did_not_actually_pass(monkeypatch, 
     ts.run_qa_session(0, "prompt", "EPIC-01")
 
     commit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _record_qa_verdict_and_guard — QA round history + loop guard
+# ---------------------------------------------------------------------------
+
+def _qa_config(epic: dict) -> dict:
+    return {"epic": [epic]}
+
+
+def test_record_qa_verdict_records_a_failing_round_with_the_flagged_features(tmp_path):
+    config = _qa_config({
+        "epic_name": "EPIC-03", "status": "require_fixing", "qa_passed": False,
+        "qa_status": "done", "qa_report_filename": "r1.md",
+        "features": [
+            {"id": "F1", "status": "require_fixing"},
+            {"id": "F2", "status": "require_fixing"},
+            {"id": "F3", "status": "done"},
+        ],
+    })
+
+    ts._record_qa_verdict_and_guard(config, 0, "EPIC-03", tmp_path / "qa.log")
+
+    history = config["epic"][0]["qa_history"]
+    assert len(history) == 1
+    assert history[0]["verdict"] == "fail"
+    assert history[0]["failed"] == ["F1", "F2"]
+    assert history[0]["report"] == "r1.md"
+
+
+def test_record_qa_verdict_records_a_pass_with_no_failed_features(tmp_path):
+    config = _qa_config({
+        "epic_name": "EPIC-03", "status": "done", "qa_passed": True, "qa_status": "done",
+        "features": [{"id": "F1", "status": "done"}],
+    })
+
+    ts._record_qa_verdict_and_guard(config, 0, "EPIC-03", tmp_path / "qa.log")
+
+    assert config["epic"][0]["qa_history"][0]["verdict"] == "pass"
+    assert config["epic"][0]["qa_history"][0]["failed"] == []
+
+
+def test_record_qa_verdict_ignores_an_interrupted_session(tmp_path):
+    # qa_status is still "ongoing", so check_and_run will resume this as the SAME round —
+    # recording it would count one round twice and manufacture a cycle out of an interruption.
+    config = _qa_config({
+        "epic_name": "EPIC-03", "status": "done", "qa_passed": False, "qa_status": "ongoing",
+    })
+
+    ts._record_qa_verdict_and_guard(config, 0, "EPIC-03", tmp_path / "qa.log")
+
+    assert "qa_history" not in config["epic"][0]
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["usage_limit_hit", "auth_error_hit", "server_overloaded_hit", "backend_stuck_after_done_hit"],
+)
+def test_record_qa_verdict_ignores_a_session_cut_short_by_a_stop_flag(tmp_path, flag):
+    setattr(ts._state, flag, True)
+    config = _qa_config({
+        "epic_name": "EPIC-03", "status": "require_fixing", "qa_passed": False, "qa_status": "done",
+    })
+
+    ts._record_qa_verdict_and_guard(config, 0, "EPIC-03", tmp_path / "qa.log")
+
+    assert "qa_history" not in config["epic"][0]
+
+
+def test_record_qa_verdict_fails_the_epic_and_stops_the_runner_on_a_detected_loop(tmp_path, monkeypatch):
+    notify = Mock()
+    monkeypatch.setattr(ts, "notify_attention", notify)
+    epic = {
+        "epic_name": "EPIC-03", "status": "require_fixing", "qa_passed": False, "qa_status": "done",
+        "qa_loop_strikes": 1,
+        "qa_history": [
+            {"round": 1, "verdict": "fail", "failed": ["F1", "F2"]},
+            {"round": 2, "verdict": "fail", "failed": ["F3", "F4"]},
+            {"round": 3, "verdict": "fail", "failed": ["F1", "F2"]},
+        ],
+        "features": [
+            {"id": "F3", "status": "require_fixing"},
+            {"id": "F4", "status": "require_fixing"},
+        ],
+    }
+
+    ts._record_qa_verdict_and_guard(_qa_config(epic), 0, "EPIC-03", tmp_path / "qa.log")
+
+    assert epic["status"] == "failed"
+    assert "cycling through QA" in epic["blocked_reason"]
+    assert ts._state.stop_event.is_set()
+    notify.assert_called_once()
+
+
+def test_record_qa_verdict_leaves_a_converging_epic_alone(tmp_path):
+    epic = {
+        "epic_name": "EPIC-03", "status": "require_fixing", "qa_passed": False, "qa_status": "done",
+        "qa_history": [
+            {"round": 1, "verdict": "fail", "failed": ["F1", "F2", "F3"]},
+            {"round": 2, "verdict": "fail", "failed": ["F1", "F2"]},
+        ],
+        "features": [{"id": "F1", "status": "require_fixing"}],
+    }
+
+    ts._record_qa_verdict_and_guard(_qa_config(epic), 0, "EPIC-03", tmp_path / "qa.log")
+
+    assert epic["status"] == "require_fixing"
+    assert "blocked_reason" not in epic
+    assert not ts._state.stop_event.is_set()
+
+
+def test_run_qa_session_records_the_round_it_just_finished(monkeypatch, tmp_path):
+    _stub_qa_backend_session(monkeypatch)
+    monkeypatch.setattr(ts, "commit_workspace_changes", Mock())
+    monkeypatch.setattr(ts, "load_config", lambda: {
+        "workspace": {"root": str(tmp_path / "workspace")},
+        "epic": [{
+            "epic_name": "EPIC-01", "status": "require_fixing", "qa_passed": False,
+            "qa_status": "done", "features": [{"id": "F1", "status": "require_fixing"}],
+        }],
+    })
+    saved = {}
+    monkeypatch.setattr(ts, "save_config", lambda config: saved.update(config))
+
+    ts.run_qa_session(0, "prompt", "EPIC-01")
+
+    assert saved["epic"][0]["qa_history"][0]["failed"] == ["F1"]

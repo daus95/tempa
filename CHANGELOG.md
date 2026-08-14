@@ -8,6 +8,46 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Tempa now notices when an epic is cycling through QA instead of converging, and stops.**
+  QA fails features 1–2 → the fix session repairs them and marks the epic done → QA fails
+  features 3–4 → fixing those regresses 1–2 → repeat, forever. Every existing safeguard was
+  blind to it: `implement_no_progress_rounds` is only evaluated while an epic is still
+  `on_progress`/`require_fixing` after a session, and a successful fix round sets it `done`;
+  `total_run` is reset by the forward progress each round genuinely makes. Since
+  `require_fixing` outranks `pending` in the scheduler, one oscillating epic also blocked
+  every later epic for as long as it ran. Each QA verdict is now recorded on the epic as
+  `qa_history`, and an epic that shows a regression (a feature that failed, was fixed, was
+  re-verified, and is failing again) or a repeated failure set for `qa_loop_strikes` rounds in
+  a row (default 2) is marked `failed` with a round-by-round explanation, plus a new
+  **QA loop detected** email alert. A `max_qa_fail_rounds` backstop (default 6) covers the case
+  where the QA agent writes no per-feature statuses at all, leaving the pattern rules nothing to
+  work with.
+- `tempa implement --reset-failed` and `--reset-qa` restart that guard's window without
+  discarding the history — they append a `reset` marker, so the record of what happened survives
+  for whoever has to look at it.
+
+### Changed
+
+- **An epic that exhausts its QA run limit is now marked `failed` instead of passed.** Hitting
+  `max_session_run` on QA used to set `qa_passed = true` — declaring the epic verified precisely
+  because Tempa had run out of attempts to verify it, while the last real verdict on record was a
+  failure. Nothing downstream could tell that apart from a genuine pass. It now stops the run and
+  asks for review, recoverable with `tempa implement --reset-failed` like every other failure.
+- A failed epic's `blocked_reason` is no longer labelled "no progress across resumed sessions" in
+  `tempa status` and the dashboard — more than one guard writes it now, and each explains itself.
+
+### Fixed
+
+- **The runner no longer spins forever instead of halting on a failed epic.** The QA gate's
+  "wait for the previous epic's re-implementation" deferral matches any earlier epic with
+  `qa_status="done"` and `qa_passed=false` — which is exactly the state a `failed` epic is left in
+  once QA found issues and something then gave up on it. That deferral never resolves on its own,
+  so the runner logged `QA [x] deferred` on every poll and never reached the halt below it, turning
+  an actionable stop into a silent spin. Both places that pick the next thing to do now share the
+  same failed-epic check.
+
 ## [0.6.3] - 2026-08-15
 
 ### Fixed

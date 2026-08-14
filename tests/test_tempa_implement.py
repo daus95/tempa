@@ -335,6 +335,96 @@ def test_validate_and_increment_run_marks_epic_failed_and_persists_when_limit_re
 
 
 # ---------------------------------------------------------------------------
+# _validate_and_increment_qa_run
+# ---------------------------------------------------------------------------
+
+def test_validate_and_increment_qa_run_increments_below_limit():
+    config = {"max_session_run": 30, "epic": [{"epic_name": "e1", "status": "done", "qa_total_run": 5}]}
+    assert ti._validate_and_increment_qa_run(config, 0, "e1") is True
+    assert config["epic"][0]["qa_total_run"] == 6
+    assert config["epic"][0]["status"] == "done"
+
+
+def test_validate_and_increment_qa_run_marks_epic_failed_instead_of_passing_it_at_the_limit():
+    # Regression: this used to set qa_passed=True -- declaring the epic QA-verified precisely
+    # because Tempa had run out of attempts to verify it, while the last real verdict on record
+    # was a failure. Nothing downstream could tell that apart from a genuine pass.
+    config = {"max_session_run": 30, "epic": [{"epic_name": "e1", "status": "done", "qa_total_run": 30}]}
+    assert ti._validate_and_increment_qa_run(config, 0, "e1") is False
+    assert config["epic"][0]["status"] == "failed"
+    assert config["epic"][0]["qa_passed"] is False
+
+
+def test_validate_and_increment_qa_run_clears_qa_status_and_stops_the_runner_at_the_limit():
+    # qa_status must not stay "ongoing": check_and_run's QA-resume branch runs BEFORE the
+    # failed-epic halt, so it would re-dispatch this same QA on every poll forever. And the stop
+    # event is what keeps a failed LAST epic from falling through to "no next_index" -> all_done
+    # -> "All epics done".
+    config = {"max_session_run": 1, "epic": [{
+        "epic_name": "e1", "status": "done", "qa_status": "ongoing", "qa_total_run": 1,
+    }]}
+    assert ti._validate_and_increment_qa_run(config, 0, "e1") is False
+    assert config["epic"][0]["qa_status"] == "idle"
+    assert _state.stop_event.is_set()
+
+
+def test_validate_and_increment_qa_run_without_a_limit_never_stops():
+    config = {"max_session_run": None, "epic": [{"epic_name": "e1", "status": "done", "qa_total_run": 999}]}
+    assert ti._validate_and_increment_qa_run(config, 0, "e1") is True
+    assert config["epic"][0]["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# _halt_if_earlier_epic_failed
+# ---------------------------------------------------------------------------
+
+def test_check_and_run_qa_gate_halts_on_an_earlier_failed_epic_instead_of_deferring_forever(
+    isolate_tempa_paths, monkeypatch,
+):
+    # Regression: the QA gate's "wait for the previous epic's re-implementation" deferral matches
+    # any earlier epic with qa_status="done" + qa_passed=false -- which is exactly what a failed
+    # epic looks like once QA found issues and something then gave up on it (a failed fix session,
+    # the QA run limit, the QA loop guard). That deferral never resolves on its own, so the runner
+    # used to log "QA [x] deferred" on every poll forever and never reach the halt.
+    tempa_config.save_config({"epic": [
+        {"epic_name": "EPIC-01", "status": "failed", "qa_passed": False, "qa_status": "done"},
+        {"epic_name": "EPIC-02", "status": "done", "qa_passed": False,
+         "completed_features": 1, "total_features": 1,
+         "features": [{"id": "F1", "status": "done"}]},
+    ]})
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("QA must not run while an earlier epic is failed")
+
+    monkeypatch.setattr(ti, "run_qa_session", fail_if_called)
+
+    with pytest.raises(SystemExit):
+        ti.check_and_run()
+
+
+def test_check_and_run_qa_gate_still_defers_to_an_earlier_epic_that_is_merely_require_fixing(
+    isolate_tempa_paths, monkeypatch,
+):
+    # The deferral itself must survive: an earlier epic that failed QA and is genuinely queued for
+    # re-implementation is a wait, not a halt.
+    tempa_config.save_config({"epic": [
+        {"epic_name": "EPIC-01", "status": "require_fixing", "qa_passed": False, "qa_status": "done"},
+        {"epic_name": "EPIC-02", "status": "done", "qa_passed": False,
+         "completed_features": 1, "total_features": 1,
+         "features": [{"id": "F1", "status": "done"}]},
+    ]})
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("QA for EPIC-02 must wait for EPIC-01's re-implementation")
+
+    monkeypatch.setattr(ti, "run_qa_session", fail_if_called)
+
+    # Deferred, not halted, and no QA session dispatched for EPIC-02.
+    ti.check_and_run()
+
+    assert _state.running_thread is None
+    assert tempa_config.load_config()["epic"][1].get("qa_status") != "ongoing"
+
+
+# ---------------------------------------------------------------------------
 # check_and_run — QA gate feature-completeness integrity check
 # ---------------------------------------------------------------------------
 

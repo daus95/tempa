@@ -32,8 +32,10 @@ from tempa_config import (
     get_backend,
     get_commit_after_qa_pass,
     get_logs_dir,
+    get_max_qa_fail_rounds,
     get_model,
     get_qa_dir,
+    get_qa_loop_strikes,
     get_reasoning_effort,
     get_server_overloaded_retry_wait_sec,
     get_usage_limit_heartbeat_sec,
@@ -47,6 +49,12 @@ from tempa_git import commit_workspace_changes
 from tempa_logging import SHOW_PROMPT, _banner, _print_log_tail, _state, log
 from tempa_maintenance import _epic_features_actually_done, reconcile_qa_passed_features_and_log
 from tempa_notifications import AttentionEventType, notify_attention
+from tempa_qa_history import (
+    VERDICT_FAIL,
+    VERDICT_PASS,
+    detect_qa_loop,
+    record_qa_round,
+)
 
 
 def _is_usage_limit_text(text: str, backend: Backend) -> bool:
@@ -980,6 +988,62 @@ def run_session(
         _state.running_index = None
 
 
+def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, log_path: Path) -> None:
+    """Append this QA session's verdict to the epic's `qa_history` and stop the run if that
+    history shows the epic cycling through the QA gate instead of converging (see
+    tempa_qa_history.detect_qa_loop). Called from run_qa_session under `_state.lock`; saves
+    `config` itself whenever it changed anything.
+
+    Nothing is recorded unless the session actually reached a verdict. A QA session cut short —
+    by a usage limit, an auth error, a backend overload, a stuck-after-done force-terminate, or a
+    plain crash — leaves `qa_status` as "ongoing", and check_and_run resumes it as a continuation
+    of the SAME round; recording on those would count one round several times and manufacture a
+    cycle out of an interrupted network connection."""
+    epic = config["epic"][index]
+    if epic.get("qa_status") != "done":
+        return
+    if (_state.usage_limit_hit or _state.auth_error_hit
+            or _state.server_overloaded_hit or _state.backend_stuck_after_done_hit):
+        return
+
+    passed = bool(epic.get("qa_passed"))
+    failed_ids = [
+        feature.get("id", "?") for feature in (epic.get("features") or [])
+        if feature.get("status") == "require_fixing"
+    ]
+    record_qa_round(
+        epic,
+        VERDICT_PASS if passed else VERDICT_FAIL,
+        failed_ids=[] if passed else failed_ids,
+        report=epic.get("qa_report_filename", ""),
+    )
+
+    reason = detect_qa_loop(epic, get_qa_loop_strikes(config), get_max_qa_fail_rounds(config))
+    if reason is None:
+        save_config(config)
+        return
+
+    epic["status"] = "failed"
+    epic["blocked_reason"] = reason
+    save_config(config)
+    log(f"QA [{session_label}] — {reason}\n"
+        "Review the QA reports listed above, fix the underlying conflict between them, then run "
+        "`tempa implement --reset-failed` (or click Continue Implementation) to retry.")
+    notify_attention(
+        AttentionEventType.QA_OSCILLATION_DETECTED,
+        "QA",
+        f"{session_label} keeps failing QA in circles",
+        "Review the QA reports for the rounds listed below — each round's fix is undoing an "
+        "earlier one. Resolve that, then run `tempa implement --reset-failed`.",
+        epic=session_label,
+        log_path=log_path,
+        details={"reason": reason, "qa_fail_rounds": sum(
+            1 for entry in (epic.get("qa_history") or []) if entry.get("verdict") == VERDICT_FAIL
+        )},
+    )
+    _state.stop_event.set()
+
+
 def run_qa_session(
     index: int,
     prompt: str,
@@ -1018,6 +1082,10 @@ def run_qa_session(
         config = load_config()
         if reconcile_qa_passed_features_and_log(config):
             save_config(config)
+
+        # Record this round's verdict and check the epic's QA history for a loop before anything
+        # else reads its status — a trip rewrites it to "failed".
+        _record_qa_verdict_and_guard(config, index, session_label, log_path)
 
         epic = config["epic"][index]
         if (epic.get("status") == "done" and epic.get("qa_passed")
