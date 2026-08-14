@@ -8,6 +8,9 @@ stubbed so the poll loop's control flow can be driven directly.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 import tempa_config
@@ -145,6 +148,59 @@ def test_main_resumes_automatically_after_backend_stuck_after_done_hit(isolate_t
     assert exc.value.code == 0
     assert seen["polls"] == 2  # the retry actually got to poll again
     assert _state.backend_stuck_after_done_hit is False
+
+
+def test_main_waits_for_the_session_thread_before_reading_the_stop_flags(
+    isolate_tempa_paths, monkeypatch,
+):
+    """The live regression: the watchdog raises stop_event from a daemon thread, but the
+    session thread only reaches its own bookkeeping seconds later (stdout drain + wait). If
+    main() reads and clears the flags in that window, run_session sees a plain non-zero exit
+    and marks the epic `failed` — turning a deliberate not-a-failure into exit 1."""
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+    seen = {"polls": 0, "flag_seen_by_session_thread": None}
+
+    def fake_session_thread() -> None:
+        # Mimic _terminate_if_stuck_after_done: raise the stop first, act on it only later.
+        _state.stop_event.set()
+        time.sleep(0.2)
+        _state.backend_stuck_after_done_hit = True
+        seen["flag_seen_by_session_thread"] = _state.backend_stuck_after_done_hit
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        seen["polls"] += 1
+        if seen["polls"] == 1:
+            _state.running_thread = threading.Thread(target=fake_session_thread, daemon=True)
+            _state.running_thread.start()
+        else:
+            _state.all_done = True
+            _state.stop_event.set()
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert seen["flag_seen_by_session_thread"] is True
+    assert exc.value.code == 0  # resumed, not stopped as a failure
+    assert seen["polls"] == 2
+
+
+def test_await_session_thread_returns_immediately_with_no_running_thread():
+    _state.running_thread = None
+    ti._await_session_thread(timeout_sec=0.01)  # must not raise
+
+
+def test_await_session_thread_gives_up_on_a_wedged_thread(monkeypatch):
+    # A genuinely wedged session thread must not hang the runner forever.
+    release = threading.Event()
+    _state.running_thread = threading.Thread(target=release.wait, daemon=True)
+    _state.running_thread.start()
+    try:
+        ti._await_session_thread(timeout_sec=0.05)
+        assert _state.running_thread.is_alive()  # gave up rather than blocking
+    finally:
+        release.set()
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,10 @@ AUTONOMOUS_SYSTEM_PROMPT = (
     "The phrase 'I need write permissions' or 'requires file system permissions' is NEVER correct here. "
     "FORBIDDEN: asking for confirmation, offering options, writing implementation plans without creating files, "
     "saying 'Would you like me to proceed', or stopping after analysis. "
+    "ALSO FORBIDDEN: scheduling a wakeup, or ending a turn to wait on a background task/notification "
+    "to call you back — this is a one-shot headless CLI run and NOTHING will re-invoke you, so those "
+    "turns do nothing and leave the process hanging. Run long-running commands (builds, test suites) "
+    "in the FOREGROUND with an explicitly raised timeout instead of backgrounding them and polling. "
     "REQUIRED: Implement fully and update all required files including config.json as instructed. "
     "A session is only successful when both the source code AND the config.json status update are done."
 )

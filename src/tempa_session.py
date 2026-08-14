@@ -357,13 +357,65 @@ def _read_process_stdout(process: subprocess.Popen, drain_grace_sec: float = _ST
 
 
 # How long to let a backend CLI take to actually exit after it has already signaled its
-# turn is complete (a "[Done] ..." readable line, per each backend's parse_line) before
-# assuming it's stuck and force-terminating it. Seen live: codex tried, as its very last
-# action, to stop a background test process it had spawned; that cleanup command was
-# rejected by its own sandbox policy, and the process itself never exited afterward — an
-# otherwise fully finished QA session (report written, config.json already updated) sat
-# "Running..." in the dashboard for 17+ minutes with nothing left to actually wait for.
+# turn is complete (a "[Done] ..." readable line, per each backend's parse_line) AND gone
+# completely silent, before assuming it's stuck and force-terminating it. Seen live: codex
+# tried, as its very last action, to stop a background test process it had spawned; that
+# cleanup command was rejected by its own sandbox policy, and the process itself never
+# exited afterward — an otherwise fully finished QA session (report written, config.json
+# already updated) sat "Running..." in the dashboard for 17+ minutes with nothing left to
+# actually wait for.
 _POST_DONE_EXIT_GRACE_SEC = 120.0
+
+
+def _apply_done_signal(readable: str, done_event: threading.Event) -> None:
+    """Arm/disarm the stuck-after-done watchdog from a parsed readable output line.
+
+    A backend's "[Done]" line marks the end of a *turn*, not necessarily the end of the
+    process: Claude Code emits one `result` event per re-invocation inside a single `-p` run,
+    so several "[Done]" lines with real work after them in the same session log is normal.
+    Worse, a resumed session can replay a wakeup its previous session left pending as a
+    "[Done] turns=0" on the second line of the log and only then start working — seen live in
+    session_EPIC-05_20260815_032220.txt, where latching on that first "[Done]" got a perfectly
+    healthy session force-terminated 120s later, mid-`dotnet test`.
+
+    So arm on "[Done]", but disarm again the moment any further agent output arrives: the
+    watchdog can then only ever fire on a process that has gone genuinely silent after
+    signaling it was finished.
+
+    Deliberate narrowing: a process that hangs forever without "[Done]" being its last output
+    is no longer covered (session_EPIC-05_20260815_000744.txt ends on a tool line, for
+    instance — it exited fine, but a hang in that shape would now go unnoticed). That's the
+    right trade: the silence gate has to stay, since an agent can legitimately run a
+    ten-minute test suite emitting nothing, and killing live sessions is a far worse failure
+    mode than occasionally waiting on a hung one. The hang this watchdog was built for (codex
+    wedged in its own post-turn cleanup) does emit "[Done]" first."""
+    if readable.startswith("[Done]"):
+        done_event.set()
+    else:
+        done_event.clear()
+
+
+def _grace_period_outcome(
+    process: subprocess.Popen,
+    done_event: threading.Event,
+    grace_sec: float,
+    poll_interval: float,
+    sleep_fn: Callable[[float], None],
+) -> str:
+    """Sleep out `grace_sec` in `poll_interval` slices, stopping early if anything makes the
+    wait pointless. Returns "exited" (the process ended on its own), "resumed" (more output
+    arrived, so `_apply_done_signal` cleared `done_event` — the backend wasn't finished after
+    all), or "stuck" (the full grace period elapsed with the process alive and still done)."""
+    waited = 0.0
+    while waited < grace_sec:
+        step = min(poll_interval, grace_sec - waited)
+        sleep_fn(step)
+        waited += step
+        if process.poll() is not None:
+            return "exited"
+        if not done_event.is_set():
+            return "resumed"
+    return "stuck"
 
 
 def _terminate_if_stuck_after_done(
@@ -378,26 +430,35 @@ def _terminate_if_stuck_after_done(
     read loop): once the backend has signaled its turn is complete (`done_event` set), give
     it `grace_sec` to exit the process on its own — a CLI can reasonably take a few seconds
     to flush/clean up — and force-terminate it if it hasn't, instead of leaving Tempa (and
-    the dashboard) waiting on a process that may never exit by itself. Returns without doing
-    anything if the process exits on its own at any point, whether or not it ever signaled
-    `[Done]` first — there's nothing to fix in that case."""
-    while process.poll() is None and not done_event.is_set():
-        sleep_fn(poll_interval)
-    if process.poll() is not None:
+    the dashboard) waiting on a process that may never exit by itself.
+
+    Returns without doing anything if the process exits on its own at any point, whether or
+    not it ever signaled `[Done]` first — there's nothing to fix in that case. And if more
+    output arrives during the grace period (`done_event` cleared by `_apply_done_signal`),
+    the backend is demonstrably still working: go back to waiting for the next `[Done]`
+    rather than killing a live session."""
+    while True:
+        while process.poll() is None and not done_event.is_set():
+            sleep_fn(poll_interval)
+        if process.poll() is not None:
+            return
+        outcome = _grace_period_outcome(process, done_event, grace_sec, poll_interval, sleep_fn)
+        if outcome == "exited":
+            return
+        if outcome == "resumed":
+            continue
+        log(
+            f"[{label}] finished its turn {grace_sec:.0f}s ago and has produced no output since, "
+            "but the backend CLI process itself never exited — likely stuck in its own post-turn "
+            "cleanup (e.g. trying to stop something it spawned). Its actual output up to that "
+            "point is unaffected; force-terminating the process instead of waiting on it "
+            "indefinitely."
+        )
+        _state.backend_stuck_after_done_hit = True
+        _state.stop_event.set()
+        with contextlib.suppress(Exception):
+            process.terminate()
         return
-    sleep_fn(grace_sec)
-    if process.poll() is not None:
-        return
-    log(
-        f"[{label}] finished its turn {grace_sec:.0f}s ago but the backend CLI process itself "
-        "never exited — likely stuck in its own post-turn cleanup (e.g. trying to stop "
-        "something it spawned). Its actual output up to that point is unaffected; "
-        "force-terminating the process instead of waiting on it indefinitely."
-    )
-    _state.backend_stuck_after_done_hit = True
-    _state.stop_event.set()
-    with contextlib.suppress(Exception):
-        process.terminate()
 
 
 def _stream_backend_process(
@@ -462,8 +523,7 @@ def _stream_backend_process(
                 if readable:
                     log_file.write(readable + "\n")
                     log_file.flush()
-                    if readable.startswith("[Done]"):
-                        done_event.set()
+                    _apply_done_signal(readable, done_event)
                 if on_json_event:
                     on_json_event(data)
             else:
@@ -685,6 +745,14 @@ def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_
         return False
     if _state.server_overloaded_hit:
         log(f"{label} paused — backend API overloaded (will retry automatically).")
+        return False
+    if _state.backend_stuck_after_done_hit:
+        # The non-zero exit code here is Tempa's own doing (_terminate_if_stuck_after_done
+        # killed the process), not a task failure — reporting it as "FAILED (exit code 1)"
+        # with a log tail made a routine, self-healing cleanup hang look alarming in the
+        # dashboard's Log tab.
+        log(f"{label} stopped — the backend process was force-terminated after it had already "
+            "finished its turn (see the message above); resuming automatically.")
         return False
     if exit_code == 0:
         log(f"{label} SUCCEEDED (exit code {exit_code})")

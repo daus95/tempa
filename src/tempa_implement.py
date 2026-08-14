@@ -125,6 +125,27 @@ def _reset_failed_before_retry(label: str) -> None:
         "`tempa implement --reset-failed`.")
 
 
+def _await_session_thread(timeout_sec: float = 120.0) -> None:
+    """Let the in-flight session thread finish its own post-session bookkeeping before main()
+    reads (and clears) the `_state.*_hit` flags.
+
+    Every stop signal — usage limit, auth error, overload, stuck-after-done — is raised from
+    inside the session thread's own stack together with `_state.stop_event`, and that wakes
+    main()'s poll loop while `run_session` is still seconds away from acting on it: it has to
+    drain stdout (see _STDOUT_DRAIN_GRACE_SEC) and then process.wait(). Clearing
+    `backend_stuck_after_done_hit` inside that window is what turned a deliberately-not-a-
+    failure into a runner stop: run_session then saw a plain non-zero exit, marked the epic
+    `failed`, and re-set stop_event, so the next loop turn found no flags left and exited 1
+    (seen live — force-terminate logged at 03:24:21, "marked as failed" at 03:24:24, exactly
+    the 3s stdout-drain grace apart). Joining first means the session thread and main() always
+    agree on which flags were set.
+
+    Bounded, so a genuinely wedged session thread can't hang the runner forever."""
+    thread = _state.running_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout_sec)
+
+
 def check_and_run(features_override: int | None = None) -> None:
 
     with _state.lock:
@@ -480,6 +501,10 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             # Re-read every cycle (load_config() never caches) so a Settings change to
             # poll_interval_sec reaches this already-running loop without a restart.
             _state.stop_event.wait(timeout=get_poll_interval_sec(load_config()))
+
+        # The session thread that raised this stop may still be finishing its own bookkeeping
+        # — wait for it before reading any of the flags below (see _await_session_thread).
+        _await_session_thread()
 
         if _state.auth_error_hit:
             log("Agent runner stopped — authentication failed (see message above). "
