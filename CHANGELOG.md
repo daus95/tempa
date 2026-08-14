@@ -8,6 +8,35 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A healthy session no longer gets force-terminated ~2 minutes in, then reported as a
+  failure.** The stuck-after-done watchdog treated the backend's first `[Done]` line as "the
+  turn is over", but Claude Code emits one of those per re-invocation inside a single run —
+  and a resumed session can replay a wakeup its predecessor left pending as `[Done] turns=0`
+  before it has done any work at all. The watchdog latched onto that and killed the process
+  120s later, mid-test-suite. `[Done]` now only arms the watchdog; any further output disarms
+  it again, so it can still catch a backend that genuinely hangs in post-turn cleanup, but
+  can only ever fire on a process that has actually gone silent.
+- **A force-terminated session no longer marks its epic `failed` and stops the runner.** The
+  watchdog raises its "this is not a real failure, resume automatically" flag and the stop
+  signal together, from a background thread. The poll loop woke on the stop signal and cleared
+  the flag while the session thread was still ~3s from reading it (it has to drain stdout
+  first), so the session thread saw a plain non-zero exit, marked the epic `failed`, and the
+  runner exited 1 on what it had just decided wasn't a failure. The poll loop now waits for the
+  session thread to finish its own bookkeeping before touching those flags. This makes the
+  usage-limit, auth-error and overload recovery paths race-free for the same reason.
+- **A force-terminate is now logged as what it is**, instead of a red
+  `FAILED (exit code 1)` plus a log tail in the dashboard's Log tab.
+
+### Changed
+
+- **Autonomous system prompt now forbids scheduling wakeups and polling background tasks.**
+  Sessions run as a one-shot headless CLI invocation, so nothing ever re-invokes the agent
+  after it ends a turn to wait — those turns did no work and left a pending wakeup behind for
+  the next resumed session to replay. Long builds and test suites should run in the foreground
+  with an explicitly raised timeout.
+
 ## [0.6.2] - 2026-08-12
 
 ### Added

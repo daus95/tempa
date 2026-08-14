@@ -355,6 +355,20 @@ def test_log_session_result_overloaded_stops_before_checking_exit_code(tmp_path)
     assert ts._log_session_result("Session [X]", 0, tmp_path / "log.txt") is False
 
 
+def test_log_session_result_stuck_after_done_is_not_reported_as_a_failure(tmp_path, capsys):
+    # The non-zero exit is Tempa's own force-terminate, not a task failure -- reporting it as
+    # "FAILED (exit code 1)" made a routine, self-healing cleanup hang look alarming.
+    ts._state.backend_stuck_after_done_hit = True
+    log_path = tmp_path / "log.txt"
+    log_path.write_text("boom", encoding="utf-8")
+
+    assert ts._log_session_result("Session [X]", 1, log_path) is False
+
+    out = capsys.readouterr().out
+    assert "FAILED" not in out
+    assert "force-terminated" in out
+
+
 # ---------------------------------------------------------------------------
 # wait_out_usage_limit / run_with_usage_limit_retry
 # ---------------------------------------------------------------------------
@@ -799,6 +813,12 @@ class _FakePollingProcess:
         self._exit_after_calls = exit_after_calls
         self.terminated = False
 
+    def exit_now(self):
+        """Make every subsequent poll() report the process as exited -- for tests that need
+        the exit to happen at a specific point in the watchdog's own loop rather than after a
+        fixed number of poll() calls."""
+        self._exit_after_calls = self._calls
+
     def poll(self):
         self._calls += 1
         if self._exit_after_calls is not None and self._calls >= self._exit_after_calls:
@@ -816,13 +836,15 @@ def test_terminate_if_stuck_after_done_terminates_when_process_never_exits():
     sleeps = []
 
     ts._terminate_if_stuck_after_done(
-        process, done_event, "Session [e1]", grace_sec=42, sleep_fn=sleeps.append,
+        process, done_event, "Session [e1]", grace_sec=42, poll_interval=7, sleep_fn=sleeps.append,
     )
 
     assert process.terminated is True
     assert ts._state.backend_stuck_after_done_hit is True
     assert ts._state.stop_event.is_set()
-    assert 42 in sleeps
+    # The grace period is slept in poll_interval slices (so it can be cut short the moment
+    # more output arrives) -- what matters is that the full grace_sec was waited out.
+    assert sum(sleeps) == 42
 
 
 def test_terminate_if_stuck_after_done_does_nothing_if_process_already_exited():
@@ -838,8 +860,8 @@ def test_terminate_if_stuck_after_done_does_nothing_if_process_already_exited():
 
 
 def test_terminate_if_stuck_after_done_does_nothing_if_process_exits_during_grace_period():
-    # Exits by the time the post-grace-period check happens (2nd poll call), even though it
-    # hadn't exited yet at the pre-grace check (1st poll call).
+    # Exits by the time the first in-grace-period check happens (2nd poll call), even though
+    # it hadn't exited yet at the pre-grace check (1st poll call).
     process = _FakePollingProcess(exit_after_calls=2)
     done_event = threading.Event()
     done_event.set()
@@ -863,12 +885,82 @@ def test_terminate_if_stuck_after_done_waits_for_done_event_before_grace_period(
             done_event.set()  # let the wait-for-done loop finish after a few polls
 
     ts._terminate_if_stuck_after_done(
-        process, done_event, "Session [e1]", grace_sec=5, poll_interval=0.1, sleep_fn=fake_sleep,
+        process, done_event, "Session [e1]", grace_sec=5, poll_interval=5, sleep_fn=fake_sleep,
     )
 
     assert process.terminated is True
-    assert 0.1 in poll_sleeps  # the wait-for-done polling actually happened
-    assert 5 in poll_sleeps  # then the grace-period sleep
+    assert len(poll_sleeps) > 1  # the wait-for-done polling actually happened first
+    assert sum(poll_sleeps[:-1]) == 5 * (len(poll_sleeps) - 1)  # ...then one grace slice
+
+
+def test_terminate_if_stuck_after_done_does_not_terminate_a_session_that_resumes_working():
+    # The live regression (session_EPIC-05_20260815_032220.txt): a resumed session emitted a
+    # "[Done] turns=0" on its 2nd line and only then started working, so done_event was set
+    # while the backend was perfectly healthy. Clearing it mid-grace (what _apply_done_signal
+    # now does on the next output line) must call the watchdog off, not merely delay it.
+    process = _FakePollingProcess(exit_after_calls=None)
+    done_event = threading.Event()
+    done_event.set()
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            done_event.clear()  # more agent output arrived -- it wasn't finished after all
+        elif len(sleeps) == 4:
+            # ...and the session later ends normally, on its own, while the watchdog is back
+            # in its wait-for-the-next-[Done] loop.
+            process.exit_now()
+
+    ts._terminate_if_stuck_after_done(
+        process, done_event, "Session [e1]", grace_sec=100, poll_interval=1, sleep_fn=fake_sleep,
+    )
+
+    assert process.terminated is False
+    assert ts._state.backend_stuck_after_done_hit is False
+    assert sum(sleeps) < 100  # never sat out a full grace period
+
+
+def test_terminate_if_stuck_after_done_rearms_and_fires_on_a_later_done():
+    # Same shape as above, but the backend does eventually go silent for a full grace period
+    # after a later "[Done]" -- the watchdog must still catch that.
+    process = _FakePollingProcess(exit_after_calls=None)
+    done_event = threading.Event()
+    done_event.set()
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 1:
+            done_event.clear()  # output resumed -> watchdog goes back to waiting
+        elif len(sleeps) == 2:
+            done_event.set()  # a later, genuinely final [Done]
+
+    ts._terminate_if_stuck_after_done(
+        process, done_event, "Session [e1]", grace_sec=10, poll_interval=10, sleep_fn=fake_sleep,
+    )
+
+    assert process.terminated is True
+    assert ts._state.backend_stuck_after_done_hit is True
+
+
+# ---------------------------------------------------------------------------
+# _apply_done_signal
+# ---------------------------------------------------------------------------
+
+def test_apply_done_signal_arms_on_done():
+    done_event = threading.Event()
+    ts._apply_done_signal("[Done] turns=140 cost=$?", done_event)
+    assert done_event.is_set()
+
+
+def test_apply_done_signal_disarms_on_any_later_output():
+    # Claude Code emits a `result` event per re-invocation inside one `-p` run, so a "[Done]"
+    # is only ever the end of a *turn*; work after it means the process isn't finished.
+    done_event = threading.Event()
+    ts._apply_done_signal("[Done] turns=0 cost=$?", done_event)
+    ts._apply_done_signal("[Tool: Bash] {\"command\": \"dotnet test\"}", done_event)
+    assert not done_event.is_set()
 
 
 # ---------------------------------------------------------------------------
