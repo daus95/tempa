@@ -312,6 +312,11 @@ const state = {
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
   epics: [],
+  // Which epics' QA-history block is expanded, by epic_name. renderImplementStatus rebuilds
+  // every card from scratch on each 1s poll tick, so — same reasoning as expandedSpecDirs —
+  // the open/closed state has to live here rather than on the (thrown-away) DOM node, or a
+  // <details> the user just opened would snap shut on the very next tick.
+  expandedQaHistory: new Set(),
   // Server-computed (see _implementation_has_started): has any epic actually run yet?
   // Drives the Start -> Continue Implementation relabeling of all three buttons.
   implementStarted: false,
@@ -418,12 +423,16 @@ function closeLogFileModal() {
   logFileModalFullscreenBtn.innerHTML = iconSvg("maximize-2");
 }
 
-async function openLogFileModal(name) {
-  logFileModalTitle.textContent = name;
+// Shared by both file kinds this modal serves — a raw agent/session log (fetched via
+// /api/log-file, rendered verbatim in a <pre>) and a QA report (fetched via /api/qa-report,
+// rendered as markdown like the Verification page's report viewer). Same overlay/fullscreen
+// chrome either way; only the fetch URL and the rendering differ.
+async function openFileViewerModal(url, title, { markdown = false } = {}) {
+  logFileModalTitle.textContent = title;
   logFileModalBody.innerHTML = '<div class="log-file-modal-status">Loading…</div>';
   logFileModalOverlay.classList.remove("hidden");
   try {
-    const res = await fetch("/api/log-file?name=" + encodeURIComponent(name));
+    const res = await fetch(url);
     const data = await res.json();
     if (!data.ok) {
       logFileModalBody.innerHTML = `<div class="log-file-modal-status">${escapeHtml(data.error || "Could not open file.")}</div>`;
@@ -432,10 +441,23 @@ async function openLogFileModal(name) {
     const truncatedNote = data.truncated
       ? '<div class="log-file-modal-truncated">This file is large — showing only the most recent portion.</div>'
       : "";
-    logFileModalBody.innerHTML = truncatedNote + `<pre>${escapeHtml(data.content)}</pre>`;
+    logFileModalBody.innerHTML = truncatedNote + (markdown
+      ? `<div class="markdown-body">${renderMarkdown(data.content)}</div>`
+      : `<pre>${escapeHtml(data.content)}</pre>`);
   } catch (e) {
     logFileModalBody.innerHTML = '<div class="log-file-modal-status">Network error opening file.</div>';
   }
+}
+
+function openLogFileModal(name) {
+  return openFileViewerModal("/api/log-file?name=" + encodeURIComponent(name), name);
+}
+
+// Opened from a QA-history round's "report" link (see qaHistoryHtml) — the report
+// tempa_qa_history.record_qa_round attached to that round, served by _handle_qa_report the
+// same way session logs are, confined to get_qa_dir() instead of get_logs_dir().
+function openQaReportModal(name) {
+  return openFileViewerModal("/api/qa-report?name=" + encodeURIComponent(name), name, { markdown: true });
 }
 
 document.addEventListener("click", (e) => {
@@ -1591,6 +1613,62 @@ function featureStatusIcon(status) {
   return iconSvg(name);
 }
 
+// A qa_history entry's "report" field is the full path tempa_implement.py wrote it under
+// (e.g. ".tempa/qa/EPIC-03-qa-20260815_101500.md", or a Windows-style backslash path on that
+// platform) — /api/qa-report only accepts a bare filename (see _handle_qa_report, confined to
+// get_qa_dir() the same way log files are confined to get_logs_dir()), so this strips
+// whichever separator the path was built with down to the last component.
+function basenameOf(path) {
+  return String(path || "").replace(/\\/g, "/").split("/").pop();
+}
+
+// Collapsible per-epic QA round history (epic.qa_history / epic.qa_loop_strikes — see
+// tempa_qa_history.py) rendered inside the epic card. The strike badge stays visible whether
+// the history is expanded or not: seeing "1 strike" while implementation is still running is
+// the whole point — it's the warning that a round is repeating BEFORE the loop guard gives up
+// and stops the run over it, not just an explanation after the fact.
+function qaHistoryHtml(epic) {
+  const history = epic.qa_history || [];
+  if (!history.length) return "";
+  const strikes = epic.qa_loop_strikes || 0;
+  const strikeBadge = strikes > 0
+    ? `<span class="qa-history-strikes">⚠ ${strikes} strike${strikes === 1 ? "" : "s"}</span>`
+    : "";
+  const isOpen = state.expandedQaHistory.has(epic.epic_name);
+  const rows = history.map((entry) => {
+    if (entry.verdict === "reset") {
+      return `<div class="qa-history-row qa-history-reset-row">round ${entry.round} — reset by hand, counting restarts here</div>`;
+    }
+    const passed = entry.verdict === "pass";
+    const when = entry.at ? escapeHtml(entry.at.slice(0, 16).replace("T", " ")) : "";
+    const detail = passed
+      ? "passed"
+      : ((entry.failed || []).length ? escapeHtml(entry.failed.join(", ")) : "failed, no feature flagged");
+    // The QA prompt only writes a report file on a fail verdict (see src/prompt/qa.md) — a
+    // pass round's "report" field still carries the filename QA would have written to if it
+    // had found anything, so linking it there would 404.
+    const reportName = !passed && entry.report ? basenameOf(entry.report) : "";
+    const reportLink = reportName
+      ? ` <a href="#" class="qa-round-link" data-qa-report="${escapeHtml(reportName)}">report</a>`
+      : "";
+    return `<div class="qa-history-row">` +
+      `<span class="qa-history-icon">${passed ? "✅" : "❌"}</span>` +
+      `<span class="qa-history-label">round ${entry.round}</span>` +
+      `<span class="qa-history-detail">${detail}</span>` +
+      `<span class="qa-history-when">${when}</span>${reportLink}` +
+    `</div>`;
+  }).join("");
+  return (
+    `<div class="qa-history">` +
+      `<button type="button" class="qa-history-toggle${isOpen ? " open" : ""}" data-epic="${escapeHtml(epic.epic_name || "")}">` +
+        `<span class="twist">${iconSvg("chevron-right")}</span>` +
+        `<span>QA history (${history.length} round${history.length === 1 ? "" : "s"})</span>${strikeBadge}` +
+      `</button>` +
+      `<div class="qa-history-body${isOpen ? "" : " hidden"}">${rows}</div>` +
+    `</div>`
+  );
+}
+
 function renderImplementStatus() {
   // The 1s poll rebuilds every card from scratch, and emptying the container collapses its
   // height — which makes the browser clamp the panel's scrollTop to 0. Without capturing and
@@ -1635,6 +1713,7 @@ function renderImplementStatus() {
         `<button type="button" class="impl-epic-verify-btn" data-epic="${escapeHtml(epic.epic_name || "")}">Verify</button>` +
       `</div>` +
       blockedReason +
+      qaHistoryHtml(epic) +
       `<div class="impl-feature-list">${features}</div>`;
     implStatusBody.appendChild(card);
   }
@@ -1645,6 +1724,20 @@ function renderImplementStatus() {
 // card from scratch on each 1s poll tick — re-attaching per card would leak/duplicate
 // listeners over time.
 implStatusBody.addEventListener("click", async (e) => {
+  const historyToggle = e.target.closest(".qa-history-toggle");
+  if (historyToggle) {
+    const epicName = historyToggle.dataset.epic;
+    if (state.expandedQaHistory.has(epicName)) state.expandedQaHistory.delete(epicName);
+    else state.expandedQaHistory.add(epicName);
+    renderImplementStatus();
+    return;
+  }
+  const reportLink = e.target.closest(".qa-round-link");
+  if (reportLink) {
+    e.preventDefault();
+    openQaReportModal(reportLink.dataset.qaReport);
+    return;
+  }
   const btn = e.target.closest(".impl-epic-verify-btn");
   if (!btn) return;
   const epic = btn.dataset.epic;

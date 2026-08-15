@@ -248,6 +248,14 @@ tempa status                  # summary of all epic + feature + QA status
 tempa show-folders            # active working folder
 ```
 
+The dashboard's Implementation → Status tab shows the same per-epic/feature state live, plus a
+collapsible **QA history** on each epic card: every QA round it's had, which features were
+flagged, and a link to open that round's report. An epic with one or more "strikes" toward the
+QA loop guard (see `qa_loop_strikes` in [config-json.md](config-json.md)) shows a `⚠ N
+strike(s)` badge next to the toggle even while collapsed — visible while the epic is still
+`require_fixing` and the run is still going, not just after the guard gives up and marks it
+`failed`.
+
 ## Recovery (if something goes wrong)
 
 ```bash
