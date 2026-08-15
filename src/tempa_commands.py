@@ -566,9 +566,12 @@ def print_status() -> None:
         if status == "done":
             qa_tag = "  [QA ok]" if s.get("qa_passed", False) else "  [QA --]"
         print(f"{icon} {epic:<10} {status:<16} {completed_f}/{total_f} features   last run: {last_run}{qa_tag}")
+        # blocked_reason carries whichever guard gave up on this epic — no forward progress
+        # across resumed sessions, or a QA loop it never converged out of (tempa_qa_history).
+        # Each writes its own explanation, so the label here stays neutral.
         if status == "failed" and s.get("blocked_reason"):
             reason = s["blocked_reason"].replace("\n", "\n      ")
-            print(f"   ⚠ Blocked — no progress across resumed sessions:\n      {reason}")
+            print(f"   ⚠ Halted:\n      {reason}")
 
         feat_icons = {"done": "✅", "failed": "❌", "require_fixing": "🔧"}
         for feat in s.get("features", []):

@@ -348,8 +348,38 @@ def test_reset_failed_epics_clears_run_and_stall_counters():
     assert epic["total_run"] == 0
     assert epic["qa_total_run"] == 0
     assert epic["no_progress_rounds"] == 0
+    assert epic["qa_loop_strikes"] == 0
     assert "blocked_reason" not in epic
     assert "blocked_by_epic" not in epic
+
+
+def test_reset_failed_epics_keeps_qa_history_but_marks_a_reset_boundary():
+    # The history is the only record a human has that this epic was cycling through QA, so it
+    # survives the reset -- a marker is appended instead, which is what makes the loop guard
+    # start counting from here rather than instantly re-tripping on the pre-reset rounds.
+    config = {"epic": [{
+        "epic_name": "e1", "status": "failed", "qa_loop_strikes": 2,
+        "qa_history": [
+            {"round": 1, "verdict": "fail", "failed": ["F1"]},
+            {"round": 2, "verdict": "fail", "failed": ["F2"]},
+        ],
+    }]}
+    tm.reset_failed_epics(config)
+    history = config["epic"][0]["qa_history"]
+    assert [entry["verdict"] for entry in history] == ["fail", "fail", "reset"]
+
+
+def test_reset_qa_state_restarts_the_qa_loop_guard_window():
+    config = {"epic": [{
+        "epic_name": "e1", "status": "done", "qa_passed": True, "qa_status": "done",
+        "qa_loop_strikes": 1, "total_features": 1, "completed_features": 1,
+        "features": [{"id": "F1", "status": "done"}],
+        "qa_history": [{"round": 1, "verdict": "fail", "failed": ["F1"]}],
+    }]}
+    tm.reset_qa_state(config)
+    epic = config["epic"][0]
+    assert epic["qa_loop_strikes"] == 0
+    assert [entry["verdict"] for entry in epic["qa_history"]] == ["fail", "reset"]
 
 
 def test_reset_failed_epics_nothing_failed_returns_empty():

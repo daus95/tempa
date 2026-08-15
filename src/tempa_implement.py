@@ -82,22 +82,59 @@ def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
 
 
 def _validate_and_increment_qa_run(config: dict, index: int, label: str) -> bool:
-    """Increment qa_total_run and validate against max_session_run. Returns False if limit exceeded."""
+    """Increment qa_total_run and validate against max_session_run. Returns False if limit exceeded.
+
+    On the limit path the epic is marked `failed`, NOT passed. This used to set
+    qa_passed=True — declaring an epic QA-verified precisely because Tempa had run out of
+    attempts to verify it, while the last real verdict on record was a failure. That is the one
+    outcome a QA gate must never produce: the run continues, later epics build on it, and nothing
+    downstream can tell it apart from an epic that genuinely passed.
+
+    `qa_status` has to be cleared alongside the status. Leaving it "ongoing" would send the very
+    next poll straight back into check_and_run's QA-resume branch, which runs before the
+    failed-epic halt and would re-dispatch this same QA forever. And the stop_event is what keeps
+    a failed LAST epic from falling through to "no next_index" → all_done → "All epics done" —
+    the same reason run_session sets it on its own failure path."""
     max_run = config.get("max_session_run")
     qa_total_run = config["epic"][index].get("qa_total_run", 0)
     if max_run is not None and qa_total_run >= max_run:
-        log(f"QA [{label}] has reached the max_session_run limit ({max_run}). Skipping QA.")
+        log(f"QA [{label}] has reached the max_session_run limit ({max_run}) without ever passing. "
+            "Marking it failed rather than passing it unverified — review the epic and its QA "
+            "reports, then run `tempa implement --reset-failed` (or click Continue Implementation) "
+            "to retry.")
+        config["epic"][index]["status"] = "failed"
+        config["epic"][index]["qa_status"] = "idle"
+        config["epic"][index]["qa_passed"] = False
         notify_attention(
             AttentionEventType.QA_LIMIT_REACHED, "QA",
             f"{label} QA reached its session limit",
-            "QA was skipped by the run limit. Review the epic and QA report before relying on it.",
+            "The epic was marked failed, not passed — it has never been verified. Review it and "
+            "its QA reports, then run `tempa implement --reset-failed` to retry.",
             epic=label, details={"max_session_run": max_run},
         )
-        config["epic"][index]["qa_passed"] = True
-        config["epic"][index]["qa_status"] = "done"
+        _state.stop_event.set()
         return False
     config["epic"][index]["qa_total_run"] = qa_total_run + 1
     return True
+
+
+def _halt_if_earlier_epic_failed(config: dict, upto_index: int) -> None:
+    """Raise SystemExit(1) if any epic before `upto_index` is `failed` — nothing after a failed
+    epic may be worked on until a human resolves it.
+
+    Called from BOTH places that pick the next thing to do. The QA gate needs it because its own
+    "wait for the previous epic's re-implementation" deferral (see check_and_run) matches any
+    earlier epic with qa_status="done" + qa_passed=false — which is exactly the state a `failed`
+    epic is left in when its QA found issues and the fix session, the QA run limit, or the QA
+    loop guard subsequently gave up on it. That deferral never resolves on its own, so without
+    this the runner logs "QA [x] deferred" on every poll forever and never reaches the halt below
+    it, turning a stop that should be actionable into a silent spin."""
+    for i in range(upto_index):
+        if config["epic"][i].get("status") == "failed":
+            label = config["epic"][i].get("epic_name", f"epic_{i}")
+            log(f"Halted — session [{label}] at index {i} has failed. Fix it, then run "
+                "`tempa implement --reset-failed` (failed → pending) before proceeding.")
+            raise SystemExit(1)
 
 
 def _reset_failed_before_retry(label: str) -> None:
@@ -263,6 +300,10 @@ def check_and_run(features_override: int | None = None) -> None:
                     save_config(config)
                     return
 
+                # A failed earlier epic is never going to finish that re-implementation on its
+                # own, so it must halt here rather than fall into the deferral below.
+                _halt_if_earlier_epic_failed(config, i)
+
                 # Block if any PREVIOUS epic's QA found issues and is waiting for re-implementation.
                 # qa_status="done" + qa_passed=false means QA ran and failed — that epic must be
                 # re-implemented (and re-QA'd) before we advance to this one.
@@ -324,12 +365,7 @@ def check_and_run(features_override: int | None = None) -> None:
             return
 
         # All epics before next_index must not be failed
-        for i in range(next_index):
-            if config["epic"][i]["status"] == "failed":
-                label = config["epic"][i].get("epic_name", f"epic_{i}")
-                log(f"Halted — session [{label}] at index {i} has failed. Fix it, then run "
-                    "`tempa implement --reset-failed` (failed → pending) before proceeding.")
-                raise SystemExit(1)
+        _halt_if_earlier_epic_failed(config, next_index)
 
         session = config["epic"][next_index]
         label = session.get("epic_name", f"epic_{next_index}")

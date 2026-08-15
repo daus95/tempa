@@ -208,7 +208,7 @@ DEFAULT_REASONING_EFFORTS = {
 IMPLEMENTATION_START_REQUIREMENTS = ("no_critical_or_major", "no_critical", "none")
 DEFAULT_EMAIL_NOTIFICATION_EVENTS = (
     "authentication_required", "implementation_failed", "plan_failed", "session_limit_reached",
-    "qa_limit_reached", "clarification_answers_required", "clarification_limit_reached",
+    "qa_limit_reached", "qa_oscillation_detected", "clarification_answers_required", "clarification_limit_reached",
     "clarification_failed", "confirmation_required", "verification_failed", "backend_test_failed",
 )
 
@@ -227,6 +227,8 @@ DEFAULT_CONFIG = {
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 5,
     "implement_no_progress_rounds": 2,
+    "qa_loop_strikes": 2,
+    "max_qa_fail_rounds": 6,
     "clarify_overlay_warn_findings": 25,
     "usage_limit_retry_wait_sec": 1800,
     "usage_limit_heartbeat_sec": 300,
@@ -566,6 +568,23 @@ def get_finalize_no_progress_rounds(config: dict) -> int | float:
     rounds in a row may fail to reduce the critical+major finding count before the loop
     gives up and asks for human answers (see run_clarify_finalize) — defaulting to 5."""
     return _get_positive_number(config, "finalize_no_progress_rounds", DEFAULT_CONFIG["finalize_no_progress_rounds"])
+
+
+def get_qa_loop_strikes(config: dict) -> int | float:
+    """Return config.json's "qa_loop_strikes" — how many QA rounds in a row must show a
+    regression or a repeated failure set before an epic is declared stuck cycling through the
+    QA gate (see tempa_qa_history.detect_qa_loop) — defaulting to 2. Raise it to give an epic
+    more rope before the guard stops the run."""
+    return _get_positive_number(config, "qa_loop_strikes", DEFAULT_CONFIG["qa_loop_strikes"])
+
+
+def get_max_qa_fail_rounds(config: dict) -> int | float:
+    """Return config.json's "max_qa_fail_rounds" — how many times one epic may fail QA without
+    ever passing before the loop guard stops it regardless of pattern (see
+    tempa_qa_history.detect_qa_loop) — defaulting to 6. This is the backstop for the case where
+    the QA agent doesn't write per-feature statuses at all, leaving the pattern rules nothing to
+    fingerprint a round by."""
+    return _get_positive_number(config, "max_qa_fail_rounds", DEFAULT_CONFIG["max_qa_fail_rounds"])
 
 
 def get_clarify_overlay_warn_findings(config: dict) -> int | float:

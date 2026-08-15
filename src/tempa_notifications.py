@@ -31,6 +31,7 @@ class AttentionEventType(StrEnum):
     PLAN_FAILED = "plan_failed"
     SESSION_LIMIT_REACHED = "session_limit_reached"
     QA_LIMIT_REACHED = "qa_limit_reached"
+    QA_OSCILLATION_DETECTED = "qa_oscillation_detected"
     CLARIFICATION_ANSWERS_REQUIRED = "clarification_answers_required"
     CLARIFICATION_LIMIT_REACHED = "clarification_limit_reached"
     CLARIFICATION_FAILED = "clarification_failed"
