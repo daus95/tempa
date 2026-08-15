@@ -10,6 +10,14 @@ once the first tagged release is cut.
 
 ### Added
 
+- **The Implementation Status tab now shows each epic's QA round history.** Every epic card
+  gets a collapsible "QA history (N rounds)" section — round number, verdict, which features
+  were flagged, and a link to that round's report — built from the `qa_history` recorded by
+  the QA loop guard. An epic with one or more strikes shows a `⚠ N strike(s)` badge next to
+  the toggle even while it's still collapsed and the run is still going, so a cycling epic is
+  visible before the guard gives up and stops it, not just after. A new `/api/qa-report`
+  route serves the underlying `.tempa/qa/*.md` report a round's link points to, rendered as
+  markdown in the same viewer modal the Log tab already uses for session logs.
 - **Tempa now notices when an epic is cycling through QA instead of converging, and stops.**
   QA fails features 1–2 → the fix session repairs them and marks the epic done → QA fails
   features 3–4 → fixing those regresses 1–2 → repeat, forever. Every existing safeguard was

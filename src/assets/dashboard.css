@@ -215,6 +215,27 @@
     border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); cursor: pointer; }
   .impl-epic-verify-btn:hover { opacity: 0.9; border-color: var(--accent); }
 
+  /* ---- per-epic QA round history (tempa_qa_history.py) ---- */
+  .qa-history { margin-top: 10px; }
+  .qa-history-toggle { display: flex; align-items: center; gap: 6px; padding: 2px 0;
+    background: none; border: none; color: var(--muted); font-size: 0.82rem; cursor: pointer;
+    font-family: inherit; }
+  .qa-history-toggle:hover { color: var(--text); }
+  .qa-history-toggle .twist { width: 14px; text-align: center; flex: none; transition: transform .12s; }
+  .qa-history-toggle .twist .icon-svg { width: 12px; height: 12px; vertical-align: -1px; }
+  .qa-history-toggle.open .twist { transform: rotate(90deg); }
+  .qa-history-strikes { color: var(--major); font-weight: 600; }
+  .qa-history-body { margin: 4px 0 0 20px; }
+  .qa-history-body.hidden { display: none; }
+  .qa-history-row { display: flex; align-items: baseline; gap: 8px; font-size: 0.82rem;
+    padding: 2px 0; color: var(--text); }
+  .qa-history-label { color: var(--muted); flex: none; }
+  .qa-history-detail { flex: 1; }
+  .qa-history-when { color: var(--muted); font-size: 0.76rem; flex: none; }
+  .qa-history-reset-row { color: var(--muted); font-style: italic; }
+  .qa-round-link { color: var(--accent); text-decoration: none; flex: none; }
+  .qa-round-link:hover { text-decoration: underline; }
+
   /* ---- verification page (list of runs + per-run detail/report) ---- */
   /* Same "pane itself never scrolls, inner content is the scroller" treatment as
      .impl-pane/.clarify-overview-pane. */
@@ -588,5 +609,6 @@
   .log-file-modal-body pre { margin: 0; padding: 14px 16px; font-family: ui-monospace, Consolas, monospace;
     font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text); }
   .log-file-modal-body .log-file-modal-status { padding: 14px 16px; color: var(--muted); font-size: 0.88rem; }
+  .log-file-modal-body .markdown-body { padding: 14px 20px; }
   .log-file-modal-body .log-file-modal-truncated { padding: 8px 16px; color: var(--major);
     font-size: 0.8rem; border-bottom: 1px solid var(--border); }

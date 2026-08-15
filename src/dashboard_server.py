@@ -215,6 +215,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_update_status()
         elif route == "/api/log-file":
             self._handle_log_file(parse_qs(parsed.query))
+        elif route == "/api/qa-report":
+            self._handle_qa_report(parse_qs(parsed.query))
         elif route == "/api/verify/runs":
             self._send_json(200, {"ok": True, "runs": _list_verify_runs(self.server)})
         elif route == "/api/verify/detail":
@@ -295,6 +297,31 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         target = _resolve_within(tempa_config.get_logs_dir(), name)
         if target is None or target.suffix.lower() != ".txt" or not target.is_file():
             self._send_json(404, {"ok": False, "error": "Log file not found."})
+            return
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            self._send_json(500, {"ok": False, "error": f"Could not read file: {e}"})
+            return
+        truncated = len(content) > LOG_FILE_MAX_CHARS
+        if truncated:
+            content = content[-LOG_FILE_MAX_CHARS:]
+        self._send_json(200, {
+            "ok": True, "name": target.name, "content": content, "truncated": truncated,
+        })
+
+    def _handle_qa_report(self, query: dict) -> None:
+        """Serve one QA report's raw markdown by bare filename (no subdirectories — these are
+        all flat files directly under .tempa/qa/) for the Status tab's per-round QA history
+        (epic.qa_history[].report — see tempa_qa_history.record_qa_round) to open in the log
+        file viewer modal, rendered as markdown instead of the modal's usual `<pre>` text.
+        `_resolve_within` confines this to get_qa_dir() the same way log/spec/clarify file
+        reads are each confined to their own root, so a crafted name can't read anything
+        outside the QA reports folder."""
+        name = (query.get("name", [""])[0])
+        target = _resolve_within(tempa_config.get_qa_dir(), name)
+        if target is None or target.suffix.lower() != ".md" or not target.is_file():
+            self._send_json(404, {"ok": False, "error": "QA report not found."})
             return
         try:
             content = target.read_text(encoding="utf-8", errors="replace")
