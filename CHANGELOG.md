@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-15
+
 ### Added
 
 - **The Implementation Status tab now shows each epic's QA round history.** Every epic card
