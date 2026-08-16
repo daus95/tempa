@@ -54,6 +54,7 @@ def read_config(backend_status: dict) -> Response:
             "finalize_no_progress_rounds": tempa_config.get_finalize_no_progress_rounds(config),
             "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
             "commit_after_qa_pass": tempa_config.get_commit_after_qa_pass(config),
+            "terminate_leftover_processes": tempa_config.get_terminate_leftover_processes(config),
             "implementation_start_requirement": tempa_config.get_implementation_start_requirement(config),
             "notifications": {"email": tempa_config.get_email_notifications(config)},
             "usage_limit_retry_wait_sec": tempa_config.get_usage_limit_retry_wait_sec(config),
@@ -188,6 +189,14 @@ def validate_settings(payload: dict | list | None, current_config: dict) -> tupl
         **limits,
         "allow_finalize_with_critical": bool(payload.get("allow_finalize_with_critical")),
         "commit_after_qa_pass": bool(payload.get("commit_after_qa_pass")),
+        # Defaulted, unlike its neighbours' bare bool(payload.get(...)) — deliberately. A
+        # payload that simply omits this key (a dashboard tab left open from before the
+        # upgrade, a hand-built body) must not be able to turn containment off: unlike every
+        # other toggle here, "off" produces no visible signal, so the orphans would just
+        # start accumulating and nobody would trace it back to a save that said "Saved.".
+        "terminate_leftover_processes": bool(payload.get(
+            "terminate_leftover_processes",
+            tempa_config.DEFAULT_CONFIG["terminate_leftover_processes"])),
         "implementation_start_requirement": implementation_start_requirement,
         "notifications": {"email": email},
     }

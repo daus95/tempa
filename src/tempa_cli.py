@@ -61,6 +61,7 @@ from tempa_maintenance import (
     run_plan_clear,
 )
 from tempa_notifications import send_test_email
+from tempa_process_group import install_process_cleanup_handlers
 from tempa_update import print_check_update, print_version, run_update
 
 # Ensure UTF-8 output on Windows consoles with non-unicode code pages
@@ -246,6 +247,11 @@ def run() -> None:
     if "--help" in sys.argv or "-h" in sys.argv:
         print_help()
         sys.exit(0)
+
+    # Ctrl+C and the dashboard's Stop button have to reach the backend CLI's whole process
+    # tree, not just Tempa itself — see tempa_process_group for why that stops being
+    # automatic once a session is contained.
+    install_process_cleanup_handlers()
 
     cli_args = _build_arg_parser().parse_args()
 

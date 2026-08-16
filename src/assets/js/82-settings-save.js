@@ -169,6 +169,7 @@ function buildSettingsPayload() {
     max_clarification_run: settingsMaxClarificationRun.value,
     finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
     commit_after_qa_pass: settingsCommitAfterQaPass.checked,
+    terminate_leftover_processes: settingsTerminateLeftoverProcesses.checked,
     allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,
     implementation_start_requirement: selectedImplementRequirement(),
     notifications: { email: {

@@ -8,6 +8,38 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Processes a session leaves behind are now terminated with it.** An agent CLI starts
+  long-running commands routinely — a dev server to check its own work, a file watcher, a
+  build daemon, a test runner — and doesn't reliably stop them. Once the CLI exits they are
+  orphaned, and nothing could reach them: Tempa's only tree-kill walks live parent-pid links,
+  which an orphan by definition no longer has. In one workspace that left a `vite` dev server
+  still holding its port 5.4 hours after the session that started it had finished, alongside
+  15 idle build workers holding 1.9 GB between them. Each backend CLI is now spawned inside a
+  container the operating system tears down along with the session — a Job Object on Windows,
+  a process group on Linux and macOS — so the session's whole process tree goes when the
+  session does, not just the CLI process. Because it asks only who started a process and
+  never what it is, this works the same for any toolchain. On by default; toggle it off in
+  dashboard Settings → Runs tab → "Process Cleanup" if you want a session's processes to
+  outlive it. Anything genuinely detached — a Docker container, an installed service — is out
+  of scope and unchanged, and containment that can't be established is logged and the session
+  continues as before, since cleanup must never fail a run.
+
+### Fixed
+
+- **A backend session that raised mid-stream left its CLI process running.** The spawn in
+  `_stream_backend_process` had no `try`/`finally`, so an exception in the output-parsing
+  loop propagated out without ever reaching `process.wait()` or terminating anything — the
+  one path where the CLI was leaked outright rather than merely outliving its usefulness.
+- **A backend CLI that never exited would wedge the runner indefinitely.** The post-loop
+  `process.wait()` had no timeout. It is now bounded whenever the session is contained (there
+  is something to fall back on); with containment off it still waits exactly as before.
+- **On Linux and macOS, the dashboard's Stop button orphaned the backend CLI.** It sent
+  `terminate()` to the `tempa implement` process only — the Windows path had a `taskkill /T`
+  tree-kill, the POSIX path had no equivalent. Tempa now installs SIGINT/SIGTERM handlers
+  that reclaim the contained session, so Stop and Ctrl+C both reach the CLI's whole tree.
+
 ## [0.6.7] - 2026-08-16
 
 ### Changed

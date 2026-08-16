@@ -202,8 +202,9 @@ Backends** button there to re-check after installing or logging into one. See
 [docs/cli-availability.md](docs/cli-availability.md).
 
 The Settings page is organized into five tabs: **AI Models** (backend/model/reasoning effort
-per stage), **Runs** (run limits, retry waits, poll interval, and whether Tempa commits the
-workspace to git after each epic passes QA), **Guardrails** (what
+per stage), **Runs** (run limits, retry waits, poll interval, whether Tempa commits the
+workspace to git after each epic passes QA, and whether processes a session leaves running
+are terminated when it ends), **Guardrails** (what
 clarification findings may block Finalized Clarification and Start Implementation),
 **Notifications** (email alerts) and **Maintenance** (updates, restart server). One **Save
 Settings** button at the bottom writes every tab at once, and it stays visible while you
@@ -481,6 +482,20 @@ long unattended run leaves a checkpoint per verified epic instead of one giant u
 diff at the end. It's skipped silently (logged, not an error) if the workspace isn't a git
 repository or there's nothing to commit; turn it off if you'd rather commit by hand. See
 `commit_after_qa_pass` in [docs/config-json.md](docs/config-json.md).
+
+**Terminate leftover processes** (on by default — Settings → Runs tab → "Process Cleanup")
+ends whatever a session left running when that session finishes — the dev server it started
+to check its own work, a file watcher, a build daemon, a test runner — instead of leaving it
+orphaned. Agent CLIs start long-running commands routinely and don't reliably stop them: in
+one workspace a `vite` dev server was still holding its port 5.4 hours after the session that
+started it had finished, alongside 15 idle build workers holding 1.9 GB between them. Each
+session's CLI runs inside a container the operating system tears down with it — a Job Object
+on Windows, a process group on Linux and macOS — so the session's whole process tree goes,
+not just the CLI. It never asks what a process is, only who started it, so this works the
+same whatever your project is built with. Anything genuinely detached (a Docker container, an
+installed service) is out of scope. Turn it off only if you want a session's processes to
+outlive it — nothing else will clean them up. See `terminate_leftover_processes` in
+[docs/config-json.md](docs/config-json.md).
 
 Once any epic has actually run, the button relabels itself to **Continue Implementation** —
 the run resumes the existing plan rather than starting anything — and clicking it resets any

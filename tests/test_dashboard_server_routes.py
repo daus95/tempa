@@ -303,7 +303,8 @@ def test_config_get_returns_every_settings_field(dash):
     assert set(body["config"]) == {
         "models", "backends", "reasoning_efforts", "features_per_session", "max_session_run",
         "max_clarification_run", "finalize_no_progress_rounds", "allow_finalize_with_critical",
-        "commit_after_qa_pass", "implementation_start_requirement", "notifications",
+        "commit_after_qa_pass", "terminate_leftover_processes",
+        "implementation_start_requirement", "notifications",
         "usage_limit_retry_wait_sec", "usage_limit_heartbeat_sec",
         "server_overloaded_retry_wait_sec", "poll_interval_sec", "backends_status",
     }
@@ -583,6 +584,7 @@ def _config_payload(**overrides) -> dict:
         "poll_interval_sec": 60,
         "allow_finalize_with_critical": False,
         "commit_after_qa_pass": True,
+        "terminate_leftover_processes": True,
         "implementation_start_requirement": "no_critical_or_major",
         "notifications": {"email": {"enabled": False}},
     }
@@ -600,6 +602,26 @@ def test_config_save_persists_and_echoes_the_settings(dash):
     saved = tempa_config.load_config()
     assert saved["models"] == {stage: "claude-sonnet-5" for stage in STAGES}
     assert saved["poll_interval_sec"] == 60
+
+
+def test_config_save_persists_leftover_process_termination_turned_off(dash):
+    status, body = dash.post("/api/config/save", _config_payload(terminate_leftover_processes=False))
+    assert status == 200
+    assert body["config"]["terminate_leftover_processes"] is False
+    assert tempa_config.load_config()["terminate_leftover_processes"] is False
+
+
+def test_config_save_keeps_leftover_process_termination_on_when_the_field_is_absent(dash):
+    """A client predating the toggle — a dashboard tab left open across an upgrade, a
+    hand-built payload — must not silently turn containment off by omitting the field.
+    Unlike every other toggle on this form, "off" has no observable symptom until orphaned
+    processes have been piling up for hours, so an accidental flip is never traced back."""
+    payload = _config_payload()
+    del payload["terminate_leftover_processes"]
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 200
+    assert body["config"]["terminate_leftover_processes"] is True
+    assert tempa_config.load_config()["terminate_leftover_processes"] is True
 
 
 def test_config_save_keeps_non_claude_model_strings_verbatim(dash):

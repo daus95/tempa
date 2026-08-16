@@ -464,6 +464,22 @@ def test_get_commit_after_qa_pass_ignores_non_bool_value():
 
 
 # ---------------------------------------------------------------------------
+# get_terminate_leftover_processes
+# ---------------------------------------------------------------------------
+
+def test_get_terminate_leftover_processes_defaults_true():
+    assert tempa_config.get_terminate_leftover_processes({}) is True
+
+
+def test_get_terminate_leftover_processes_respects_false():
+    assert tempa_config.get_terminate_leftover_processes({"terminate_leftover_processes": False}) is False
+
+
+def test_get_terminate_leftover_processes_ignores_non_bool_value():
+    assert tempa_config.get_terminate_leftover_processes({"terminate_leftover_processes": "nope"}) is True
+
+
+# ---------------------------------------------------------------------------
 # get_model — DEFAULT_MODELS now includes "clarify_apply"
 # ---------------------------------------------------------------------------
 

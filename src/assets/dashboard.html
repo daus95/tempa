@@ -503,6 +503,37 @@
               <input type="number" id="settingsPollIntervalSec" min="1" step="1">
             </div>
           </div>
+          <div class="settings-group">
+            <h3>Process Cleanup</h3>
+            <div class="settings-field">
+              <label class="settings-switch-row" for="settingsTerminateLeftoverProcesses">
+                <span class="settings-switch">
+                  <input type="checkbox" id="settingsTerminateLeftoverProcesses">
+                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+                </span>
+                <span>Terminate leftover processes</span>
+              </label>
+              <p class="settings-field-desc">On by default. When a session ends, anything it left running
+                is terminated with it — the dev server it started to check its own work, a file watcher, a
+                build daemon, a test runner — instead of being orphaned and left holding memory and ports.</p>
+              <details class="settings-more">
+                <summary>More…</summary>
+                <p>An agent CLI starts long-running commands routinely and doesn't reliably stop them: in
+                  one workspace a <code>vite</code> dev server was still holding its port 5.4 hours after
+                  the session that started it had finished, alongside 15 idle build workers holding 1.9 GB
+                  between them. Tempa spawns each session's CLI inside a container the operating system
+                  tears down along with it — a Job Object on Windows, a process group on Linux and macOS —
+                  so the session's whole process tree goes, not just the CLI itself. It never asks what a
+                  process is, only who started it, so this works the same for any toolchain.</p>
+                <p>Only what the OS still counts as part of that session is covered. Anything genuinely
+                  detached — a Docker container, a service the session installed, a job on another machine
+                  — is outside what Tempa can reclaim.</p>
+                <p>Read when each session starts, so a change here applies to the next session rather than
+                  one already running. Turn it off only if you want a session's processes to outlive it,
+                  for example to keep using a dev server it started — nothing else will clean them up.</p>
+              </details>
+            </div>
+          </div>
         </div>
         <div class="tab-panel hidden" id="settingsTabGuardrailsPanel">
           <div class="settings-group">
