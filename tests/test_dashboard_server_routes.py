@@ -21,6 +21,8 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
+import dashboard_api_settings
+import dashboard_api_status
 import dashboard_runs
 import dashboard_server
 import dashboard_verify
@@ -244,7 +246,7 @@ def test_log_file_rejects_non_txt(dash):
 
 
 def test_log_file_truncates_to_the_tail(dash, monkeypatch):
-    monkeypatch.setattr(dashboard_server, "LOG_FILE_MAX_CHARS", 10)
+    monkeypatch.setattr(dashboard_api_status, "LOG_FILE_MAX_CHARS", 10)
     logs = tempa_config.get_logs_dir()
     logs.mkdir(parents=True, exist_ok=True)
     (logs / "big.txt").write_text("0123456789ABCDE", encoding="utf-8")
@@ -739,7 +741,7 @@ def test_principles_save_rejects_non_text(dash):
 
 
 def test_test_email_reports_the_notification_result(dash, monkeypatch):
-    monkeypatch.setattr(dashboard_server, "send_test_email", lambda: (False, "SMTP is off."))
+    monkeypatch.setattr(dashboard_api_settings, "send_test_email", lambda: (False, "SMTP is off."))
     assert dash.post("/api/notifications/test-email", {}) == (
         400, {"ok": False, "message": "SMTP is off."})
 

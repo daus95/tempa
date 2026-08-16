@@ -62,7 +62,12 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `dashboard_ui.py` | `run_dashboard()` — starts the `HTTPServer`, wires the handler and initial page render together. The dashboard's own entry point. |
-| `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`), including `/api/backends/status` (see [cli-availability.md](cli-availability.md)). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
+| `dashboard_server.py` | `_DashboardHandler` — the HTTP layer and nothing else: two route tables (`GET_ROUTES`/`POST_ROUTES`), body/query reading, and one thin adapter per route that hands off to a `dashboard_api_*` module and sends back the `(status, payload)` it returns. |
+| `dashboard_api_spec.py` | Specification pane: read/save/upload/delete/rename inside the PRD folder, all confined to it by `dashboard_spec._resolve_within`. |
+| `dashboard_api_clarify.py` | Clarification pane: render one findings file, write answers back into it (`apply_answers_to_file`), the skip-minor toggle, and the server-side gate on starting a Finalized Clarification run. |
+| `dashboard_api_status.py` | The read-only/polled endpoints: `/api/tree`'s first-paint payload, both live run-status payloads, the log and QA-report viewers, the update check, and `backend_status()` (see [cli-availability.md](cli-availability.md)). |
+| `dashboard_api_settings.py` | Settings pane: reading config.json for the form, and validating + saving it back. The validation is plain functions over the payload, so every rule (and its user-facing message) is testable without HTTP. Architecture Principles and the SMTP test live here too. |
+| `dashboard_api_workspace.py` | Home page's working-folder controls and the Settings maintenance actions — select/open/detach a workspace, Clear Everything, apply an update, restart the server. Each shells out to `tempa.py <command>` rather than doing the work in-process (see [The CLI/dashboard boundary](#the-clidashboard-boundary)). |
 | `dashboard_assets.py` | Reads `assets/dashboard.{html,css}`, the `assets/js/*.js` parts (concatenated in `JS_PARTS` order), and the two guide `.html` files from disk once (`lru_cache`), and inlines CSS/JS into a self-contained document — no external requests from the page. |
 | `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
 | `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |
@@ -194,10 +199,15 @@ workflow → its own module; a small stateless command → `tempa_commands.py`).
 `tempa_prompts.py`, and a runner in `tempa_session.py` if it needs its own stop-condition handling
 — otherwise reuse `_run_oneshot_session`.
 
-**Adding a new dashboard page/route:** add the route in `dashboard_server._DashboardHandler`, and
-if it's a standalone guide page (not part of the single-page app), follow the
-`principles_guide_page()`/`spec_guide_page()` pattern in `dashboard_assets.py` — a static `.html`
-file in `src/assets/` with the dashboard's CSS inlined at request time.
+**Adding a new dashboard route:** add an entry to `GET_ROUTES`/`POST_ROUTES` in
+`dashboard_server._DashboardHandler` plus the one-line adapter method it names, and put the actual
+logic in the `dashboard_api_*` module for that pane (a function taking what it needs explicitly and
+returning `(status, payload)` — no HTTP objects, so it can be tested directly).
+
+**Adding a new standalone guide page** (a document opened in its own tab, not part of the
+single-page app): follow the `principles_guide_page()`/`spec_guide_page()` pattern in
+`dashboard_assets.py` — a static `.html` file in `src/assets/` with the dashboard's CSS inlined at
+request time — and give it a route in `GET_ROUTES` like the two existing ones.
 
 **Adding a new background run kicked off from the dashboard:** see
 [The CLI/dashboard boundary](#the-clidashboard-boundary) above — it goes through

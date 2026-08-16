@@ -10,6 +10,16 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **The dashboard's HTTP handler is now routing only, with each pane's logic in its own
+  module.** `dashboard_server.py` was a 1,238-line class where routing, validation and
+  business logic for seven feature areas sat in one 50-method block; it is 447 lines now —
+  two route tables and a one-line adapter per route — with the work moved into
+  `dashboard_api_spec`, `dashboard_api_clarify`, `dashboard_api_status`,
+  `dashboard_api_settings` and `dashboard_api_workspace`. Those take what they need as plain
+  arguments and return the `(status, payload)` to send, so the Settings form's 20-odd
+  validation rules are now testable without an HTTP request. Every route answers exactly
+  what it did before, held in place by the 101 characterization tests added first.
+
 - **Tempa's self-update and its `--help` page moved out of the modules they were crowding.**
   `tempa version`/`check-update`/`update` are now `tempa_update.py` — the only module that
   talks to GitHub or writes to the install folder — and the dashboard reads the version from
