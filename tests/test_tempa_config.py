@@ -616,6 +616,33 @@ def test_clarify_overlay_warn_findings_rejects_non_positive_and_junk(value):
 
 
 # ---------------------------------------------------------------------------
+# get_backend_background_wait_sec — how long a backend CLI waits for the background
+# work a session left running before killing it and exiting.
+# ---------------------------------------------------------------------------
+
+def test_backend_background_wait_sec_defaults_when_absent():
+    default = tempa_config.DEFAULT_CONFIG["backend_background_wait_sec"]
+    assert tempa_config.get_backend_background_wait_sec({}) == default
+
+
+def test_backend_background_wait_sec_honors_a_positive_value():
+    assert tempa_config.get_backend_background_wait_sec({"backend_background_wait_sec": 1800}) == 1800
+
+
+def test_backend_background_wait_sec_accepts_zero_as_wait_indefinitely():
+    # Unlike every other *_sec setting, 0 is meaningful here rather than invalid: it's the
+    # backend CLI's own documented "never give up on background work" value.
+    assert tempa_config.get_backend_background_wait_sec({"backend_background_wait_sec": 0}) == 0
+
+
+@pytest.mark.parametrize("value", [-1, "x", True, None])
+def test_backend_background_wait_sec_rejects_negative_and_junk(value):
+    default = tempa_config.DEFAULT_CONFIG["backend_background_wait_sec"]
+    assert tempa_config.get_backend_background_wait_sec(
+        {"backend_background_wait_sec": value}) == default
+
+
+# ---------------------------------------------------------------------------
 # Graceful-stop sentinel — the one cross-process channel between the dashboard
 # (or a second terminal) and a running implement/clarify process.
 # ---------------------------------------------------------------------------

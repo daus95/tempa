@@ -315,3 +315,39 @@ def test_get_backend_status_not_writable_is_never_ready_even_if_installed(monkey
         assert status[name]["installed"] is True
         assert status[name]["writable"] is False
         assert status[name]["ready"] is False
+
+
+# ---------------------------------------------------------------------------
+# background_wait_env / background_terminated_markers
+# ---------------------------------------------------------------------------
+
+def test_claude_background_wait_env_converts_tempa_seconds_to_the_clis_milliseconds():
+    assert tb.CLAUDE.background_wait_env(3600) == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "3600000"}
+
+
+def test_claude_background_wait_env_passes_zero_through_as_the_clis_wait_indefinitely_value():
+    assert tb.CLAUDE.background_wait_env(0) == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
+
+
+def test_claude_background_wait_env_renders_a_whole_number_not_a_float():
+    # The value is exported into the environment verbatim, and the CLI parses it as an
+    # integer count of milliseconds — "600000.0" would not survive that.
+    assert tb.CLAUDE.background_wait_env(600.0) == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "600000"}
+
+
+@pytest.mark.parametrize("backend", [tb.COPILOT, tb.CODEX])
+def test_backends_without_a_documented_knob_set_no_background_wait_environment(backend):
+    assert backend.background_wait_env(3600) == {}
+
+
+def test_claude_recognizes_its_own_background_task_termination_message():
+    # Verbatim from the claude CLI, which is what tempa_session matches against.
+    message = ("Background tasks still running after 600s; terminating. "
+               "Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.")
+    assert any(marker in message.lower() for marker in tb.CLAUDE.background_terminated_markers)
+
+
+def test_claude_background_terminated_marker_does_not_carry_the_seconds_count():
+    # The count moves with whatever ceiling is configured, so a marker containing "600s"
+    # would silently stop matching the moment backend_background_wait_sec is changed.
+    assert all("600" not in marker for marker in tb.CLAUDE.background_terminated_markers)

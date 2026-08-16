@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from tempa_backend import AUTONOMOUS_SYSTEM_PROMPT, Backend, get_backend_def, re
 from tempa_config import (
     WORKING_DIR,
     get_backend,
+    get_backend_background_wait_sec,
     get_commit_after_qa_pass,
     get_logs_dir,
     get_max_qa_fail_rounds,
@@ -99,6 +101,37 @@ def _handle_overloaded(text: str, process: subprocess.Popen, label: str, backend
     _state.stop_event.set()
     with contextlib.suppress(Exception):
         process.terminate()
+    return True
+
+
+def _is_background_terminated_text(text: str, backend: Backend) -> bool:
+    """True if the given CLI output text is `backend` announcing it has killed the
+    background work the current turn left running because its own wait ceiling expired
+    (see Backend.background_terminated_markers)."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in backend.background_terminated_markers)
+
+
+def _handle_background_terminated(text: str, label: str, backend: Backend) -> bool:
+    """If text shows the backend killed its own still-running background work, flag it and
+    return True. Otherwise return False.
+
+    Deliberately does NOT terminate the process or set stop_event, unlike every other
+    handler here: the CLI is already tearing itself down and exits 0 straight after, and
+    the session's work up to that point is real and on disk. All this flag does is stop
+    run_session from reading that truncated session as an epic that made no progress
+    because it's blocked — it was cut short mid-flight, so the right answer is to resume
+    it, not to fail it."""
+    if not _is_background_terminated_text(text, backend):
+        return False
+    _state.background_tasks_terminated_hit = True
+    log(f"[{label}] {backend.label} hit its own ceiling on waiting for background work "
+        "(a delegated sub-agent, or a command left running in the background) and killed "
+        "it, cutting this session short. Whatever it finished before that is on disk and "
+        "the session stays resumable, so this round is not counted as a stalled one. "
+        "Raise `backend_background_wait_sec` in config.json if this keeps happening.")
     return True
 
 
@@ -469,6 +502,20 @@ def _terminate_if_stuck_after_done(
         return
 
 
+def _backend_env(backend: Backend) -> dict[str, str]:
+    """The environment to spawn `backend`'s CLI with: this process's own environment plus
+    the backend's `background_wait_env` for Tempa's configured
+    `backend_background_wait_sec`.
+
+    Those are applied as DEFAULTS, never overrides — a variable the user already exported
+    themselves wins, so tuning one by hand (or pinning it in CI) keeps working exactly as
+    it did before Tempa set anything."""
+    env = dict(os.environ)
+    for name, value in backend.background_wait_env(get_backend_background_wait_sec(load_config())).items():
+        env.setdefault(name, value)
+    return env
+
+
 def _stream_backend_process(
     backend: Backend,
     cmd: list[str],
@@ -485,10 +532,12 @@ def _stream_backend_process(
     isn't valid JSON), stops early if a usage-limit/auth-error marker is seen, and invokes
     `on_json_event(data)` per parsed event for callers that need to react (e.g. capture a
     session id or a final result)."""
+    _state.background_tasks_terminated_hit = False
     with open(log_path, "w", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             cmd,
             cwd=str(WORKING_DIR),
+            env=_backend_env(backend),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -526,6 +575,9 @@ def _stream_backend_process(
                 log_file.write(raw_line)
                 log_file.flush()
                 break
+            # Not a `break`: the CLI keeps streaming (and exits 0) after this — the rest of
+            # its output still belongs in the log, and only the flag matters downstream.
+            _handle_background_terminated(marker_text, label, backend)
             if data is not None:
                 readable = backend.parse_line(data)
                 if readable:
@@ -742,9 +794,10 @@ def _reason_with_counterpart_context(reason: str, epics: list[dict], blocked_by_
 
 
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
-    """Log SUCCEEDED / usage-limit-stopped / overload-paused / FAILED (with a one-time log
-    tail) for a finished session. Returns True iff exit_code == 0 and neither a usage limit
-    nor a server overload was hit."""
+    """Log SUCCEEDED / usage-limit-stopped / overload-paused / cut-short / FAILED (with a
+    one-time log tail) for a finished session. Returns True iff exit_code == 0 and the
+    session ran to completion — no usage limit, server overload, or backend-side
+    termination of the session's own background work."""
     if _state.auth_error_hit:
         log(f"{label} stopped — authentication failed (see message above).")
         return False
@@ -761,6 +814,15 @@ def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_
         # dashboard's Log tab.
         log(f"{label} stopped — the backend process was force-terminated after it had already "
             "finished its turn (see the message above); resuming automatically.")
+        return False
+    if _state.background_tasks_terminated_hit:
+        # Exit code 0 here is the CLI reporting its own clean shutdown, not a finished job:
+        # it gave up waiting on the background work the session left running and killed it
+        # (see the message _handle_background_terminated already logged). Reporting that as
+        # "SUCCEEDED" is what made a session that was cut short mid-implementation look, in
+        # the dashboard's Log tab, like one that simply had nothing left to do.
+        log(f"{label} was cut short — the backend gave up waiting on the background work "
+            "this session left running and terminated it (see the message above).")
         return False
     if exit_code == 0:
         log(f"{label} SUCCEEDED (exit code {exit_code})")
@@ -854,19 +916,22 @@ def run_session(
     )
 
     with _state.lock:
-        # A usage-limit, auth-error, server-overload, or stuck-after-done stop is not a real
-        # epic failure: leave status untouched so the epic can be resumed once the limit
-        # resets / auth is fixed / the backend's API recovers / next time around. The
-        # stuck-after-done case in particular already did its real work (it had reached
-        # "[Done]" — its own signal that the turn, and whatever config.json updates it makes,
-        # is complete) before getting stuck purely in unrelated process cleanup; the forced
-        # termination's non-zero exit code doesn't mean the task itself failed.
+        # A usage-limit, auth-error, server-overload, stuck-after-done, or background-work
+        # termination is not a real epic failure: leave status untouched so the epic can be
+        # resumed once the limit resets / auth is fixed / the backend's API recovers / next
+        # time around. The stuck-after-done case in particular already did its real work (it
+        # had reached "[Done]" — its own signal that the turn, and whatever config.json
+        # updates it makes, is complete) before getting stuck purely in unrelated process
+        # cleanup; the forced termination's non-zero exit code doesn't mean the task itself
+        # failed. A background-work termination is the mirror image — the session was cut
+        # short BEFORE it could finish, which is equally not this epic's fault.
         if (
             exit_code != 0
             and not _state.usage_limit_hit
             and not _state.auth_error_hit
             and not _state.server_overloaded_hit
             and not _state.backend_stuck_after_done_hit
+            and not _state.background_tasks_terminated_hit
         ):
             # Only mark failed — "done"/"pending" is set by the AI session itself
             config = load_config()
@@ -882,6 +947,18 @@ def run_session(
                 log_path=log_path,
             )
             _state.stop_event.set()
+        elif _state.background_tasks_terminated_hit:
+            # The session never got to finish: the backend CLI killed the background work
+            # the turn left running once its own wait ceiling expired (see
+            # _handle_background_terminated, which already logged what happened) and exited.
+            # completed_features therefore says nothing about whether this epic is blocked —
+            # counting it as a no-progress round is how a productive session gets mistaken
+            # for a stalled one and, after implement_no_progress_rounds of them, failed
+            # outright. Leave the epic exactly as the session left it so the next poll
+            # resumes it; max_session_run remains the backstop against a real loop here.
+            log(f"Session [{session_label}] was cut short by {backend.label} terminating its "
+                "own background work, so this round is left out of the no-progress count — "
+                "the epic stays resumable and continues on the next poll.")
         elif exit_code == 0 and not (_state.usage_limit_hit or _state.auth_error_hit or _state.server_overloaded_hit):
             # The session finished "successfully" (exit 0) but that alone doesn't mean it made
             # progress — a backend that's genuinely blocked on something outside this epic (a
@@ -995,15 +1072,17 @@ def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, l
     `config` itself whenever it changed anything.
 
     Nothing is recorded unless the session actually reached a verdict. A QA session cut short —
-    by a usage limit, an auth error, a backend overload, a stuck-after-done force-terminate, or a
-    plain crash — leaves `qa_status` as "ongoing", and check_and_run resumes it as a continuation
-    of the SAME round; recording on those would count one round several times and manufacture a
-    cycle out of an interrupted network connection."""
+    by a usage limit, an auth error, a backend overload, a stuck-after-done force-terminate, the
+    backend terminating the background work the session left running, or a plain crash — leaves
+    `qa_status` as "ongoing", and check_and_run resumes it as a continuation of the SAME round;
+    recording on those would count one round several times and manufacture a cycle out of an
+    interrupted network connection."""
     epic = config["epic"][index]
     if epic.get("qa_status") != "done":
         return
     if (_state.usage_limit_hit or _state.auth_error_hit
-            or _state.server_overloaded_hit or _state.backend_stuck_after_done_hit):
+            or _state.server_overloaded_hit or _state.backend_stuck_after_done_hit
+            or _state.background_tasks_terminated_hit):
         return
 
     passed = bool(epic.get("qa_passed"))

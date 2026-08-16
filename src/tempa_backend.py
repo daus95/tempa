@@ -41,6 +41,13 @@ AUTONOMOUS_SYSTEM_PROMPT = (
     "to call you back — this is a one-shot headless CLI run and NOTHING will re-invoke you, so those "
     "turns do nothing and leave the process hanging. Run long-running commands (builds, test suites) "
     "in the FOREGROUND with an explicitly raised timeout instead of backgrounding them and polling. "
+    "Do the implementation work YOURSELF in your own turn: do NOT hand a whole feature to a background "
+    "sub-agent and then end your turn waiting on it — your CLI enforces a ceiling on how long it will "
+    "wait for background work and kills it when that expires, losing the unfinished work and making a "
+    "productive session look like a stalled one. "
+    "Before your turn ends, STOP every process you started that does not exit on its own (dev servers, "
+    "API hosts, watchers, `nohup ... &`, `run_in_background`): a process still running when you finish "
+    "keeps the whole CLI hanging until it is force-killed. "
     "REQUIRED: Implement fully and update all required files including config.json as instructed. "
     "A session is only successful when both the source code AND the config.json status update are done."
 )
@@ -74,6 +81,12 @@ CODEX_MODEL_REASONING_LEVELS = {
 CODEX_DEFAULT_EFFORT_LEVELS = CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh")
 
 
+def _no_background_wait_env(seconds: int | float) -> dict[str, str]:
+    """Default `Backend.background_wait_env`: a CLI with no documented knob for how long it
+    waits on its own background work gets no environment override at all."""
+    return {}
+
+
 @dataclass(frozen=True)
 class Backend:
     name: str
@@ -89,6 +102,16 @@ class Backend:
     overloaded_markers: tuple[str, ...]
     friendly_auth_error_message: Callable[[str], str]
     reasoning_effort_choices: Callable[[str], tuple[str, ...]]
+    # Environment variables that raise this CLI's own ceiling on how long it waits for
+    # background work (sub-agents, backgrounded shells) before killing it, given Tempa's
+    # configured wait in seconds. Applied as DEFAULTS by tempa_session._backend_env — an
+    # explicit value already in the user's environment always wins.
+    background_wait_env: Callable[[int | float], dict[str, str]] = _no_background_wait_env
+    # Markers this CLI prints when that ceiling expires and it kills its own still-running
+    # background work. The session is cut short mid-flight but exits 0, so without these
+    # Tempa cannot tell a harness-side kill apart from a session that genuinely had nothing
+    # left to do — see tempa_session._is_background_terminated_text.
+    background_terminated_markers: tuple[str, ...] = ()
 
 
 def resolve_exe(backend: Backend) -> str | None:
@@ -185,6 +208,18 @@ def _claude_parse_line(data: dict) -> str | None:
     return None
 
 
+def _claude_background_wait_env(seconds: int | float) -> dict[str, str]:
+    """Claude Code's print mode (`-p`) waits at most CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS
+    for the background work a turn left running — a delegated sub-agent, a backgrounded
+    shell — then prints "Background tasks still running after Ns; terminating." kills it,
+    and exits 0. Its default is 10 minutes, which a single feature's implementation
+    routinely outruns, so raise it to Tempa's own configured wait.
+
+    0 is the CLI's documented "wait indefinitely" value and is passed through unchanged;
+    anything else is converted from Tempa's seconds to the variable's milliseconds."""
+    return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": str(int(seconds * 1000))}
+
+
 def _claude_friendly_auth_error_message(text: str) -> str:
     lowered = text.lower()
     if "invalid api key" in lowered or "invalid x-api-key" in lowered or "invalid bearer token" in lowered:
@@ -243,6 +278,12 @@ CLAUDE = Backend(
     ),
     friendly_auth_error_message=_claude_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CLAUDE_EFFORT_LEVELS,
+    background_wait_env=_claude_background_wait_env,
+    # Printed verbatim (plain stderr, merged into the stream) when the ceiling above expires:
+    #   "Background tasks still running after 600s; terminating. Set
+    #    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely."
+    # Matched without the seconds count, which varies with the configured ceiling.
+    background_terminated_markers=("background tasks still running after",),
 )
 
 

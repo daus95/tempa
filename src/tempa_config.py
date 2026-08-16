@@ -281,6 +281,7 @@ DEFAULT_CONFIG = {
     "usage_limit_retry_wait_sec": 1800,
     "usage_limit_heartbeat_sec": 300,
     "server_overloaded_retry_wait_sec": 300,
+    "backend_background_wait_sec": 3600,
     "poll_interval_sec": 60,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
@@ -590,6 +591,23 @@ def get_server_overloaded_retry_wait_sec(config: dict) -> int | float:
     return _get_positive_number(
         config, "server_overloaded_retry_wait_sec", DEFAULT_CONFIG["server_overloaded_retry_wait_sec"]
     )
+
+
+def get_backend_background_wait_sec(config: dict) -> int | float:
+    """Return config.json's "backend_background_wait_sec" — how long a backend CLI should
+    wait for background work its own turn left running (a delegated sub-agent, a
+    backgrounded shell) before killing it and exiting — defaulting to 3600 (1 hour).
+
+    Unlike every other `*_sec` setting here, 0 is meaningful rather than invalid: it's the
+    backend CLI's documented "wait indefinitely" value. That is deliberately NOT the
+    default — a session that leaves a dev server running would then hang the runner with no
+    upper bound, whereas a finite ceiling still ends it eventually (and
+    tempa_session._is_background_terminated_text makes Tempa resume rather than fail when
+    it does). Only positive numbers and 0 are accepted; anything else falls back to the
+    default. Converted to each backend's own unit by Backend.background_wait_env."""
+    value = config.get("backend_background_wait_sec", DEFAULT_CONFIG["backend_background_wait_sec"])
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return value if is_number and value >= 0 else DEFAULT_CONFIG["backend_background_wait_sec"]
 
 
 def get_resume_implementation_sessions(config: dict) -> bool:

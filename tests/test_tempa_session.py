@@ -33,6 +33,7 @@ def reset_runner_state():
     ts._state.auth_error_message = ""
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
+    ts._state.background_tasks_terminated_hit = False
     ts._state.stop_event.clear()
     yield
     ts._state.usage_limit_hit = False
@@ -40,6 +41,7 @@ def reset_runner_state():
     ts._state.auth_error_message = ""
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
+    ts._state.background_tasks_terminated_hit = False
     ts._state.stop_event.clear()
 
 
@@ -327,6 +329,92 @@ def test_handle_overloaded_no_match_returns_false_without_side_effects():
 
 
 # ---------------------------------------------------------------------------
+# _is_background_terminated_text / _handle_background_terminated / _backend_env
+# ---------------------------------------------------------------------------
+# The backend CLI kills the background work a turn left running once its own wait
+# ceiling expires, then exits 0. Tempa has to recognize that line, because "exit 0
+# and completed_features didn't move" otherwise reads as an epic blocked on something
+# outside itself -- which, after implement_no_progress_rounds of them, fails the epic.
+
+_CLAUDE_BG_TERMINATED = (
+    "Background tasks still running after 600s; terminating. "
+    "Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely."
+)
+
+
+def test_is_background_terminated_text_matches_the_real_cli_message():
+    assert ts._is_background_terminated_text(_CLAUDE_BG_TERMINATED, tb.CLAUDE) is True
+
+
+def test_is_background_terminated_text_empty_string_false():
+    assert ts._is_background_terminated_text("", tb.CLAUDE) is False
+
+
+def test_is_background_terminated_text_unrelated_text_false():
+    assert ts._is_background_terminated_text("running the test suite", tb.CLAUDE) is False
+
+
+@pytest.mark.parametrize("backend", [tb.COPILOT, tb.CODEX])
+def test_is_background_terminated_text_no_markers_for_backend_without_them(backend):
+    assert ts._is_background_terminated_text(_CLAUDE_BG_TERMINATED, backend) is False
+
+
+def test_handle_background_terminated_sets_state_without_stopping_the_runner():
+    # Unlike every other handler here it must NOT set stop_event or terminate anything:
+    # the CLI is already tearing itself down and the epic stays resumable.
+    handled = ts._handle_background_terminated(_CLAUDE_BG_TERMINATED, "label", tb.CLAUDE)
+    assert handled is True
+    assert ts._state.background_tasks_terminated_hit is True
+    assert not ts._state.stop_event.is_set()
+
+
+def test_handle_background_terminated_no_match_returns_false_without_side_effects():
+    handled = ts._handle_background_terminated("all good", "label", tb.CLAUDE)
+    assert handled is False
+    assert ts._state.background_tasks_terminated_hit is False
+
+
+def test_background_terminated_marker_inside_a_successful_json_event_is_not_eligible():
+    # A session that merely READS a log containing that line (or explains the failure in
+    # its own prose) must not be mistaken for one that actually hit the ceiling --
+    # _failure_marker_text is what keeps successful JSON events out of marker matching.
+    event = {"type": "assistant", "message": {"content": [{"type": "text", "text": _CLAUDE_BG_TERMINATED}]}}
+    marker_text = ts._failure_marker_text(json.dumps(event), event)
+    assert ts._is_background_terminated_text(marker_text, tb.CLAUDE) is False
+
+
+def test_backend_env_sets_the_backends_background_wait_variable(monkeypatch):
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 3600})
+    monkeypatch.delenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", raising=False)
+
+    env = ts._backend_env(tb.CLAUDE)
+
+    assert env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] == "3600000"
+
+
+def test_backend_env_keeps_the_rest_of_the_process_environment(monkeypatch):
+    monkeypatch.setattr(ts, "load_config", lambda: {})
+    monkeypatch.setenv("TEMPA_TEST_MARKER", "kept")
+
+    assert ts._backend_env(tb.CLAUDE)["TEMPA_TEST_MARKER"] == "kept"
+
+
+def test_backend_env_never_overrides_a_value_the_user_already_exported(monkeypatch):
+    # Tempa's value is a default, not a policy -- someone who pinned the variable by hand
+    # (or in CI) keeps exactly the behaviour they asked for.
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 3600})
+    monkeypatch.setenv("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
+
+    assert ts._backend_env(tb.CLAUDE)["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] == "0"
+
+
+def test_backend_env_adds_nothing_for_a_backend_without_a_documented_knob(monkeypatch):
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 3600})
+
+    assert ts._backend_env(tb.COPILOT) == dict(ts.os.environ)
+
+
+# ---------------------------------------------------------------------------
 # _log_session_result
 # ---------------------------------------------------------------------------
 
@@ -353,6 +441,18 @@ def test_log_session_result_nonzero_exit_fails(tmp_path):
 def test_log_session_result_overloaded_stops_before_checking_exit_code(tmp_path):
     ts._state.server_overloaded_hit = True
     assert ts._log_session_result("Session [X]", 0, tmp_path / "log.txt") is False
+
+
+def test_log_session_result_background_terminated_is_not_reported_as_a_success(tmp_path, capsys):
+    # The CLI exits 0 after killing its own background work, so without this the Log tab
+    # showed "SUCCEEDED" for a session that was cut short mid-implementation.
+    ts._state.background_tasks_terminated_hit = True
+
+    assert ts._log_session_result("Session [X]", 0, tmp_path / "log.txt") is False
+
+    out = capsys.readouterr().out
+    assert "SUCCEEDED" not in out
+    assert "cut short" in out
 
 
 def test_log_session_result_stuck_after_done_is_not_reported_as_a_failure(tmp_path, capsys):
