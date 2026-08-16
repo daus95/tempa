@@ -502,8 +502,10 @@
   .settings-save-status.err { color: var(--danger); }
   .settings-update-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
   .settings-update-info { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
-  .settings-update-info span:last-child { color: var(--muted); font-size: 0.85rem; }
+  #settingsUpdateLatest { color: var(--muted); font-size: 0.85rem; }
   .settings-update-actions { display: flex; align-items: center; gap: 10px; }
+  .settings-link-btn { background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+    text-align: left; width: fit-content; }
 
   /* ---- settings page: tabbed layout ----
      Same idiom as .impl-pane: the pane itself never scrolls (overriding .pane's

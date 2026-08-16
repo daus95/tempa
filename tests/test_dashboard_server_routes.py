@@ -335,6 +335,28 @@ def test_update_status_when_github_is_unreachable(dash, monkeypatch):
     assert body["error"] == "Could not reach GitHub to check the latest release."
 
 
+def test_update_changelog_returns_content_for_a_valid_version(dash, monkeypatch):
+    monkeypatch.setattr(tempa_update, "get_local_version", lambda: "0.1.0")
+    monkeypatch.setattr(tempa_update, "get_changelog_since", lambda current, latest: "## [0.2.0] - 2026-01-02\n\n- did a thing")
+    assert dash.get("/api/update/changelog?latest=0.2.0") == (
+        200, {"ok": True, "content": "## [0.2.0] - 2026-01-02\n\n- did a thing", "truncated": False})
+
+
+def test_update_changelog_rejects_malformed_version(dash):
+    status, body = dash.get("/api/update/changelog?latest=not-a-version")
+    assert status == 400
+    assert body["ok"] is False
+
+
+def test_update_changelog_when_github_is_unreachable(dash, monkeypatch):
+    monkeypatch.setattr(tempa_update, "get_local_version", lambda: "0.1.0")
+    monkeypatch.setattr(tempa_update, "get_changelog_since", lambda current, latest: None)
+    status, body = dash.get("/api/update/changelog?latest=0.2.0")
+    assert status == 200
+    assert body["ok"] is False
+    assert body["error"] == "Could not reach GitHub to fetch changelog details."
+
+
 # ---------------------------------------------------------------------------
 # GET verify
 # ---------------------------------------------------------------------------

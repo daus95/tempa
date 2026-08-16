@@ -99,6 +99,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsPollIntervalSec = $("settingsPollIntervalSec"),
   settingsSaveBtn = $("settingsSaveBtn"), settingsSaveStatus = $("settingsSaveStatus"),
   settingsUpdateCurrent = $("settingsUpdateCurrent"), settingsUpdateLatest = $("settingsUpdateLatest"),
+  settingsWhatsNewBtn = $("settingsWhatsNewBtn"),
   settingsCheckUpdateBtn = $("settingsCheckUpdateBtn"), settingsUpdateBtn = $("settingsUpdateBtn"),
   settingsUpdateStatus = $("settingsUpdateStatus"),
   settingsRestartBtn = $("settingsRestartBtn"), settingsRestartStatus = $("settingsRestartStatus"),

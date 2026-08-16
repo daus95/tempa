@@ -116,6 +116,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/backends/status": "_handle_backends_status",
         "/api/principles": "_handle_principles_get",
         "/api/update/status": "_handle_update_status",
+        "/api/update/changelog": "_handle_update_changelog",
         "/api/log-file": "_handle_log_file",
         "/api/qa-report": "_handle_qa_report",
         "/api/verify/runs": "_handle_verify_runs",
@@ -188,6 +189,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_update_status(self) -> None:
         self._send_json(*dashboard_api_status.update_status())
+
+    def _handle_update_changelog(self) -> None:
+        self._send_json(*dashboard_api_status.update_changelog(self.query.get("latest", [""])[0]))
 
     # -- POST ---------------------------------------------------------------
     POST_ROUTES = {

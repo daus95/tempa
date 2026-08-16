@@ -16,6 +16,7 @@ because none of it is in the archive to begin with.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -30,6 +31,9 @@ from tempa_logging import _banner, log
 GITHUB_RELEASES_API = "https://api.github.com/repos/daus95/tempa/releases/latest"
 GITHUB_RELEASES_PAGE = "https://github.com/daus95/tempa/releases/latest"
 GITHUB_LATEST_DOWNLOAD_URL = "https://github.com/daus95/tempa/releases/latest/download/tempa.zip"
+GITHUB_RAW_CHANGELOG = "https://raw.githubusercontent.com/daus95/tempa/v{tag}/CHANGELOG.md"
+
+_CHANGELOG_SECTION_RE = re.compile(r"^## \[([^\]]+)\](?:\s*-\s*.+)?\s*$", re.MULTILINE)
 
 
 def get_local_version() -> str:
@@ -61,6 +65,52 @@ def get_latest_release_version(timeout: float = 5.0) -> str | None:
         return None
     tag = data.get("tag_name", "")
     return tag.removeprefix("v") or None
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Dotted-numeric version -> comparable tuple. Non-numeric parts sort as 0 rather than
+    raising, since this only ever feeds a best-effort comparison, never a hard failure."""
+    parts = []
+    for part in version.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) or (0,)
+
+
+def get_changelog_since(current_version: str, latest_version: str, timeout: float = 5.0) -> str | None:
+    """Fetch CHANGELOG.md as it existed at the `latest_version` release tag (pinned to that
+    tag rather than `main`, so the content matches exactly what was released) and return the
+    concatenated markdown for every version section newer than `current_version` (all of
+    them if current is "unknown") up to and including latest, newest first, excluding
+    [Unreleased]. Returns None on any network failure — same best-effort contract as
+    get_latest_release_version."""
+    request = urllib.request.Request(
+        GITHUB_RAW_CHANGELOG.format(tag=latest_version),
+        headers={"User-Agent": "tempa-cli"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            text = response.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError):
+        return None
+
+    current = (0,) if current_version == "unknown" else _version_tuple(current_version)
+    latest = _version_tuple(latest_version)
+
+    # Sections appear newest-first in the file already, so no re-sorting is needed.
+    matches = list(_CHANGELOG_SECTION_RE.finditer(text))
+    sections = []
+    for i, match in enumerate(matches):
+        version = match.group(1)
+        if version.lower() == "unreleased":
+            continue
+        if not (current < _version_tuple(version) <= latest):
+            continue
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections.append(text[match.start():end].strip())
+    return "\n\n".join(sections)
 
 
 def print_check_update() -> None:
