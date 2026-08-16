@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-16
+
 ### Added
 
 - **Every Stop button can now stop *after* the work in flight instead of throwing it away.**
@@ -31,6 +33,11 @@ once the first tagged release is cut.
   rather than a key in `config.json`, which the runner's own saves would have overwritten; a
   request left behind by a crash is cleared automatically the next time a run starts, so it can
   never stop a fresh run before it does any work.
+- **The sidebar now shows when Clarification or Implementation is running, from any page.** An
+  animated spinner appears next to each nav item while its background run (clarify/apply/finalize,
+  implement) is active, and the Clarification page's "Continue Implementation" button disables
+  while an implementation run is already in progress — matching the behavior its twin button on
+  the Implementation page already had.
 
 Nothing about how a run behaves otherwise changed: with no graceful stop requested, every new
 check is a no-op and Stop Now, exit codes and scheduling are byte-for-byte what they were.
