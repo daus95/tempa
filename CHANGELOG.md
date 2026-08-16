@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Test coverage for the dashboard's HTTP surface, its page assembly, and the CLI's
+  command surface.** `dashboard_server.py` (every `/api/*` route), `dashboard_assets.py`
+  (CSS/JS inlining and the per-request data placeholders), and `tempa_cli.py` (which
+  subcommands exist, what they accept, and whether the help text documents them) had no
+  tests at all. 147 new characterization tests pin down the status codes, JSON shapes, and
+  user-facing error strings these currently produce — groundwork for splitting the two
+  largest modules without changing what they do.
+
 ## [0.6.6] - 2026-08-16
 
 ### Fixed
