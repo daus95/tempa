@@ -539,7 +539,7 @@ function renderSidebar() {
   treeEl.appendChild(renderLeafSection("home", iconSvg("house"), "Home"));
   treeEl.appendChild(renderSpecSection());
   treeEl.appendChild(renderClarifySection());
-  treeEl.appendChild(renderLeafSection("implementation", iconSvg("wrench"), "Implementation", !state.workspaceInitialized));
+  treeEl.appendChild(renderLeafSection("implementation", iconSvg("wrench"), "Implementation", !state.workspaceInitialized, state.implementRun.running));
   treeEl.appendChild(renderLeafSection("verification", iconSvg("circle-check"), "Verification", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
   treeBottomEl.appendChild(renderLeafSection("principles", iconSvg("ruler"), "Architecture Principles", !state.workspaceInitialized));
@@ -771,12 +771,13 @@ homeClearAllBtn.addEventListener("click", async () => {
   }
 });
 
-function renderLeafSection(key, icon, label, disabled) {
+function renderLeafSection(key, icon, label, disabled, running) {
   const wrap = document.createElement("div");
   wrap.className = "node";
   const row = document.createElement("div");
   row.className = "row top" + (state.activeTop === key ? " selected" : "") + (disabled ? " disabled" : "");
-  row.innerHTML = `<span class="twist hidden"></span><span class="icon">${icon}</span><span class="label">${label}</span>`;
+  row.innerHTML = `<span class="twist hidden"></span><span class="icon">${icon}</span><span class="label">${label}</span>` +
+    (running ? `<span class="row-status-spin">${iconSvg("loader-circle", "icon-spin")}</span>` : "");
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop(key);
@@ -877,6 +878,7 @@ function renderClarifySection() {
     (disabled ? " disabled" : "");
   const count = state.clarifyUnanswered.length;
   row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("circle-help")}</span><span class="label">Clarification</span>` +
+    (state.clarifyRun.running ? `<span class="row-status-spin">${iconSvg("loader-circle", "icon-spin")}</span>` : "") +
     (count ? `<span class="badge-count">${count}</span>` : "");
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
@@ -1459,10 +1461,12 @@ async function pollClarifyRun() {
     state.clarifyRun.progress = data.progress;
     state.clarifyRun.mode = data.mode;
     renderClarifyLog();
+    const wasRunning = state.clarifyRun.running;
     state.clarifyRun.running = data.running;
     renderClarifyRunStatus();
     syncClarifyLockState();
     setClarifyRunButtonsDisabled(data.running);
+    if (wasRunning !== data.running) renderSidebar();
     // Finalize's round counter, read fresh from config.json every poll (see
     // _handle_clarify_run_status) — ticks up live, round by round, instead of
     // waiting for the run to finish and /api/tree to pick it up.
@@ -1498,6 +1502,7 @@ async function startClarifyRun(mode) {
   state.clarifyRun.running = true;
   renderClarifyRunStatus();
   renderClarifyLog();
+  renderSidebar();
   try {
     const res = await fetch("/api/clarify/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1509,6 +1514,7 @@ async function startClarifyRun(mode) {
       state.clarifyRun.running = false;
       renderClarifyRunStatus();
       setClarifyRunButtonsDisabled(false);
+      renderSidebar();
       return;
     }
     startClarifyPolling();
@@ -1517,6 +1523,7 @@ async function startClarifyRun(mode) {
     state.clarifyRun.running = false;
     renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(false);
+    renderSidebar();
   }
 }
 
@@ -1533,6 +1540,7 @@ async function checkClarifyRunOnLoad() {
     renderClarifyLog();
     renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(data.running);
+    renderSidebar();
     if (data.mode === "finalize" && data.maxRound > 0) {
       finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;
       finalizeRoundProgress.classList.remove("hidden");
@@ -1825,6 +1833,7 @@ function updateImplementButtonLabels() {
 
 function updateImplementControls() {
   startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
+  clarifyStartImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
   stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
   updateImplementButtonLabels();
@@ -1859,6 +1868,7 @@ async function refreshImplementRun() {
     const wasRunning = state.implementRun.running;
     state.implementRun.running = data.running;
     updateImplementControls();
+    if (wasRunning !== data.running) renderSidebar();
     homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready;
     // Keep polling while any epic is actively running/QA'ing even if this dashboard
     // session isn't the one that started it (e.g. `tempa implement` in a terminal) —
@@ -1903,6 +1913,7 @@ async function startImplementRun() {
     }
     state.implementRun.running = true;
     updateImplementControls();
+    renderSidebar();
     startImplementPolling();
   } catch (e) {
     toast("Network error starting implementation.", true);
