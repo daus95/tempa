@@ -18,6 +18,15 @@ workspace's `.tempa/` folder (i.e. `<workspace_root>/.tempa/...`) — see
 To wipe everything in `.tempa/qa/` and `.tempa/logs/`: `tempa implement --clear` (asks for
 confirmation; add `--yes` to skip). See [docs/command-reference.md](command-reference.md).
 
+## Process cleanup lines
+
+If a session left processes running when it ended (a dev server, a build daemon, a watcher)
+and `terminate_leftover_processes` is on (the default), the session's log — both
+`process_*.txt` and that session's own `session_*.txt`/`qa_*.txt`/etc. — gets one line
+reporting how many were reclaimed. Silent when nothing was left running, which is the normal
+case. See `terminate_leftover_processes` in [config-json.md](config-json.md) and
+`tempa_process_group.py` for what does the reclaiming.
+
 ## Viewing a log file in the dashboard
 
 Every "log: `<filename>`" reference the Clarify/Implement Log tabs print (from a session's
