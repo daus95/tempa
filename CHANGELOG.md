@@ -8,6 +8,21 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings field descriptions: "More…" now sits inline instead of on its own line.**
+  Long field descriptions on Settings previously parked their extra detail behind a
+  `<details>`/`<summary>` disclosure that rendered as a separate line below the first
+  sentence. It's now an inline "More…" toggle right at the end of that sentence, and
+  expanding it reveals the rest of the text with a "Hide…" toggle at its end — the same
+  "See more"/"See less" convention as Facebook — so collapsing stays near wherever the
+  reader's eye already is instead of requiring a scroll back to the top.
+- **Simplified the "Terminate leftover processes" description on Settings → Runs.** The
+  explanation leaned on implementation detail (Job Objects, process groups, process trees)
+  and a lengthy anecdote that made the setting harder to parse than it needed to be. It now
+  states plainly what gets shut down, what's left alone, and when a change takes effect,
+  without changing the setting's actual behavior.
+
 ### Added
 
 - **The Maintenance tab now shows what's actually in an available update.** Previously

@@ -533,18 +533,15 @@
     background: var(--major); }
   .settings-muted-hint { color: var(--muted); font-size: 0.88rem; }
 
-  /* Long field descriptions keep their first sentence inline and park the rest here, so the
-     controls aren't buried under prose for someone who already knows what the field does. */
-  .settings-more { max-width: 640px; margin: -2px 0 8px; }
-  .settings-more > summary { display: inline-flex; align-items: center; gap: 4px;
-    width: fit-content; cursor: pointer; list-style: none; color: var(--accent);
-    font-size: 0.82rem; font-weight: 600; }
-  .settings-more > summary::-webkit-details-marker { display: none; }
-  .settings-more > summary::before { content: "\25B8"; font-size: 0.75em; }
-  .settings-more[open] > summary::before { content: "\25BE"; }
-  .settings-more > summary:hover { text-decoration: underline; }
-  .settings-more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .settings-more p { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; max-width: 640px; }
+  /* Long field descriptions keep their first sentence inline and park the rest behind an
+     inline "More…" toggle, so the controls aren't buried under prose for someone who already
+     knows what the field does. The "Hide…" toggle sits at the end of the revealed text
+     (Facebook "See more"/"See less" convention) instead of swapping the "More…" label in
+     place, so collapsing stays near wherever the reader's eye already is. */
+  .settings-more-toggle { background: none; border: none; padding: 0; margin: 0; font: inherit;
+    font-size: 0.82rem; font-weight: 600; color: var(--accent); cursor: pointer; }
+  .settings-more-toggle:hover { text-decoration: underline; }
+  .settings-more-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Column captions for the four backend/model/effort rows. Reusing the control class names
      on the <span>s makes them inherit the exact flex bases the real controls use, so the
