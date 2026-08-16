@@ -67,7 +67,8 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   // finalize run specifically is in progress, swap it for Stop Finalize entirely
   // (same Start/Stop toggle Implementation already has) rather than just disabling it.
   const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
-  finalizeClarifyBtn.disabled = runDisabled || !st.ready;
+  finalizeClarifyBtn.disabled = runDisabled || !st.ready || state.implementRun.running;
+  finalizeClarifyBtn.title = state.implementRun.running ? "Implementation is running." : "";
   finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
   // The wrapper, not the button: Stop Now and its chevron have to appear together.
   stopFinalizeClarifySplit.classList.toggle("hidden", !finalizeRunning);
@@ -110,9 +111,15 @@ function setClarifyRunButtonsDisabled(disabled) {
   // would just be a full PRD rewrite standing between the user and the next round.
   // hasUnapplied is still computed — Apply Answers and the finalize checklist need it.
   const blockedByAnswers = needsContinue && hasUnanswered;
-  startClarifyBtn.disabled = disabled || blockedByAnswers;
-  startClarifyBtn.title = blockedByAnswers ? "Answer the remaining findings first." : "";
-  applyAnswersBtn.disabled = disabled || !hasUnapplied;
+  // Clarification and implementation are two independent background runs that both
+  // touch the spec/PRD — never let the user start one while the other is in progress.
+  const implementRunning = state.implementRun.running;
+  startClarifyBtn.disabled = disabled || blockedByAnswers || implementRunning;
+  startClarifyBtn.title = implementRunning
+    ? "Implementation is running."
+    : blockedByAnswers ? "Answer the remaining findings first." : "";
+  applyAnswersBtn.disabled = disabled || !hasUnapplied || implementRunning;
+  applyAnswersBtn.title = implementRunning ? "Implementation is running." : "";
   // While "run"/"apply" specifically is in progress, swap the Start/Apply button for its
   // Stop counterpart entirely (same Start/Stop toggle Implementation and Finalize already
   // use) rather than just disabling it.
@@ -284,7 +291,13 @@ async function pollClarifyRun() {
     renderClarifyRunStatus();
     syncClarifyLockState();
     setClarifyRunButtonsDisabled(data.running);
-    if (wasRunning !== data.running) renderSidebar();
+    if (wasRunning !== data.running) {
+      // Push the clarify-running state to the implement side right away too, mirroring
+      // updateImplementControls' equivalent push in the other direction — the 1s poll
+      // driving this runs regardless of which page is active.
+      updateImplementControls();
+      renderSidebar();
+    }
     // Finalize's round counter, read fresh from config.json every poll (see
     // _handle_clarify_run_status) — ticks up live, round by round, instead of
     // waiting for the run to finish and /api/tree to pick it up.
@@ -325,6 +338,7 @@ async function startClarifyRun(mode) {
   renderClarifyRunStatus();
   renderClarifyLog();
   renderSidebar();
+  updateImplementControls();
   try {
     const res = await fetch("/api/clarify/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -337,6 +351,7 @@ async function startClarifyRun(mode) {
       renderClarifyRunStatus();
       setClarifyRunButtonsDisabled(false);
       renderSidebar();
+      updateImplementControls();
       return;
     }
     startClarifyPolling();
@@ -346,6 +361,7 @@ async function startClarifyRun(mode) {
     renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(false);
     renderSidebar();
+    updateImplementControls();
   }
 }
 
@@ -365,6 +381,7 @@ async function checkClarifyRunOnLoad() {
     renderClarifyLog();
     renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(data.running);
+    updateImplementControls();
     renderSidebar();
     if (data.mode === "finalize" && data.maxRound > 0) {
       finalizeRoundProgress.textContent = `${data.finalizeRound} / ${data.maxRound}`;

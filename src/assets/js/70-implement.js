@@ -220,10 +220,15 @@ function renderImplementGate() {
 function updateImplementButtonLabels() {
   const started = state.implementStarted;
   const label = started ? "Continue Implementation" : "Start Implementation";
-  const tip = started
-    ? "Resumes the existing plan. Any epic left in the failed state is reset back to " +
-      "pending first (same as `tempa implement --reset-failed`)."
-    : "";
+  // Clarification and implementation are two independent background runs that both
+  // touch the spec/PRD — while a clarification run is active, explain that instead of
+  // the usual "resumes the existing plan" tip (which doesn't apply to why it's disabled).
+  const tip = state.clarifyRun.running
+    ? "A clarification run is in progress."
+    : started
+      ? "Resumes the existing plan. Any epic left in the failed state is reset back to " +
+        "pending first (same as `tempa implement --reset-failed`)."
+      : "";
   for (const btn of [homeStartImplementBtn, clarifyStartImplementBtn, startImplementBtn]) {
     btn.querySelector("span:last-child").textContent = label;
     btn.title = tip;
@@ -231,8 +236,9 @@ function updateImplementButtonLabels() {
 }
 
 function updateImplementControls() {
-  startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
-  clarifyStartImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
+  const blocked = state.implementRun.running || !state.implementReadiness.ready || state.clarifyRun.running;
+  startImplementBtn.disabled = blocked;
+  clarifyStartImplementBtn.disabled = blocked;
   // The wrapper, not the button: Stop Now and its chevron have to appear together.
   stopImplementSplit.classList.toggle("hidden", !state.implementRun.running);
   implHeaderStatus.textContent = !state.implementRun.running ? ""
@@ -241,6 +247,11 @@ function updateImplementControls() {
       : "Running…";
   updateImplementButtonLabels();
   renderImplementGate();
+  // The 1s poll driving this (refreshImplementRun) runs globally regardless of which
+  // page is active, so push the implement-running state to the other surfaces right
+  // away instead of waiting for the user to navigate into them.
+  setClarifyRunButtonsDisabled(state.clarifyRun.running);
+  if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
 }
 
 function stopImplementPolling() {
@@ -275,7 +286,7 @@ async function refreshImplementRun() {
     state.implementRun.running = data.running;
     updateImplementControls();
     if (wasRunning !== data.running) renderSidebar();
-    homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready;
+    homeStartImplementBtn.disabled = data.running || !state.implementReadiness.ready || state.clarifyRun.running;
     // Keep polling while any epic is actively running/QA'ing even if this dashboard
     // session isn't the one that started it (e.g. `tempa implement` in a terminal) —
     // otherwise the spinner freezes stale until the user re-navigates to the tab.

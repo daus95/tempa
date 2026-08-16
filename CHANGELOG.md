@@ -16,6 +16,16 @@ once the first tagged release is cut.
   item above Architecture Principles in the sidebar; clicking it jumps straight to
   Settings → Maintenance.
 
+### Fixed
+
+- **Clarification and implementation can no longer run at the same time.** Start
+  Clarification, Apply Answers, and Finalized Clarification stayed clickable on the Home
+  and Clarification pages while an implementation run was in progress (and vice versa),
+  risking both processes writing to the spec/PRD concurrently. All six buttons now
+  disable for the duration of the other run, on both pages, and the dashboard's
+  `/api/clarify/run` and `/api/implement/run` endpoints now reject the request with a
+  409 if the other kind of run is already active.
+
 ## [0.6.8] - 2026-08-16
 
 ### Added

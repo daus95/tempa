@@ -267,6 +267,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if mode not in ("run", "finalize", "apply"):
             self._send_json(400, {"ok": False, "error": "Invalid mode."})
             return
+        # Server-side gate, not just a disabled button client-side (see the matching
+        # comment on _handle_implement_run_start below) — clarification and
+        # implementation both touch the spec/PRD and must never run concurrently.
+        if self.server.implement_run["running"]:
+            self._send_json(409, {"ok": False, "error": "Cannot start clarification while implementation is running."})
+            return
         if mode == "finalize":
             error = dashboard_api_clarify.finalize_gate_error(self.server.clar_dir)
             if error:
@@ -305,6 +311,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # Server-side gate, not just a disabled button client-side — tempa.py's
         # `implement` itself has no awareness of clarification findings and will
         # happily start regardless, so this is the only thing actually enforcing it.
+        if self.server.clarify_run["running"]:
+            self._send_json(409, {
+                "ok": False,
+                "error": "Cannot start implementation while a clarification run is in progress.",
+            })
+            return
         dashboard_config = _load_dashboard_config()
         last_action = dashboard_config.get("last_clarification_action")
         if last_action is None:
