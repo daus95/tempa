@@ -40,16 +40,27 @@ function renderHomeWorkflow() {
   // Only unanswered findings block — answered-but-unapplied ones ride into the next round
   // as already-decided resolutions. Same rule as setClarifyRunButtonsDisabled.
   const homeBlockedByAnswers = homeNeedsContinue && homeHasUnanswered;
+  // Clarification and implementation are two independent background runs that both
+  // touch the spec/PRD — never let the user start one while the other is in progress
+  // (mirrors setClarifyRunButtonsDisabled/renderFinalizeGate on the Clarification page).
+  const homeImplementRunning = state.implementRun.running;
   homeStartClarifyBtn.querySelector("span:last-child").textContent =
     homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
-  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers;
-  homeStartClarifyBtn.title = homeBlockedByAnswers ? "Answer the remaining findings first." : "";
-  homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied;
+  homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers ||
+    homeImplementRunning;
+  homeStartClarifyBtn.title = homeImplementRunning
+    ? "Implementation is running."
+    : homeBlockedByAnswers ? "Answer the remaining findings first." : "";
+  homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied ||
+    homeImplementRunning;
+  homeApplyAnswersBtn.title = homeImplementRunning ? "Implementation is running." : "";
   // Mirrors renderFinalizeGate's gate above: disabled until clarification has run, the
   // latest result is a fresh evaluate, and it shows zero critical findings (or the
   // Settings override is on) — state.clarifyFinalize.ready, computed server-side by
   // _clarify_finalize_status in dashboard_clarify_parse.py.
-  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready;
+  homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready ||
+    homeImplementRunning;
+  homeFinalizeClarifyBtn.title = homeImplementRunning ? "Implementation is running." : "";
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
@@ -86,7 +97,7 @@ function renderHomeWorkflow() {
   const ir = state.implementReadiness;
   const step3Locked = step2Locked || !ir.ready;
   homeStep3.classList.toggle("locked", step3Locked);
-  homeStartImplementBtn.disabled = step3Locked || state.implementRun.running;
+  homeStartImplementBtn.disabled = step3Locked || state.implementRun.running || state.clarifyRun.running;
   updateImplementButtonLabels();
   homeStep3Status.textContent = step2Locked
     ? "Finish step 2 first."
