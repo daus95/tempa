@@ -129,6 +129,23 @@ immediately (no wait, unlike the usage-limit/overload cases above). A `clarify`/
 session hit by the same watchdog is still force-terminated (so it can't hang forever either),
 but its non-zero exit is treated as an ordinary failure there rather than silently retried.
 
+**Nor does a backend CLI cutting its own session short.** The mirror image of the case above:
+instead of finishing and refusing to exit, the CLI gives up *before* the work is done. Claude
+Code's print mode waits a fixed 10 minutes for whatever background work a turn left running — a
+delegated sub-agent, a `run_in_background`/`nohup ... &` command — then prints "Background tasks
+still running after 600s; terminating.", kills it, and exits **0**. A single feature routinely
+takes longer than that, so a perfectly productive session was being killed mid-implementation
+and reported as a success with no feature completed; two of those in a row is exactly what
+`implement_no_progress_rounds` reads as an epic blocked on something outside itself, so it got
+marked `failed` and the runner stopped. Tempa now raises that ceiling to
+`backend_background_wait_sec` (config.json, default **1 hour**) on every spawn, and if it is hit
+anyway, recognizes the CLI's own message, reports the session as cut short rather than
+SUCCEEDED, and leaves that round out of the no-progress count — the epic stays exactly as the
+session left it and simply resumes on the next poll, with `max_session_run` still the backstop
+against a real loop. Setting `backend_background_wait_sec` to `0` means "wait indefinitely"; it
+isn't the default, because a session that leaves a dev server running would then hang the runner
+with no upper bound.
+
 ## Epic Status Lifecycle
 
 ```

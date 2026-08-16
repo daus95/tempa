@@ -8,6 +8,39 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session the backend CLI cut short no longer gets mistaken for a blocked epic.**
+  Claude Code's print mode waits a fixed 10 minutes for the background work a turn left
+  running — a delegated sub-agent, a `run_in_background`/`nohup ... &` command — then prints
+  "Background tasks still running after 600s; terminating.", kills it, and **exits 0**. A single
+  feature routinely takes longer than that, so a session that was working perfectly well got
+  killed mid-implementation and reported as SUCCEEDED with nothing to show for it. Two of those
+  in a row is exactly what `implement_no_progress_rounds` reads as "blocked on something outside
+  this epic", so the epic was marked `failed` — with a `blocked_reason` quoting whatever
+  happened to be the last line of the log — and the whole agent runner stopped, despite the epic
+  being one Playwright run away from done. Tempa now raises that ceiling to its own
+  `backend_background_wait_sec` (new; default 1 hour) on every spawn, recognizes the CLI's
+  "terminating" message if it's hit anyway, reports the session honestly as cut short instead of
+  SUCCEEDED, and leaves that round out of the no-progress count so the epic simply resumes.
+  `max_session_run` remains the backstop against a genuine loop.
+
+### Added
+
+- `backend_background_wait_sec` in `config.json` (default `3600`): how long a backend CLI waits
+  for the background work a session left running before killing it and exiting. Set as an
+  environment default per backend — Claude Code's `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` today —
+  and only when you haven't exported the variable yourself, so a hand-pinned value still wins.
+  `0` is the CLI's "wait indefinitely" value; it is deliberately not the default, since a session
+  that leaves a dev server running would then hang the runner with no upper bound.
+
+### Changed
+
+- The autonomous system prompt now tells the agent to do the implementation itself rather than
+  handing a whole feature to a background sub-agent and ending its turn waiting on it, and to
+  stop every process it started that doesn't exit on its own (dev servers, API hosts, watchers)
+  before finishing — the two habits that make a backend CLI hit the ceiling above at all.
+
 ## [0.6.5] - 2026-08-16
 
 ### Added
