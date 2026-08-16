@@ -11,12 +11,19 @@ async function renderSettings() {
   renderUpdateStatus();
 }
 
+// Set by renderUpdateStatus whenever an update is available, so the "What's New" click
+// handler below knows which release's changelog to ask for without re-parsing the
+// "Update available: X" label text.
+let settingsUpdateLatestVersion = null;
+
 async function renderUpdateStatus() {
   settingsUpdateStatus.textContent = "";
   settingsUpdateStatus.classList.remove("err");
   settingsUpdateCurrent.textContent = "—";
   settingsUpdateLatest.textContent = "Checking…";
   settingsUpdateBtn.classList.add("hidden");
+  settingsWhatsNewBtn.classList.add("hidden");
+  settingsUpdateLatestVersion = null;
   try {
     const res = await fetch("/api/update/status");
     const data = await res.json();
@@ -36,6 +43,8 @@ async function renderUpdateStatus() {
     if (data.updateAvailable) {
       settingsUpdateLatest.textContent = `Update available: ${data.latest}`;
       settingsUpdateBtn.classList.remove("hidden");
+      settingsUpdateLatestVersion = data.latest;
+      settingsWhatsNewBtn.classList.remove("hidden");
     } else {
       settingsUpdateLatest.textContent = "Up to date.";
     }
@@ -45,6 +54,14 @@ async function renderUpdateStatus() {
     settingsUpdateStatus.classList.add("err");
   }
 }
+
+settingsWhatsNewBtn.addEventListener("click", () => {
+  if (!settingsUpdateLatestVersion) return;
+  openFileViewerModal(
+    "/api/update/changelog?latest=" + encodeURIComponent(settingsUpdateLatestVersion),
+    `What's New in ${settingsUpdateLatestVersion}`,
+    { markdown: true });
+});
 
 // Passive, silent counterpart to renderUpdateStatus() above: checked once on page load so
 // the sidebar can flag a new release without the user having to open Settings first.

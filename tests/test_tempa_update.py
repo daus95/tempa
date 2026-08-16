@@ -79,6 +79,89 @@ def test_get_latest_release_version_bad_json_returns_none(monkeypatch):
     assert tu.get_latest_release_version() is None
 
 
+_SAMPLE_CHANGELOG = """\
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+- **Not released yet.** Should never show up in a diff between released versions.
+
+## [0.3.0] - 2026-01-03
+
+### Added
+
+- **Third thing.** Details.
+
+## [0.2.0] - 2026-01-02
+
+### Fixed
+
+- **Second thing.** Details.
+
+## [0.1.0] - 2026-01-01
+
+### Added
+
+- **First thing.** Details.
+"""
+
+
+def test_get_changelog_since_returns_intervening_sections_newest_first(monkeypatch):
+    monkeypatch.setattr(
+        tu.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResponse(_SAMPLE_CHANGELOG.encode("utf-8")))
+
+    result = tu.get_changelog_since("0.1.0", "0.3.0")
+
+    assert result.index("[0.3.0]") < result.index("[0.2.0]")
+    assert "[0.1.0]" not in result
+    assert "[Unreleased]" not in result
+    assert "Not released yet" not in result
+
+
+def test_get_changelog_since_single_version_behind(monkeypatch):
+    monkeypatch.setattr(
+        tu.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResponse(_SAMPLE_CHANGELOG.encode("utf-8")))
+
+    result = tu.get_changelog_since("0.2.0", "0.3.0")
+
+    assert "[0.3.0]" in result
+    assert "[0.2.0]" not in result
+    assert "[0.1.0]" not in result
+
+
+def test_get_changelog_since_up_to_date_returns_empty(monkeypatch):
+    monkeypatch.setattr(
+        tu.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResponse(_SAMPLE_CHANGELOG.encode("utf-8")))
+
+    assert tu.get_changelog_since("0.3.0", "0.3.0") == ""
+
+
+def test_get_changelog_since_unknown_current_includes_everything_up_to_latest(monkeypatch):
+    monkeypatch.setattr(
+        tu.urllib.request, "urlopen",
+        lambda *a, **k: _FakeResponse(_SAMPLE_CHANGELOG.encode("utf-8")))
+
+    result = tu.get_changelog_since("unknown", "0.2.0")
+
+    assert "[0.2.0]" in result
+    assert "[0.1.0]" in result
+    assert "[0.3.0]" not in result
+
+
+def test_get_changelog_since_network_failure_returns_none(monkeypatch):
+    def _raise(*a, **k):
+        raise urllib.error.URLError("no network")
+
+    monkeypatch.setattr(tu.urllib.request, "urlopen", _raise)
+
+    assert tu.get_changelog_since("0.1.0", "0.3.0") is None
+
+
 def test_print_version_outputs_local_version(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(tu, "SCRIPT_DIR", tmp_path)
     (tmp_path / "VERSION").write_text("0.3.0", encoding="utf-8")

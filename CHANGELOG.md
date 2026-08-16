@@ -10,6 +10,14 @@ once the first tagged release is cut.
 
 ### Added
 
+- **The Maintenance tab now shows what's actually in an available update.** Previously
+  "Update available: X" was all the information given — deciding whether to take an update
+  meant leaving the dashboard to read the release on GitHub by hand, and there was no way to
+  tell how many releases behind the installation was. A new "What's New" link opens the
+  changelog entries for every version between the installed one and the latest, newest
+  first, rendered the same way QA reports already are. The content is fetched from
+  `CHANGELOG.md` pinned to the latest release's tag, so it always matches what actually
+  shipped.
 - **Sidebar now flags an available update.** Previously the only way to learn a newer Tempa
   release existed was to open Settings → Maintenance and check manually. The dashboard now
   checks once on load and, if a newer version is available, shows an "Update available"

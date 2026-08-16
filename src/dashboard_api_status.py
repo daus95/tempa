@@ -8,6 +8,7 @@ config.json, so a cached answer would show a run that has already moved on.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import tempa_backend
@@ -201,3 +202,21 @@ def update_status() -> Response:
         "ok": True, "current": current, "latest": latest,
         "updateAvailable": current == "unknown" or current != latest,
     }
+
+
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def update_changelog(latest: str) -> Response:
+    """Changelog entries for every version between the installed one and `latest`
+    (inclusive), for the Maintenance tab's "What's New" link. `latest` comes from the
+    client (echoing what /api/update/status already told it), so it's validated before
+    being used to build the GitHub raw-content URL, the same way _resolve_within validates
+    a client-supplied path before it touches disk."""
+    if not _VERSION_RE.match(latest):
+        return 400, {"ok": False, "error": "Invalid version."}
+    current = tempa_update.get_local_version()
+    content = tempa_update.get_changelog_since(current, latest)
+    if content is None:
+        return 200, {"ok": False, "error": "Could not reach GitHub to fetch changelog details."}
+    return 200, {"ok": True, "content": content, "truncated": False}
