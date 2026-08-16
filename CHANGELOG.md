@@ -10,6 +10,12 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **The session engine and the per-stage session runners are separate modules.**
+  `tempa_session.py` (1,292 lines before this release's refactors) kept both "how do you run
+  a backend CLI and read its output" and "what does the QA stage do with the result" in one
+  place. The engine is 657 lines now; the five runners — implementation, QA, one-shot
+  plan/review, clarification, apply-clarification — are `tempa_session_runners.py`.
+
 - **The dashboard's background-run workers are no longer closures.** `_start_clarify_run`
   and `_start_implement_run` each wrapped a `worker()` around a near-identical `run_once()`,
   reachable only by actually spawning `tempa.py`. Both are now module-level functions over a

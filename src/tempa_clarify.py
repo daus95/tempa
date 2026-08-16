@@ -44,11 +44,8 @@ from tempa_prompts import (
     build_auto_answer_prompt,
     build_clarification_prompt,
 )
-from tempa_session import (
-    run_apply_clarification_session,
-    run_clarification_session,
-    run_with_usage_limit_retry,
-)
+from tempa_session import run_with_usage_limit_retry
+from tempa_session_runners import run_apply_clarification_session, run_clarification_session
 
 # How many times one `clarify --finalize` run may rewrite the PRD/spec (see
 # run_clarify_finalize). A compaction is followed by a verification round; if that round

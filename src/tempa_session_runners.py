@@ -1,0 +1,396 @@
+"""The concrete session runners: what each stage actually asks a backend to do.
+
+`tempa_session` next door is the generic engine — spawn a CLI, stream and parse its output,
+recognize the stop conditions. This module is the layer above it: one runner per stage
+(implementation, QA, one-shot plan/review, clarification, apply-clarification), each
+deciding what to log, what to record in config.json, and which session id to keep so the
+next round can resume instead of re-reading everything.
+
+Callers pass a fully-built prompt string in (see tempa_prompts) — nothing here builds
+prompts, only runs them. What a finished implementation session MEANS for its epic is one
+step further out again, in tempa_session_outcome.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+from tempa_backend import Backend, get_backend_def
+from tempa_config import (
+    get_backend,
+    get_commit_after_qa_pass,
+    get_max_qa_fail_rounds,
+    get_model,
+    get_qa_dir,
+    get_qa_loop_strikes,
+    get_reasoning_effort,
+    get_workspace,
+    load_config,
+    save_config,
+    set_epic_session_id,
+)
+from tempa_git import commit_workspace_changes
+from tempa_logging import _print_log_tail, _state, log
+from tempa_maintenance import reconcile_qa_passed_features_and_log
+from tempa_notifications import AttentionEventType, notify_attention
+from tempa_qa_history import VERDICT_FAIL, VERDICT_PASS, detect_qa_loop, record_qa_round
+from tempa_session import _run_backend_session, _session_feature_lines
+from tempa_session_outcome import apply_session_outcome
+
+
+def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
+    """Log SUCCEEDED / usage-limit-stopped / overload-paused / cut-short / FAILED (with a
+    one-time log tail) for a finished session. Returns True iff exit_code == 0 and the
+    session ran to completion — no usage limit, server overload, or backend-side
+    termination of the session's own background work."""
+    if _state.auth_error_hit:
+        log(f"{label} stopped — authentication failed (see message above).")
+        return False
+    if _state.usage_limit_hit:
+        log(f"{label} stopped — usage limit reached.{usage_limit_note}")
+        return False
+    if _state.server_overloaded_hit:
+        log(f"{label} paused — backend API overloaded (will retry automatically).")
+        return False
+    if _state.backend_stuck_after_done_hit:
+        # The non-zero exit code here is Tempa's own doing (_terminate_if_stuck_after_done
+        # killed the process), not a task failure — reporting it as "FAILED (exit code 1)"
+        # with a log tail made a routine, self-healing cleanup hang look alarming in the
+        # dashboard's Log tab.
+        log(f"{label} stopped — the backend process was force-terminated after it had already "
+            "finished its turn (see the message above); resuming automatically.")
+        return False
+    if _state.background_tasks_terminated_hit:
+        # Exit code 0 here is the CLI reporting its own clean shutdown, not a finished job:
+        # it gave up waiting on the background work the session left running and killed it
+        # (see the message _handle_background_terminated already logged). Reporting that as
+        # "SUCCEEDED" is what made a session that was cut short mid-implementation look, in
+        # the dashboard's Log tab, like one that simply had nothing left to do.
+        log(f"{label} was cut short — the backend gave up waiting on the background work "
+            "this session left running and terminated it (see the message above).")
+        return False
+    if exit_code == 0:
+        log(f"{label} SUCCEEDED (exit code {exit_code})")
+        return True
+    log(f"{label} FAILED (exit code {exit_code})")
+    _print_log_tail(log_path)
+    return False
+
+
+def _capture_session_id(
+    index: int, backend: Backend, kind: str, initial: str | None, label: str,
+) -> tuple[Callable[[dict], None], Callable[[], str | None]]:
+    """Build an on_json_event callback that captures the session id from the first event
+    `backend.extract_session_id` recognizes (unless `initial` is already set, e.g.
+    resuming) and persists it — along with which backend produced it — to
+    config["epic"][index] under the process lock (see tempa_config.set_epic_session_id).
+    Returns (callback, getter)."""
+    captured = [initial]
+
+    def _on_json_event(data: dict) -> None:
+        if captured[0] is not None:
+            return
+        sid = backend.extract_session_id(data)
+        if not sid:
+            return
+        captured[0] = sid
+        with _state.lock:
+            cfg = load_config()
+            set_epic_session_id(cfg["epic"][index], backend.name, sid, kind=kind)
+            save_config(cfg)
+        log(f"{label} session_id: {sid}", to_console=False)
+
+    return _on_json_event, lambda: captured[0]
+
+
+def run_session(
+    index: int,
+    prompt: str,
+    session_label: str,
+    resume_session_id: str | None = None,
+    features_override: int | None = None,
+) -> None:
+
+    action = "Resuming" if resume_session_id else "Starting"
+    backend = get_backend_def(get_backend(load_config(), "implement"))
+    completed_before = load_config()["epic"][index].get("completed_features", 0)
+
+    def _print_feature_plan() -> None:
+        for _line in _session_feature_lines(load_config(), session_label, features_override):
+            print(_line, flush=True)
+
+    def _feature_progress_suffix() -> str:
+        # Live feature progress: read from config.json (the agent updates completed_features
+        # and each feature's status as it works). Ignore read errors (e.g. config is being
+        # written) — display without feature info for that iteration. Features are worked
+        # in array order, so the first non-done one is the one currently in progress.
+        try:
+            cfg = load_config()
+            epic = next((s for s in (cfg.get("epic") or []) if s.get("epic_name") == session_label), None)
+            if epic:
+                completed = epic.get('completed_features', 0)
+                total = epic.get('total_features', 0)
+                current = next(
+                    (f for f in epic.get("features", []) if f.get("status") in ("pending", "require_fixing")),
+                    None,
+                )
+                current_part = f" — {current.get('id', '?')}" if current else ""
+                return f" [feat {completed}/{total}{current_part}]"
+        except Exception:
+            pass
+        return ""
+
+    on_json_event, _ = _capture_session_id(index, backend, "implement", resume_session_id, f"Session [{session_label}]")
+
+    exit_code, log_path = _run_backend_session(
+        backend,
+        prompt,
+        get_model(load_config(), "implement"),
+        log_prefix=f"session_{session_label}",
+        banner_label=f"{action} session [{session_label}]",
+        resume_session_id=resume_session_id,
+        reasoning_effort=get_reasoning_effort(load_config(), "implement"),
+        on_json_event=on_json_event,
+        extra_progress_fn=_feature_progress_suffix,
+        pre_banner_extra=_print_feature_plan,
+    )
+
+    _log_session_result(
+        f"Session [{session_label}]", exit_code, log_path,
+        usage_limit_note=" (epic left as on_progress so it can be resumed once the limit resets).",
+    )
+
+    with _state.lock:
+        apply_session_outcome(
+            index, session_label, exit_code, log_path, completed_before, backend,
+        )
+        _state.running_thread = None
+        _state.running_index = None
+
+
+def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, log_path: Path) -> None:
+    """Append this QA session's verdict to the epic's `qa_history` and stop the run if that
+    history shows the epic cycling through the QA gate instead of converging (see
+    tempa_qa_history.detect_qa_loop). Called from run_qa_session under `_state.lock`; saves
+    `config` itself whenever it changed anything.
+
+    Nothing is recorded unless the session actually reached a verdict. A QA session cut short —
+    by a usage limit, an auth error, a backend overload, a stuck-after-done force-terminate, the
+    backend terminating the background work the session left running, or a plain crash — leaves
+    `qa_status` as "ongoing", and check_and_run resumes it as a continuation of the SAME round;
+    recording on those would count one round several times and manufacture a cycle out of an
+    interrupted network connection."""
+    epic = config["epic"][index]
+    if epic.get("qa_status") != "done":
+        return
+    if (_state.usage_limit_hit or _state.auth_error_hit
+            or _state.server_overloaded_hit or _state.backend_stuck_after_done_hit
+            or _state.background_tasks_terminated_hit):
+        return
+
+    passed = bool(epic.get("qa_passed"))
+    failed_ids = [
+        feature.get("id", "?") for feature in (epic.get("features") or [])
+        if feature.get("status") == "require_fixing"
+    ]
+    record_qa_round(
+        epic,
+        VERDICT_PASS if passed else VERDICT_FAIL,
+        failed_ids=[] if passed else failed_ids,
+        report=epic.get("qa_report_filename", ""),
+    )
+
+    reason = detect_qa_loop(epic, get_qa_loop_strikes(config), get_max_qa_fail_rounds(config))
+    if reason is None:
+        save_config(config)
+        return
+
+    epic["status"] = "failed"
+    epic["blocked_reason"] = reason
+    save_config(config)
+    log(f"QA [{session_label}] — {reason}\n"
+        "Review the QA reports listed above, fix the underlying conflict between them, then run "
+        "`tempa implement --reset-failed` (or click Continue Implementation) to retry.")
+    notify_attention(
+        AttentionEventType.QA_OSCILLATION_DETECTED,
+        "QA",
+        f"{session_label} keeps failing QA in circles",
+        "Review the QA reports for the rounds listed below — each round's fix is undoing an "
+        "earlier one. Resolve that, then run `tempa implement --reset-failed`.",
+        epic=session_label,
+        log_path=log_path,
+        details={"reason": reason, "qa_fail_rounds": sum(
+            1 for entry in (epic.get("qa_history") or []) if entry.get("verdict") == VERDICT_FAIL
+        )},
+    )
+    _state.stop_event.set()
+
+
+def run_qa_session(
+    index: int,
+    prompt: str,
+    session_label: str,
+    resume_session_id: str | None = None,
+) -> None:
+
+    get_qa_dir().mkdir(parents=True, exist_ok=True)
+    action = "Resuming" if resume_session_id else "Starting"
+    backend = get_backend_def(get_backend(load_config(), "implement"))
+
+    on_json_event, _ = _capture_session_id(index, backend, "qa", resume_session_id, f"QA [{session_label}]")
+
+    exit_code, log_path = _run_backend_session(
+        backend,
+        prompt,
+        get_model(load_config(), "implement"),
+        log_prefix=f"qa_{session_label}",
+        banner_label=f"{action} QA session [{session_label}]",
+        resume_session_id=resume_session_id,
+        reasoning_effort=get_reasoning_effort(load_config(), "implement"),
+        progress_tag="QA",
+        on_json_event=on_json_event,
+    )
+
+    _log_session_result(f"QA session [{session_label}]", exit_code, log_path)
+
+    # qa_status is managed by the agent in config.json.
+    # If it is still "ongoing" after this session, check_and_run will detect and resume.
+    with _state.lock:
+        # A pass verdict leaves the feature statuses of an earlier failed QA round untouched
+        # (the PASS branch of the QA prompt only writes qa_passed/qa_status) — resync them
+        # here, right after the verdict lands, so the status output and the dashboard never
+        # show this epic as QA-passed with 🔧 features. check_and_run does the same on every
+        # poll as the catch-all; this call is what makes the repair immediate.
+        config = load_config()
+        if reconcile_qa_passed_features_and_log(config):
+            save_config(config)
+
+        # Record this round's verdict and check the epic's QA history for a loop before anything
+        # else reads its status — a trip rewrites it to "failed".
+        _record_qa_verdict_and_guard(config, index, session_label, log_path)
+
+        epic = config["epic"][index]
+        if (epic.get("status") == "done" and epic.get("qa_passed")
+                and epic.get("qa_status") == "done" and get_commit_after_qa_pass(config)):
+            workspace_root = get_workspace(config).get("root", "")
+            label = epic.get("epic_name", session_label)
+            outcome, detail = commit_workspace_changes(
+                workspace_root, f"tempa: {label} — QA passed"
+            )
+            if outcome == "committed":
+                log(f"[{label}] committed workspace changes after QA pass: {detail}")
+            else:
+                log(f"[{label}] commit after QA pass {outcome}: {detail}")
+
+        _state.running_thread = None
+        _state.running_index = None
+
+
+def _run_oneshot_session(
+    prompt: str, label: str, log_prefix: str, backend: Backend, model: str, reasoning_effort: str = "",
+) -> bool:
+    """Run a single fresh session (never resumes) against `backend`. Streams output to a
+    log file and returns True on exit code 0. Used by one-pass workflows (plan-epics,
+    review)."""
+    exit_code, log_path = _run_backend_session(
+        backend,
+        prompt,
+        model,
+        log_prefix=log_prefix,
+        banner_label=label,
+        reasoning_effort=reasoning_effort,
+        progress_tag=label,
+    )
+    return _log_session_result(f"[{label}]", exit_code, log_path)
+
+
+def _capture_clarify_session_id(
+    backend: Backend, initial: str | None, label: str, id_key: str = "clarify_session_id",
+    backend_key: str = "clarify_session_backend",
+) -> Callable[[dict], None]:
+    """Like _capture_session_id, but for clarify/apply sessions — these aren't tied to an
+    epic index, so the captured id is persisted directly under top-level config.json keys
+    instead of into an epic entry. `id_key`/`backend_key` default to the evaluate session's
+    keys (see tempa_config.get_clarify_session_id); run_apply_clarification_session passes
+    the apply-specific pair instead (get_clarify_apply_session_id)."""
+    captured = [initial]
+
+    def _on_json_event(data: dict) -> None:
+        if captured[0] is not None:
+            return
+        sid = backend.extract_session_id(data)
+        if not sid:
+            return
+        captured[0] = sid
+        with _state.lock:
+            cfg = load_config()
+            cfg[id_key] = sid
+            cfg[backend_key] = backend.name
+            save_config(cfg)
+        log(f"{label} session_id: {sid}", to_console=False)
+
+    return _on_json_event
+
+
+def run_clarification_session(
+    prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
+) -> bool:
+    """Run a single clarification (evaluate) session against `backend`. Always starts a
+    fresh session — never resumes itself (a fresh full read of the PRD every round is
+    what makes evaluate trustworthy). Its session id IS captured (into
+    config["clarify_session_id"]), purely so a same-backend apply pass run right after it
+    (run_apply_clarification_session) can resume it — that session already paid to read
+    the whole PRD, so applying via --resume reuses that context instead of re-reading it
+    cold."""
+    label = f"Clarification run #{run_number}"
+    on_json_event = _capture_clarify_session_id(backend, None, label)
+    exit_code, log_path = _run_backend_session(
+        backend,
+        prompt,
+        model,
+        log_prefix=f"clarification_{run_number}",
+        banner_label=label,
+        reasoning_effort=reasoning_effort,
+        progress_tag="CLARIFY",
+        on_json_event=on_json_event,
+    )
+    return _log_session_result(label, exit_code, log_path)
+
+
+def run_apply_clarification_session(
+    prompt: str, run_number: int, backend: Backend, model: str, reasoning_effort: str = "",
+    resume_session_id: str | None = None,
+) -> bool:
+    """Apply clarification findings to PRD/spec documents against `backend`.
+
+    `resume_session_id`, when given, resumes an existing session instead of starting
+    fresh — normally the evaluate session that just wrote the findings being applied
+    (see tempa_config.get_clarify_session_id / _run_apply_step), so the apply pass reuses
+    context that session already paid to build instead of re-reading the PRD and every
+    backlog clarification file cold. Omit it (e.g. a standalone `tempa clarify --apply`
+    run some time after evaluate, or a backend mismatch) to fall back to a fresh session,
+    same as before."""
+    label = f"Apply-clarifications run #{run_number}"
+    action = "Resuming" if resume_session_id else "Starting"
+    # Captured under its own top-level keys (distinct from the evaluate session's
+    # clarify_session_id) so a usage-limit/overload retry of THIS apply attempt (see
+    # tempa_config.get_clarify_apply_session_id) can resume it instead of losing whatever
+    # this attempt already did and falling back to resuming evaluate — or starting cold
+    # — again.
+    on_json_event = _capture_clarify_session_id(
+        backend, resume_session_id, label,
+        id_key="clarify_apply_session_id", backend_key="clarify_apply_session_backend",
+    )
+    exit_code, log_path = _run_backend_session(
+        backend,
+        prompt,
+        model,
+        log_prefix=f"apply_clarification_{run_number}",
+        banner_label=f"{action} {label}",
+        resume_session_id=resume_session_id,
+        reasoning_effort=reasoning_effort,
+        progress_tag="APPLY",
+        on_json_event=on_json_event,
+    )
+    return _log_session_result(label, exit_code, log_path)

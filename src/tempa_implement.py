@@ -44,13 +44,11 @@ from tempa_prompts import (
     build_session_prompt,
 )
 from tempa_session import (
-    _run_oneshot_session,
-    run_qa_session,
-    run_session,
     run_with_usage_limit_retry,
     wait_out_server_overload,
     wait_out_usage_limit,
 )
+from tempa_session_runners import _run_oneshot_session, run_qa_session, run_session
 
 
 def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
