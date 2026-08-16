@@ -14,6 +14,10 @@ several source files that get concatenated back into one inline script.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+
+import pytest
 
 import dashboard_assets
 
@@ -113,3 +117,26 @@ def test_javascript_is_served_as_one_inline_script():
     assert "renderMarkdown" in page          # a function defined in the dashboard's JS
     assert "const state = {" in page          # the single shared app-state object
     assert re.search(r"<script\s+src=", page) is None
+
+
+def test_every_js_part_is_listed_and_every_listed_part_exists():
+    """JS_PARTS is the load order, so it has to stay in sync with the folder both ways:
+    a part that exists but isn't listed silently never loads."""
+    on_disk = {p.name for p in (dashboard_assets.ASSET_DIR / "js").glob("*.js")}
+    assert on_disk == set(dashboard_assets.JS_PARTS)
+    assert dashboard_assets.JS_PARTS[0] == "00-initial-data.js"    # declares INITIAL_*
+    assert dashboard_assets.JS_PARTS[-1] == "99-events-init.js"    # runs the first paint
+
+
+def test_the_concatenated_script_parses_as_valid_javascript(tmp_path):
+    """The parts are concatenated blindly into one script scope, so a cut in the wrong
+    place (mid-function, mid-string) would only surface as a blank dashboard in a browser.
+    `node --check` parses without executing, which is exactly the check that catches it.
+    Skipped when node isn't installed — this is a nice-to-have, not a hard dependency."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; skipping the JS syntax check")
+    bundle = tmp_path / "bundle.js"
+    bundle.write_text(dashboard_assets._dashboard_js(), encoding="utf-8")
+    result = subprocess.run([node, "--check", str(bundle)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

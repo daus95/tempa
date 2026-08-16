@@ -33,7 +33,9 @@ Sanity-check your setup with:
   parsing/rendering.
 - `src/prompt/*.md` — the prompt templates sent to Claude, one file per prompt stage. Prefer
   editing these over changing prompt strings inline in Python.
-- `src/assets/` — the dashboard's HTML/CSS/JS.
+- `src/assets/` — the dashboard's HTML/CSS, plus `assets/js/` (the front-end script, split
+  into ordered parts that are concatenated into one inline `<script>` — see
+  [docs/architecture.md](docs/architecture.md#assets-srcassets-srcprompt)).
 - `docs/` — reference docs for each subsystem (config, folders, prompts, models, logging).
 
 If you add a module, follow the existing `tempa_*.py` / `dashboard_*.py` naming split so it's

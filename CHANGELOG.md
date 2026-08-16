@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **The dashboard's front-end script is now split across `src/assets/js/` instead of one
+  3,558-line `dashboard.js`.** Twenty ordered parts, one per pane/concern (markdown renderer,
+  DOM refs + state, modals, home, clarification, implementation, verification, settings,
+  specification, shared events), concatenated by `dashboard_assets.JS_PARTS` into the same
+  single inline `<script>` the page always had. No module system, no imports, no behavior
+  change: the assembled script is byte-for-byte identical to the file it replaces.
+
 ### Added
 
 - **Test coverage for the dashboard's HTTP surface, its page assembly, and the CLI's

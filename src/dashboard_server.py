@@ -627,8 +627,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # reads/writes to the same file could corrupt or lose an auto-answer, so saves are
         # rejected for as long as a finalize run is in flight. This is the authoritative
         # guard (the client already disables editing — see isClarifyFinalizeLocked in
-        # dashboard.js — but this also covers a stale tab that had the file open before
-        # finalize started).
+        # assets/js/94-clarify-answers.js — but this also covers a stale tab that had the
+        # file open before finalize started).
         payload = self._read_json_body()
         run = self.server.clarify_run
         with run["lock"]:

@@ -60,7 +60,7 @@ functions directly in-process.
 |---|---|
 | `dashboard_ui.py` | `run_dashboard()` — starts the `HTTPServer`, wires the handler and initial page render together. The dashboard's own entry point. |
 | `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`), including `/api/backends/status` (see [cli-availability.md](cli-availability.md)). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
-| `dashboard_assets.py` | Reads `assets/dashboard.{html,css,js}` and the two guide `.html` files from disk once (`lru_cache`) and inlines CSS/JS into a self-contained document — no external requests from the page. |
+| `dashboard_assets.py` | Reads `assets/dashboard.{html,css}`, the `assets/js/*.js` parts (concatenated in `JS_PARTS` order), and the two guide `.html` files from disk once (`lru_cache`), and inlines CSS/JS into a self-contained document — no external requests from the page. |
 | `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
 | `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |
 | `dashboard_clarify_parse.py` | Parses a clarification result file into findings (via the `clarify:item`/`clarify:answer` HTML-comment markers), computes the finalize/implement readiness state, and derives the pending-resolution overlay (`pending_resolutions` / `pending_overlay_stats`) shared by the dashboard and the clarification prompt. Ported from the former standalone `clarify_ui.py`. |
@@ -70,11 +70,22 @@ functions directly in-process.
 
 ### Assets (`src/assets/`, `src/prompt/`)
 
-`dashboard.html`/`.css`/`.js` are the single-page app shell; `principles-guide.html` and
-`spec-guide.html` are standalone static documents opened in their own tab (same stylesheet
-inlined, so they inherit the dashboard's theming — see `dashboard_assets.principles_guide_page`/
-`spec_guide_page` for the pattern to follow when adding a third). `src/prompt/*.md` are the raw
-prompt templates — see [prompt-templates.md](prompt-templates.md).
+`dashboard.html`/`dashboard.css` plus `assets/js/*.js` are the single-page app shell;
+`principles-guide.html` and `spec-guide.html` are standalone static documents opened in their
+own tab (same stylesheet inlined, so they inherit the dashboard's theming — see
+`dashboard_assets.principles_guide_page`/`spec_guide_page` for the pattern to follow when
+adding a third). `src/prompt/*.md` are the raw prompt templates — see
+[prompt-templates.md](prompt-templates.md).
+
+The front-end script is split across `assets/js/` only so no single file has to hold all
+~3,500 lines of it. It is **not** a module system: `dashboard_assets.JS_PARTS` concatenates
+those files, in that exact order, into one inline `<script>`, so every part shares a single
+script scope exactly as one file would — no `import`/`export`, and a function defined in one
+part is callable from any other. The order is explicit (not a sorted glob) because two parts
+are positional: `00-initial-data.js` declares the `INITIAL_*` constants `render_page()`
+substitutes into, so it must come first, and `99-events-init.js` is the only part that *runs*
+anything at load (the first paint), so it must come last. Everything in between is grouped by
+pane. Adding a part means adding it to `JS_PARTS` too.
 
 ## The CLI/dashboard boundary
 

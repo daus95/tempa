@@ -285,8 +285,9 @@ def _clarify_finalize_status(
     """How ready "Finalized Clarification" is to run — the "Finalize readiness" panel's
     state, and also the actual precondition gate: the button (Home and Clarification
     Overview) stays disabled, and POST /api/clarify/run (mode=finalize) returns 409,
-    until "ready" is true (see renderFinalizeGate/renderHomeWorkflow in dashboard.js,
-    and _handle_clarify_run_start in dashboard_server.py). "ready" is also what the
+    until "ready" is true (see renderFinalizeGate/renderHomeWorkflow in the dashboard's
+    front-end script under assets/js/, and _handle_clarify_run_start in
+    dashboard_server.py). "ready" is also what the
     dashboard uses to decide whether to relabel Start Clarification -> Continue
     Clarification and explain what's still blocking Finalize.
 
