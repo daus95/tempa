@@ -6,7 +6,13 @@ file still isn't reflected in config.json's "clarify_applied_hashes") before it'
 to chain into a fresh evaluate. The subprocess-spawning worker() itself isn't covered here
 (no subprocess mocking harness in this suite yet) — this locks down the decision function
 the loop is built on. _implementation_has_started is the same kind of pure decision
-function behind the Start/Continue Implementation relabeling."""
+function behind the Start/Continue Implementation relabeling.
+
+The run workers themselves are covered at the bottom of this file: they used to be
+closures inside _start_clarify_run/_start_implement_run and could only be reached by
+actually spawning `tempa.py`; as module-level functions they can be driven directly with
+a fake _stream_tempa_command, so the apply auto-chain and both stop paths are testable
+without a subprocess."""
 
 from __future__ import annotations
 
@@ -317,3 +323,127 @@ def test_clarify_graceful_pending_reports_a_request_made_from_the_cli(isolate_te
     tempa_config.request_graceful_stop("clarify")
 
     assert dr._clarify_graceful_stop_pending(server) is True
+
+
+# ---------------------------------------------------------------------------
+# The run workers — previously untestable as closures inside _start_*_run, now
+# module-level functions that can be driven directly with a fake command runner.
+# Each test replaces _stream_tempa_command, so nothing is ever spawned.
+# ---------------------------------------------------------------------------
+def _fake_runner(returncodes, calls):
+    """Stand in for _stream_tempa_command: record every (command, args) and return the
+    next code from `returncodes` (the last one repeats)."""
+    def run(run_state, command, args):
+        calls.append((command, list(args)))
+        return returncodes[min(len(calls) - 1, len(returncodes) - 1)]
+    return run
+
+
+def _clarify_run(**overrides):
+    run = dr._new_clarify_run_state()
+    run["running"] = True
+    run.update(overrides)
+    return run
+
+
+def test_clarify_worker_runs_one_process_and_records_the_exit_code(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: 0)
+    run = _clarify_run(mode="run")
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "run")
+    assert calls == [("clarify", ["--noui"])]
+    assert run["running"] is False and run["returncode"] == 0
+
+
+def test_clarify_worker_passes_the_finalize_flag(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), _clarify_run(mode="finalize"), "finalize")
+    assert calls == [("clarify", ["--finalize"])]
+
+
+def test_apply_keeps_going_until_the_backlog_is_clear(monkeypatch, tmp_path):
+    calls = []
+    remaining = iter([2, 1, 0])
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: next(remaining))
+    run = _clarify_run(mode="apply")
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "apply")
+    assert calls == [("clarify", ["--apply"])] * 3
+    assert run["lines"][-1].startswith("Apply finished.")
+
+
+def test_apply_stops_when_a_batch_stops_clearing_files(monkeypatch, tmp_path):
+    calls = []
+    remaining = iter([2, 2])
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: next(remaining))
+    run = _clarify_run(mode="apply")
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "apply")
+    assert len(calls) == 2
+    assert "stopping the auto-apply loop" in run["lines"][-1]
+    assert not any(line.startswith("Apply finished.") for line in run["lines"])
+
+
+def test_apply_honours_a_stop_between_batches(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: 3)
+    run = _clarify_run(mode="apply", stop_requested=True)
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "apply")
+    assert calls == [("clarify", ["--apply"])]        # the queued batch never started
+    assert run["lines"][-1] == "Apply Answers stopped — 3 remaining file(s) were not applied."
+
+
+def test_apply_reports_a_graceful_stop_differently(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: 1)
+    run = _clarify_run(mode="apply", graceful_stop_requested=True)
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "apply")
+    assert run["lines"][-1] == (
+        "Apply Answers stopped after the current session finished — "
+        "1 remaining file(s) were not applied.")
+
+
+def test_a_failed_apply_does_not_chain(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([1], calls))
+    monkeypatch.setattr(dr, "_unapplied_answered_count", lambda server: 5)
+    run = _clarify_run(mode="apply")
+    dr._clarify_run_worker(SimpleNamespace(clar_dir=tmp_path), run, "apply")
+    assert calls == [("clarify", ["--apply"])]
+    assert run["returncode"] == 1
+
+
+def test_implement_worker_resets_failed_epics_before_implementing(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    run = dr._new_implement_run_state()
+    run["running"] = True
+    dr._implement_run_worker(run)
+    assert calls == [("implement", ["--reset-failed"]), ("implement", [])]
+    assert run["running"] is False and run["returncode"] == 0
+
+
+def test_implement_worker_starts_anyway_when_the_reset_fails(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([1, 0], calls))
+    run = dr._new_implement_run_state()
+    run["running"] = True
+    dr._implement_run_worker(run)
+    assert len(calls) == 2
+    assert run["lines"][0].startswith("Could not reset failed epic(s)")
+    assert run["returncode"] == 0
+
+
+def test_implement_worker_honours_a_stop_during_the_reset_pass(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dr, "_stream_tempa_command", _fake_runner([0], calls))
+    run = dr._new_implement_run_state()
+    run["running"] = True
+    run["stop_requested"] = True
+    dr._implement_run_worker(run)
+    assert calls == [("implement", ["--reset-failed"])]
+    assert run["lines"][-1] == "Stopped before implementation started."

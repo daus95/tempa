@@ -44,37 +44,57 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `tempa_cli.py` | Argument parsing and dispatch only. No workflow logic lives here. |
+| `tempa_cli_help.py` | The hand-written `tempa --help` page (`print_help()`), separated from `tempa_cli.py` purely because it is 170 lines of formatted text. `-h`/`--help` is deliberately never registered with argparse — see `_build_arg_parser`. |
 | `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution, plus `workspace_is_writable()` (see [cli-availability.md](cli-availability.md)). The one module every other module can depend on — stdlib-only, imports nothing local. |
 | `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
 | `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
-| `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects usage-limit/auth-error stop conditions. The concrete session runners (implementation, QA, clarification, apply, one-shot) live here too, along with the usage-limit pause/retry helpers (`wait_out_usage_limit`, `run_with_usage_limit_retry`) every caller in `tempa_clarify.py`/`tempa_implement.py` uses to wait a usage-limit stop out and retry the interrupted step instead of failing. |
+| `tempa_session.py` | The agent-runner session engine: spawns whichever CLI backend a stage is configured for (see `tempa_backend.py`), streams/parses its output, detects the usage-limit/auth/overload stop conditions, and supervises a backend that hangs or is cut short. Also the pause/retry helpers (`wait_out_usage_limit`, `run_with_usage_limit_retry`) every caller in `tempa_clarify.py`/`tempa_implement.py` uses to wait a stop out and retry the interrupted step instead of failing. It knows how to run *a* session, never what one means. |
+| `tempa_session_runners.py` | The per-stage runners on top of that engine — implementation, QA, one-shot (plan/review), clarification, apply-clarification. Each decides what to log, what to record in config.json, and which session id to keep so the next round can resume instead of re-reading everything. |
+| `tempa_session_outcome.py` | What a finished implementation session MEANS for its epic — `apply_session_outcome()`, called by `run_session` under `_state.lock`. Exit code 0 is not the same question as "did this epic make progress?": a usage-limit/auth/overload stop is a pause, a session the backend cut short is not a stalled epic, and an exit-0 session that completed no feature for `implement_no_progress_rounds` rounds gets triaged into reorder-the-plan / repair-a-QA-state-desync / fail-and-stop. |
 | `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`), and per-backend readiness (`get_backend_status()` — see [cli-availability.md](cli-availability.md)). |
 | `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
-| `tempa_implement.py` | The implement poll loop and scheduler (`check_and_run`): decides what to run next (resume QA, resume an in-progress epic, implement the next pending epic). |
+| `tempa_implement.py` | The implement poll loop and scheduler: `check_and_run` walks four steps in priority order — `_resume_interrupted_qa`, `_resume_in_progress_epic`, `_run_qa_gate`, `_start_next_epic` — and the first one that takes the poll wins. That order IS the policy: resuming interrupted work beats starting new work, and no epic is implemented past one still waiting on QA. |
 | `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
 | `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/backend/reasoning-effort/status/spec/verify/test, plus opening the dashboard. |
+| `tempa_update.py` | Tempa updating itself: `version`, `check-update`, `update`. The only module that talks to GitHub or writes to the install folder, and the one the dashboard's Settings page reads the version from — importing it there avoids pulling in `tempa_commands`, which drags the whole dashboard in via `dashboard_ui`. |
 
 ### Dashboard side (`dashboard_*.py`)
 
 | Module | Responsibility |
 |---|---|
 | `dashboard_ui.py` | `run_dashboard()` — starts the `HTTPServer`, wires the handler and initial page render together. The dashboard's own entry point. |
-| `dashboard_server.py` | `_DashboardHandler` — routes every `/api/*` GET/POST and the static guide pages (`/architecture-principles`, `/spec-guide`), including `/api/backends/status` (see [cli-availability.md](cli-availability.md)). All file access goes through `dashboard_spec._resolve_within` to stay confined to the PRD/clarifications folders. |
-| `dashboard_assets.py` | Reads `assets/dashboard.{html,css,js}` and the two guide `.html` files from disk once (`lru_cache`) and inlines CSS/JS into a self-contained document — no external requests from the page. |
+| `dashboard_server.py` | `_DashboardHandler` — the HTTP layer and nothing else: two route tables (`GET_ROUTES`/`POST_ROUTES`), body/query reading, and one thin adapter per route that hands off to a `dashboard_api_*` module and sends back the `(status, payload)` it returns. |
+| `dashboard_api_spec.py` | Specification pane: read/save/upload/delete/rename inside the PRD folder, all confined to it by `dashboard_spec._resolve_within`. |
+| `dashboard_api_clarify.py` | Clarification pane: render one findings file, write answers back into it (`apply_answers_to_file`), the skip-minor toggle, and the server-side gate on starting a Finalized Clarification run. |
+| `dashboard_api_status.py` | The read-only/polled endpoints: `/api/tree`'s first-paint payload, both live run-status payloads, the log and QA-report viewers, the update check, and `backend_status()` (see [cli-availability.md](cli-availability.md)). |
+| `dashboard_api_settings.py` | Settings pane: reading config.json for the form, and validating + saving it back. The validation is plain functions over the payload, so every rule (and its user-facing message) is testable without HTTP. Architecture Principles and the SMTP test live here too. |
+| `dashboard_api_workspace.py` | Home page's working-folder controls and the Settings maintenance actions — select/open/detach a workspace, Clear Everything, apply an update, restart the server. Each shells out to `tempa.py <command>` rather than doing the work in-process (see [The CLI/dashboard boundary](#the-clidashboard-boundary)). |
+| `dashboard_assets.py` | Reads `assets/dashboard.{html,css}`, the `assets/js/*.js` parts (concatenated in `JS_PARTS` order), and the two guide `.html` files from disk once (`lru_cache`), and inlines CSS/JS into a self-contained document — no external requests from the page. |
 | `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
 | `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |
 | `dashboard_clarify_parse.py` | Parses a clarification result file into findings (via the `clarify:item`/`clarify:answer` HTML-comment markers), computes the finalize/implement readiness state, and derives the pending-resolution overlay (`pending_resolutions` / `pending_overlay_stats`) shared by the dashboard and the clarification prompt. Ported from the former standalone `clarify_ui.py`. |
 | `dashboard_clarify_render.py` | Turns parsed findings into the HTML shown in the Clarification pane (a small hand-rolled markdown renderer, not a dependency). |
-| `dashboard_runs.py` | Background clarify/implement runs: spawns `tempa.py clarify`/`tempa.py implement` as a subprocess, streams its output into a run-state dict the dashboard polls, and the Stop-implementation kill. |
+| `dashboard_runs.py` | Background clarify/implement runs: `_stream_tempa_command` spawns `tempa.py clarify`/`tempa.py implement` and streams its output into a run-state dict the dashboard polls; `_clarify_run_worker`/`_implement_run_worker` are what each Start button runs on its own thread (including apply's backlog auto-chain), plus the Stop-implementation kill. |
 | `dashboard_winui.py` / `dashboard_macui.py` / `dashboard_linuxui.py` | OS-native folder picker and reveal-in-file-manager, split per platform since there's no cross-platform stdlib API for either. Linux is best-effort (`zenity`/`kdialog` for the picker, `xdg-open` for the file manager, no window-focus equivalent) since neither is guaranteed installed the way PowerShell/osascript are on their platforms; `tempa init <path>` is the fallback if neither tool is present. |
 
 ### Assets (`src/assets/`, `src/prompt/`)
 
-`dashboard.html`/`.css`/`.js` are the single-page app shell; `principles-guide.html` and
-`spec-guide.html` are standalone static documents opened in their own tab (same stylesheet
-inlined, so they inherit the dashboard's theming — see `dashboard_assets.principles_guide_page`/
-`spec_guide_page` for the pattern to follow when adding a third). `src/prompt/*.md` are the raw
-prompt templates — see [prompt-templates.md](prompt-templates.md).
+`dashboard.html`/`dashboard.css` plus `assets/js/*.js` are the single-page app shell;
+`principles-guide.html` and `spec-guide.html` are standalone static documents opened in their
+own tab (same stylesheet inlined, so they inherit the dashboard's theming — see
+`dashboard_assets.principles_guide_page`/`spec_guide_page` for the pattern to follow when
+adding a third). `src/prompt/*.md` are the raw prompt templates — see
+[prompt-templates.md](prompt-templates.md).
+
+The front-end script is split across `assets/js/` only so no single file has to hold all
+~3,500 lines of it. It is **not** a module system: `dashboard_assets.JS_PARTS` concatenates
+those files, in that exact order, into one inline `<script>`, so every part shares a single
+script scope exactly as one file would — no `import`/`export`, and a function defined in one
+part is callable from any other. The order is explicit (not a sorted glob) because two parts
+are positional: `00-initial-data.js` declares the `INITIAL_*` constants `render_page()`
+substitutes into, so it must come first, and `99-events-init.js` is the only part that *runs*
+anything at load (the first paint), so it must come last. Everything in between is grouped by
+pane. Adding a part means adding it to `JS_PARTS` too.
 
 ## The CLI/dashboard boundary
 
@@ -180,10 +200,15 @@ workflow → its own module; a small stateless command → `tempa_commands.py`).
 `tempa_prompts.py`, and a runner in `tempa_session.py` if it needs its own stop-condition handling
 — otherwise reuse `_run_oneshot_session`.
 
-**Adding a new dashboard page/route:** add the route in `dashboard_server._DashboardHandler`, and
-if it's a standalone guide page (not part of the single-page app), follow the
-`principles_guide_page()`/`spec_guide_page()` pattern in `dashboard_assets.py` — a static `.html`
-file in `src/assets/` with the dashboard's CSS inlined at request time.
+**Adding a new dashboard route:** add an entry to `GET_ROUTES`/`POST_ROUTES` in
+`dashboard_server._DashboardHandler` plus the one-line adapter method it names, and put the actual
+logic in the `dashboard_api_*` module for that pane (a function taking what it needs explicitly and
+returning `(status, payload)` — no HTTP objects, so it can be tested directly).
+
+**Adding a new standalone guide page** (a document opened in its own tab, not part of the
+single-page app): follow the `principles_guide_page()`/`spec_guide_page()` pattern in
+`dashboard_assets.py` — a static `.html` file in `src/assets/` with the dashboard's CSS inlined at
+request time — and give it a route in `GET_ROUTES` like the two existing ones.
 
 **Adding a new background run kicked off from the dashboard:** see
 [The CLI/dashboard boundary](#the-clidashboard-boundary) above — it goes through

@@ -8,6 +8,68 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **The session engine and the per-stage session runners are separate modules.**
+  `tempa_session.py` (1,292 lines before this release's refactors) kept both "how do you run
+  a backend CLI and read its output" and "what does the QA stage do with the result" in one
+  place. The engine is 657 lines now; the five runners — implementation, QA, one-shot
+  plan/review, clarification, apply-clarification — are `tempa_session_runners.py`.
+
+- **The dashboard's background-run workers are no longer closures.** `_start_clarify_run`
+  and `_start_implement_run` each wrapped a `worker()` around a near-identical `run_once()`,
+  reachable only by actually spawning `tempa.py`. Both are now module-level functions over a
+  single `_stream_tempa_command`, which means the apply auto-chain loop, its stalled/stopped
+  message paths, and implement's `--reset-failed` pass are covered by tests for the first
+  time (10 new ones) instead of being exercised only in production.
+
+- **The dashboard's HTTP handler is now routing only, with each pane's logic in its own
+  module.** `dashboard_server.py` was a 1,238-line class where routing, validation and
+  business logic for seven feature areas sat in one 50-method block; it is 447 lines now —
+  two route tables and a one-line adapter per route — with the work moved into
+  `dashboard_api_spec`, `dashboard_api_clarify`, `dashboard_api_status`,
+  `dashboard_api_settings` and `dashboard_api_workspace`. Those take what they need as plain
+  arguments and return the `(status, payload)` to send, so the Settings form's 20-odd
+  validation rules are now testable without an HTTP request. Every route answers exactly
+  what it did before, held in place by the 101 characterization tests added first.
+
+- **Tempa's self-update and its `--help` page moved out of the modules they were crowding.**
+  `tempa version`/`check-update`/`update` are now `tempa_update.py` — the only module that
+  talks to GitHub or writes to the install folder — and the dashboard reads the version from
+  there directly instead of lazily importing `tempa_commands` (which drags in the whole
+  dashboard via `dashboard_ui`). The 170-line hand-written help page is now
+  `tempa_cli_help.py`, leaving `tempa_cli.py` a 320-line dispatch layer. Same commands, same
+  output, verified identical string-for-string.
+
+- **The three longest functions in the CLI half are now split into named steps.**
+  `run_session`'s 150-line "what does this exit code mean for the epic?" tail moved into a
+  new `tempa_session_outcome.py` (`apply_session_outcome`, plus one small function per
+  outcome: reorder the plan, repair a QA-state desync, fail and stop); `check_and_run`'s
+  four scheduling branches became `_resume_interrupted_qa` / `_resume_in_progress_epic` /
+  `_run_qa_gate` / `_start_next_epic`, called in that priority order; and
+  `run_clarify_finalize`'s loop body split into evaluate / compact / convergence-guard /
+  auto-answer steps. Behavior is unchanged — every log line, notification, and exit code is
+  byte-identical, verified by comparing the full set of runtime string literals before and
+  after — and 12 new tests now cover the extracted implementation-outcome decision tree
+  directly.
+
+- **The dashboard's front-end script is now split across `src/assets/js/` instead of one
+  3,558-line `dashboard.js`.** Twenty ordered parts, one per pane/concern (markdown renderer,
+  DOM refs + state, modals, home, clarification, implementation, verification, settings,
+  specification, shared events), concatenated by `dashboard_assets.JS_PARTS` into the same
+  single inline `<script>` the page always had. No module system, no imports, no behavior
+  change: the assembled script is byte-for-byte identical to the file it replaces.
+
+### Added
+
+- **Test coverage for the dashboard's HTTP surface, its page assembly, and the CLI's
+  command surface.** `dashboard_server.py` (every `/api/*` route), `dashboard_assets.py`
+  (CSS/JS inlining and the per-request data placeholders), and `tempa_cli.py` (which
+  subcommands exist, what they accept, and whether the help text documents them) had no
+  tests at all. 147 new characterization tests pin down the status codes, JSON shapes, and
+  user-facing error strings these currently produce — groundwork for splitting the two
+  largest modules without changing what they do.
+
 ## [0.6.6] - 2026-08-16
 
 ### Fixed

@@ -44,11 +44,8 @@ from tempa_prompts import (
     build_auto_answer_prompt,
     build_clarification_prompt,
 )
-from tempa_session import (
-    run_apply_clarification_session,
-    run_clarification_session,
-    run_with_usage_limit_retry,
-)
+from tempa_session import run_with_usage_limit_retry
+from tempa_session_runners import run_apply_clarification_session, run_clarification_session
 
 # How many times one `clarify --finalize` run may rewrite the PRD/spec (see
 # run_clarify_finalize). A compaction is followed by a verification round; if that round
@@ -433,6 +430,180 @@ def _exit_if_graceful_stop(about_to: str) -> None:
     sys.exit(0)
 
 
+def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, phase: str,
+                             skip_minor: bool) -> tuple[int, int, int]:
+    """Run one evaluate pass of the finalize loop and return its (critical, major, minor)
+    finding counts, having already recorded them in config.json.
+
+    The prompt is rebuilt every round rather than reused: auto-answering grows the pending
+    overlay, and a compaction empties it (so the verify round evaluates the PRD on its own
+    merits, which is the whole point of running it).
+
+    Exits the process rather than returning if the session couldn't run — 3 on an
+    authentication error, 1 on any other failure, matching what a failed manual round does.
+    """
+    prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
+
+    start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
+    # Retry's lambda binds the loop variables as defaults (not by closure) so a retry
+    # can't accidentally pick up a later iteration's prompt/run_number/config.
+    success = run_with_usage_limit_retry(
+        lambda prompt=prompt, run_number=run_number, config=config: run_clarification_session(
+            prompt, run_number, get_backend_def(get_backend(config, "clarify")),
+            get_model(config, "clarify"), get_reasoning_effort(config, "clarify"),
+        ),
+        f"Clarify (finalize) round #{run_number} — evaluate",
+    )
+    if _state.auth_error_hit:
+        sys.exit(3)
+    if not success:
+        log(f"Clarification run #{run_number} failed — stopping the loop.")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            f"Clarification round {run_number} failed",
+            "Review the clarification session log and resolve the failure before continuing.",
+        )
+        sys.exit(1)
+
+    config = load_config()
+    findings = config.get("last_clarification_findings", {})
+    critical = findings.get("critical", 0)
+    major = findings.get("major", 0)
+    minor = findings.get("minor", 0)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor)
+    config["last_clarification_action"] = "evaluate"
+    # Running total across every evaluate pass ever (manual `clarify` or one iteration
+    # of `clarify --finalize`) — NOT reset here, unlike last_finalize_round below, so
+    # it keeps counting across finalize runs and manual runs alike.
+    config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
+    config["last_finalize_round"] = run_number
+    config["last_finalize_phase"] = phase
+    save_config(config)
+    report_files = _clarification_report_files(clar_dir, start_ts)
+    _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
+
+    log(f"Round #{run_number} ({phase}) findings: critical={critical}, major={major}, minor={minor}")
+    return critical, major, minor
+
+
+def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compactions: int,
+                                        minor: int) -> int:
+    """Nothing critical/major is left to ask, so write the whole accumulated overlay into
+    the PRD/spec in one apply pass. Returns the incremented compaction count.
+
+    Exits 0 instead if there was nothing left to write (the run is simply done), and 1 if
+    the apply failed or the PRD has already been rewritten MAX_COMPACTIONS times without the
+    verification round coming back clean — at that point the remaining findings need a human.
+    """
+    config = load_config()
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
+    if not unanswered_files and not unapplied_files:
+        log("No critical/major findings, and every recorded answer is already in the "
+            "PRD/spec. Clarify (finalize) done.")
+        if minor > 0:
+            log(f"Still {minor} minor finding(s) — considered acceptable.")
+        sys.exit(0)
+
+    compactions += 1
+    if compactions > MAX_COMPACTIONS:
+        log(f"The PRD/spec has already been rewritten {MAX_COMPACTIONS} time(s) in this run "
+            "and the verification round keeps finding new critical/major issues — stopping "
+            "instead of rewriting it again. The remaining findings need a human decision "
+            "(see `tempa answer`).")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
+            "Clarification needs human answers",
+            "Applying the answers keeps surfacing new findings — review them by hand.",
+            details={"compactions": compactions - 1},
+        )
+        sys.exit(1)
+
+    log(f"No critical/major findings remain — writing {len(unanswered_files) + len(unapplied_files)} "
+        f"pending file(s) of resolutions into the PRD/spec documents "
+        f"(compaction {compactions}/{MAX_COMPACTIONS})...")
+    # Resume the evaluate session that just ran (see tempa_config.get_clarify_session_id /
+    # run_clarification_session) — it already paid to read the whole PRD AND was handed
+    # the entire overlay, which is exactly what this apply has to write, so resuming
+    # reuses that context instead of a cold session re-reading everything itself.
+    # Checked against the "clarify_apply" stage's backend (not "clarify"'s) — that's
+    # the CLI that will actually try the --resume, and a session id only means
+    # anything to the backend that produced it. If clarify_apply is configured with a
+    # different backend than clarify (e.g. evaluate on Claude, apply on Codex), there
+    # is nothing to resume and this correctly returns None.
+    resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
+    _exit_if_graceful_stop("writing the resolutions into the PRD/spec")
+    if not _run_apply_step(config, resume_session_id=resume_sid):
+        log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            f"Clarification apply round {run_number} failed",
+            "Review the apply session log and resolve the failure before continuing.",
+            details={"round": run_number},
+        )
+        sys.exit(1)
+    return compactions
+
+
+def _track_finalize_convergence(critical: int, major: int, prev_total: int | None,
+                                no_progress_rounds: int, no_progress_limit: int | float,
+                                max_run: int) -> tuple[int, int]:
+    """Convergence guard: if `no_progress_limit` rounds in a row fail to reduce the
+    critical+major count, evaluate+auto-answer has run out of resolutions it can make on its
+    own (e.g. every remaining finding genuinely needs a human decision) — exit 1 instead of
+    burning up to max_clarification_run rounds of full-PRD re-evaluation for no benefit.
+
+    Returns the updated (prev_total, no_progress_rounds) when the loop may continue."""
+    total = critical + major
+    if prev_total is not None and total >= prev_total:
+        no_progress_rounds += 1
+    else:
+        no_progress_rounds = 0
+    if no_progress_rounds >= no_progress_limit:
+        log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
+            f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
+            "major finding(s) remain and likely need a human decision (see `tempa answer`).")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
+            "Clarification needs human answers",
+            "Review and answer the remaining findings before continuing finalization.",
+            details={"critical": critical, "major": major},
+        )
+        sys.exit(1)
+    return total, no_progress_rounds
+
+
+def _auto_answer_finalize_round(clar_dir: Path, run_number: int, critical: int, major: int) -> None:
+    """Answer what this round found — never apply here. The answers join the pending overlay
+    and are carried into the next evaluation; the PRD isn't touched until the compaction.
+    Exits 1 if the auto-answer session failed."""
+    config = load_config()
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, _ = _clarification_backlog(clar_dir, applied_hashes)
+    if not unanswered_files:
+        log(f"The evaluation reported {critical} critical and {major} major finding(s) but left "
+            "no unanswered finding behind — nothing to auto-answer this round.")
+        return
+    _exit_if_graceful_stop("auto-answering this round's findings")
+    log(f"Still {critical} critical and {major} major finding(s) — answering "
+        f"{len(unanswered_files)} file(s) with unanswered findings...")
+    if not _run_auto_answer_step(config, unanswered_files):
+        log(f"Auto-answer run #{run_number} failed — stopping the loop.")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            f"Clarification auto-answer round {run_number} failed",
+            "Review the auto-answer session log and resolve the failure before continuing.",
+            details={"round": run_number},
+        )
+        sys.exit(1)
+    # Backstop: the agent may leave a blank behind. The overlay has to be complete or
+    # the next evaluation simply re-raises the finding and the loop can't converge.
+    filled = _fill_unanswered_with_recommendations(unanswered_files)
+    if filled:
+        log(f"Filled {filled} finding(s) the auto-answer pass left blank with their own "
+            "recommendation.")
+
+
 def run_clarify_finalize(skip_minor: bool = False) -> None:
     """Unattended clarification: loop evaluate -> auto-answer until an evaluation reports no
     critical/major findings, then write every accumulated answer into the PRD/spec in ONE
@@ -506,51 +677,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         _banner(round_header)
         log(round_header, to_console=False)
 
-        config = load_config()
-        # Recomputed every round: auto-answering below grows the overlay, and a compaction
-        # empties it (so the verify round below evaluates the PRD on its own merits, which
-        # is the whole point of running it).
-        prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
-
-        start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
-        # Retry's lambda binds the loop variables as defaults (not by closure) so a retry
-        # can't accidentally pick up a later iteration's prompt/run_number/config.
-        success = run_with_usage_limit_retry(
-            lambda prompt=prompt, run_number=run_number, config=config: run_clarification_session(
-                prompt, run_number, get_backend_def(get_backend(config, "clarify")),
-                get_model(config, "clarify"), get_reasoning_effort(config, "clarify"),
-            ),
-            f"Clarify (finalize) round #{run_number} — evaluate",
-        )
-        if _state.auth_error_hit:
-            sys.exit(3)
-        if not success:
-            log(f"Clarification run #{run_number} failed — stopping the loop.")
-            notify_attention(
-                AttentionEventType.CLARIFICATION_FAILED, "Clarification",
-                f"Clarification round {run_number} failed",
-                "Review the clarification session log and resolve the failure before continuing.",
-            )
-            sys.exit(1)
-
-        config = load_config()
-        findings = config.get("last_clarification_findings", {})
-        critical = findings.get("critical", 0)
-        major = findings.get("major", 0)
-        minor = findings.get("minor", 0)
-        _stamp_clean_evaluation_if_zero(config, critical, major, minor)
-        config["last_clarification_action"] = "evaluate"
-        # Running total across every evaluate pass ever (manual `clarify` or one iteration
-        # of `clarify --finalize`) — NOT reset here, unlike last_finalize_round above, so
-        # it keeps counting across finalize runs and manual runs alike.
-        config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
-        config["last_finalize_round"] = run_number
-        config["last_finalize_phase"] = phase
-        save_config(config)
-        report_files = _clarification_report_files(clar_dir, start_ts)
-        _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
-
-        log(f"Round #{run_number} ({phase}) findings: critical={critical}, major={major}, minor={minor}")
+        critical, major, minor = _finalize_evaluate_round(
+            load_config(), clar_dir, run_number, phase, skip_minor)
 
         if critical == 0 and major == 0:
             if phase == "verify":
@@ -560,55 +688,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
                     log(f"Still {minor} minor finding(s) — considered acceptable.")
                 sys.exit(0)
 
-            # Clean evaluate: nothing new left to ask, so write the whole accumulated
-            # overlay into the PRD in one pass, then verify what that pass produced.
-            config = load_config()
-            applied_hashes = config.get("clarify_applied_hashes", {}) or {}
-            unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
-            if not unanswered_files and not unapplied_files:
-                log("No critical/major findings, and every recorded answer is already in the "
-                    "PRD/spec. Clarify (finalize) done.")
-                if minor > 0:
-                    log(f"Still {minor} minor finding(s) — considered acceptable.")
-                sys.exit(0)
-
-            compactions += 1
-            if compactions > MAX_COMPACTIONS:
-                log(f"The PRD/spec has already been rewritten {MAX_COMPACTIONS} time(s) in this run "
-                    "and the verification round keeps finding new critical/major issues — stopping "
-                    "instead of rewriting it again. The remaining findings need a human decision "
-                    "(see `tempa answer`).")
-                notify_attention(
-                    AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
-                    "Clarification needs human answers",
-                    "Applying the answers keeps surfacing new findings — review them by hand.",
-                    details={"compactions": compactions - 1},
-                )
-                sys.exit(1)
-
-            log(f"No critical/major findings remain — writing {len(unanswered_files) + len(unapplied_files)} "
-                f"pending file(s) of resolutions into the PRD/spec documents "
-                f"(compaction {compactions}/{MAX_COMPACTIONS})...")
-            # Resume the evaluate session that just ran (see tempa_config.get_clarify_session_id /
-            # run_clarification_session) — it already paid to read the whole PRD AND was handed
-            # the entire overlay, which is exactly what this apply has to write, so resuming
-            # reuses that context instead of a cold session re-reading everything itself.
-            # Checked against the "clarify_apply" stage's backend (not "clarify"'s) — that's
-            # the CLI that will actually try the --resume, and a session id only means
-            # anything to the backend that produced it. If clarify_apply is configured with a
-            # different backend than clarify (e.g. evaluate on Claude, apply on Codex), there
-            # is nothing to resume and this correctly returns None.
-            resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
-            _exit_if_graceful_stop("writing the resolutions into the PRD/spec")
-            if not _run_apply_step(config, resume_session_id=resume_sid):
-                log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
-                notify_attention(
-                    AttentionEventType.CLARIFICATION_FAILED, "Clarification",
-                    f"Clarification apply round {run_number} failed",
-                    "Review the apply session log and resolve the failure before continuing.",
-                    details={"round": run_number},
-                )
-                sys.exit(1)
+            compactions = _compact_resolutions_into_documents(
+                clar_dir, run_number, compactions, minor)
 
             # The apply just rewrote the PRD, so a finding count from before it says nothing
             # about whether the loop is still making progress — comparing the verify round
@@ -620,56 +701,9 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
                 "against the updated documents...")
             continue
 
-        # Convergence guard: if `no_progress_limit` rounds in a row fail to reduce the
-        # critical+major count, evaluate+auto-answer has run out of resolutions it can make
-        # on its own (e.g. every remaining finding genuinely needs a human decision) — stop
-        # instead of burning up to max_clarification_run rounds of full-PRD re-evaluation
-        # for no benefit.
-        total = critical + major
-        if prev_total is not None and total >= prev_total:
-            no_progress_rounds += 1
-        else:
-            no_progress_rounds = 0
-        prev_total = total
-        if no_progress_rounds >= no_progress_limit:
-            log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
-                f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
-                "major finding(s) remain and likely need a human decision (see `tempa answer`).")
-            notify_attention(
-                AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
-                "Clarification needs human answers",
-                "Review and answer the remaining findings before continuing finalization.",
-                details={"critical": critical, "major": major},
-            )
-            sys.exit(1)
-
-        # Answer what this round found — never apply here. The answers join the overlay and
-        # are carried into the next evaluation; the PRD isn't touched until the compaction.
-        config = load_config()
-        applied_hashes = config.get("clarify_applied_hashes", {}) or {}
-        unanswered_files, _ = _clarification_backlog(clar_dir, applied_hashes)
-        if unanswered_files:
-            _exit_if_graceful_stop("auto-answering this round's findings")
-            log(f"Still {critical} critical and {major} major finding(s) — answering "
-                f"{len(unanswered_files)} file(s) with unanswered findings...")
-            if not _run_auto_answer_step(config, unanswered_files):
-                log(f"Auto-answer run #{run_number} failed — stopping the loop.")
-                notify_attention(
-                    AttentionEventType.CLARIFICATION_FAILED, "Clarification",
-                    f"Clarification auto-answer round {run_number} failed",
-                    "Review the auto-answer session log and resolve the failure before continuing.",
-                    details={"round": run_number},
-                )
-                sys.exit(1)
-            # Backstop: the agent may leave a blank behind. The overlay has to be complete or
-            # the next evaluation simply re-raises the finding and the loop can't converge.
-            filled = _fill_unanswered_with_recommendations(unanswered_files)
-            if filled:
-                log(f"Filled {filled} finding(s) the auto-answer pass left blank with their own "
-                    "recommendation.")
-        else:
-            log(f"The evaluation reported {critical} critical and {major} major finding(s) but left "
-                "no unanswered finding behind — nothing to auto-answer this round.")
+        prev_total, no_progress_rounds = _track_finalize_convergence(
+            critical, major, prev_total, no_progress_rounds, no_progress_limit, max_run)
+        _auto_answer_finalize_round(clar_dir, run_number, critical, major)
         phase = "evaluate"
 
     log(f"Clarify (finalize) reached the {max_run}-run limit. Stopping.")

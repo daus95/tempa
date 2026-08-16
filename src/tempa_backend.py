@@ -65,7 +65,7 @@ COPILOT_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "m
 # omits "none"/"minimal" from its "supported_reasoning_levels" field even though the real
 # API accepts both for every model tested — CODEX_UNIVERSAL_LEVELS below adds them back.
 # Codex's own model catalog moves independently of Tempa and this can go stale, same
-# tradeoff already accepted for MODEL_OPTIONS_BY_BACKEND in dashboard.js.
+# tradeoff already accepted for MODEL_OPTIONS_BY_BACKEND in assets/js/80-settings-form.js.
 CODEX_UNIVERSAL_LEVELS = ("none", "minimal")
 CODEX_MODEL_REASONING_LEVELS = {
     "gpt-5.6-sol": CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh", "max", "ultra"),

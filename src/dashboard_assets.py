@@ -28,6 +28,47 @@ from dashboard_config import (
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 
+# The dashboard's front-end script, split across assets/js/ purely so no single source file
+# has to hold all 3,500 lines of it. They are CONCATENATED IN THIS ORDER into one inline
+# <script>, so every part shares one script scope exactly as the single file did: no ES
+# modules, no imports, no exports. Two ordering rules follow from that and are the only
+# reason this is an explicit list rather than a sorted glob:
+#   - "00-initial-data.js" must come first — it declares the INITIAL_* constants that
+#     render_page() substitutes the per-request data into.
+#   - "99-events-init.js" must come last — unlike the others it doesn't just declare
+#     functions, it runs the first paint, so everything it calls has to exist by then.
+# The numeric prefixes make that order visible in a directory listing; adding a part means
+# adding it here too.
+JS_PARTS = (
+    "00-initial-data.js",
+    "10-markdown.js",
+    "20-dom-state.js",
+    "30-modals.js",
+    "40-navigation.js",
+    "50-home.js",
+    "60-clarify-overview.js",
+    "62-backend-status.js",
+    "64-clarify-run.js",
+    "66-clarify-stop.js",
+    "70-implement.js",
+    "75-verify.js",
+    "80-settings-form.js",
+    "82-settings-save.js",
+    "85-implement-requirement.js",
+    "88-principles.js",
+    "90-spec.js",
+    "92-spec-context-menu.js",
+    "94-clarify-answers.js",
+    "99-events-init.js",
+)
+
+
+def _dashboard_js() -> str:
+    """The whole front-end script as one string (see JS_PARTS for the ordering rules)."""
+    return "".join(
+        (ASSET_DIR / "js" / name).read_text(encoding="utf-8") for name in JS_PARTS
+    )
+
 
 @lru_cache(maxsize=1)
 def _page_template() -> str:
@@ -35,8 +76,7 @@ def _page_template() -> str:
     data placeholders (SPEC_TREE, etc.) are still present and filled in by render_page()."""
     html = (ASSET_DIR / "dashboard.html").read_text(encoding="utf-8")
     css = (ASSET_DIR / "dashboard.css").read_text(encoding="utf-8")
-    js = (ASSET_DIR / "dashboard.js").read_text(encoding="utf-8")
-    return html.replace("/*__CSS__*/", css).replace("/*__JS__*/", js)
+    return html.replace("/*__CSS__*/", css).replace("/*__JS__*/", _dashboard_js())
 
 
 @lru_cache(maxsize=1)

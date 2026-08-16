@@ -26,7 +26,7 @@ C:\tools\tempa\           (Tempa folder — separate)
    │                            clarify_render, runs, winui, macui, linuxui,
    │                            assets)
    ├─ prompt\                (prompt templates, one .md per prompt)
-   └─ assets\                (dashboard.html / .css / .js)
+   └─ assets\                (dashboard.html / .css + js\ parts)
 ```
 
 Keep the whole folder together: the launcher puts `src/` on the import path and the modules
