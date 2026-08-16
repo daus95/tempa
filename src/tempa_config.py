@@ -282,6 +282,7 @@ DEFAULT_CONFIG = {
     "usage_limit_heartbeat_sec": 300,
     "server_overloaded_retry_wait_sec": 300,
     "backend_background_wait_sec": 3600,
+    "terminate_leftover_processes": True,
     "poll_interval_sec": 60,
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
@@ -608,6 +609,25 @@ def get_backend_background_wait_sec(config: dict) -> int | float:
     value = config.get("backend_background_wait_sec", DEFAULT_CONFIG["backend_background_wait_sec"])
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     return value if is_number and value >= 0 else DEFAULT_CONFIG["backend_background_wait_sec"]
+
+
+def get_terminate_leftover_processes(config: dict) -> bool:
+    """Return config.json's "terminate_leftover_processes" (default True) — whether the
+    processes a backend CLI session leaves running (a dev server it started to check its own
+    work, a file watcher, a test runner, a build daemon) are terminated when that session
+    ends, instead of being orphaned to the OS.
+
+    Complements backend_background_wait_sec above rather than replacing it: that is how long
+    the CLI itself waits for the background work *it* is tracking before killing it and
+    exiting, and it only helps while the CLI is still alive to act. This covers whatever is
+    still running once the CLI process is gone — including what it never tracked at all.
+
+    Read fresh immediately before each spawn (tempa_session._stream_backend_process) and
+    fixed for that process tree's lifetime, so a change applies from the next session
+    onward. An opt-out for the user who deliberately wants a session's processes to
+    outlive it."""
+    value = config.get("terminate_leftover_processes")
+    return bool(value) if isinstance(value, bool) else True
 
 
 def get_resume_implementation_sessions(config: dict) -> bool:

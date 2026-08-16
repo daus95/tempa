@@ -80,6 +80,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsFinalizeNoProgressRounds = $("settingsFinalizeNoProgressRounds"),
   settingsCommitAfterQaPass = $("settingsCommitAfterQaPass"),
+  settingsTerminateLeftoverProcesses = $("settingsTerminateLeftoverProcesses"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),
   settingsAllowFinalizeWithCriticalWarning = $("settingsAllowFinalizeWithCriticalWarning"),
   settingsImplementRequirementInputs = document.getElementsByName("settingsImplementRequirement"),

@@ -34,12 +34,14 @@ from tempa_config import (
     get_backend_background_wait_sec,
     get_logs_dir,
     get_server_overloaded_retry_wait_sec,
+    get_terminate_leftover_processes,
     get_usage_limit_heartbeat_sec,
     get_usage_limit_retry_wait_sec,
     load_config,
 )
 from tempa_logging import SHOW_PROMPT, _banner, _state, log
 from tempa_notifications import AttentionEventType, notify_attention
+from tempa_process_group import NullProcessGroup, make_process_group
 
 
 def _is_usage_limit_text(text: str, backend: Backend) -> bool:
@@ -449,6 +451,7 @@ def _terminate_if_stuck_after_done(
     grace_sec: float = _POST_DONE_EXIT_GRACE_SEC,
     poll_interval: float = 0.5,
     sleep_fn: Callable[[float], None] = time.sleep,
+    group: NullProcessGroup | None = None,
 ) -> None:
     """Background watchdog (run as a daemon thread alongside `_stream_backend_process`'s own
     read loop): once the backend has signaled its turn is complete (`done_event` set), give
@@ -482,6 +485,14 @@ def _terminate_if_stuck_after_done(
         _state.stop_event.set()
         with contextlib.suppress(Exception):
             process.terminate()
+        # A CLI wedged in its own post-turn cleanup is precisely the case where whatever it
+        # spawned is still running too, so take the contained tree with it rather than
+        # leaving the leftovers for the session teardown to find. Never `close()` — the
+        # handle belongs to _stream_backend_process's `finally`, which is the one place it
+        # is released.
+        if group is not None:
+            with contextlib.suppress(Exception):
+                group.terminate_tree()
         return
 
 
@@ -499,6 +510,41 @@ def _backend_env(backend: Backend) -> dict[str, str]:
     return env
 
 
+# How long to let a backend CLI take to exit once its output has stopped, before giving up
+# and letting the session teardown reclaim the contained tree. Shorter than
+# _POST_DONE_EXIT_GRACE_SEC (which covers a process that may still be doing real work) and
+# longer than _STDOUT_DRAIN_GRACE_SEC (a Node CLI flushing a large session transcript to
+# disk can legitimately take a few seconds).
+_BACKEND_EXIT_GRACE_SEC = 10.0
+
+
+def _wait_for_backend_exit(
+    process: subprocess.Popen,
+    group: NullProcessGroup,
+    label: str,
+    grace_sec: float = _BACKEND_EXIT_GRACE_SEC,
+) -> int:
+    """Wait for the backend CLI to exit and return its exit code.
+
+    Bounded only when the session is contained: with no container there is nothing to fall
+    back on, so waiting forever — exactly what Tempa did before this feature — remains the
+    only safe thing to do. With one, a CLI that never exits no longer wedges the runner,
+    because the caller's teardown will reclaim the whole tree straight after."""
+    if not group.active:
+        process.wait()
+        return process.returncode
+    try:
+        process.wait(timeout=grace_sec)
+    except subprocess.TimeoutExpired:
+        log(f"[{label}] the backend CLI stopped producing output but has not exited after "
+            f"{grace_sec:.0f}s. Reclaiming this session's processes rather than waiting on "
+            "it indefinitely; the output it produced up to this point is unaffected.")
+        # Non-zero, and distinct from the -1 _run_backend_session uses for "never started",
+        # so downstream reads this as a session that ended badly rather than one that passed.
+        return process.returncode if process.returncode is not None else 1
+    return process.returncode
+
+
 def _stream_backend_process(
     backend: Backend,
     cmd: list[str],
@@ -514,67 +560,125 @@ def _stream_backend_process(
     `backend.parse_line` into readable text (falls back to the raw line for anything that
     isn't valid JSON), stops early if a usage-limit/auth-error marker is seen, and invokes
     `on_json_event(data)` per parsed event for callers that need to react (e.g. capture a
-    session id or a final result)."""
+    session id or a final result).
+
+    The spawn is wrapped in a process container (see tempa_process_group) so that whatever
+    the CLI leaves running when it exits dies with the session rather than being orphaned.
+    `terminate_leftover_processes` turns that off, in which case the container is a no-op and
+    the spawn is byte-for-byte the one Tempa did before it existed."""
     _state.background_tasks_terminated_hit = False
+    # Sampled per spawn: this governs the process tree about to be created and is fixed for
+    # that tree's lifetime, since a container cannot be attached after the fact. A value
+    # saved mid-run therefore applies from the next session onward.
+    group = make_process_group(get_terminate_leftover_processes(load_config()), label)
     with open(log_path, "w", encoding="utf-8") as log_file:
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(WORKING_DIR),
-            env=_backend_env(backend),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if stdin_text:
-            process.stdin.write(stdin_text)
-        process.stdin.close()
+        # The try opens BEFORE the Popen: Popen itself can raise, and with the try any later
+        # the just-created job handle would leak — and a KILL_ON_JOB_CLOSE handle left to the
+        # garbage collector is exactly the kind of thing that goes wrong at 3am.
+        try:
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(WORKING_DIR),
+                env=_backend_env(backend),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                **group.popen_kwargs(),
+            )
+            # First statement after the spawn, before the stdin write and before the
+            # watchdog thread: on Windows the process joins the job only from here on, so
+            # every microsecond until this line is a window in which a grandchild could be
+            # created outside it.
+            group.adopt(process)
+            return _stream_contained_process(
+                backend, process, group, stdin_text, log_file, label, row_count, on_json_event,
+            )
+        finally:
+            _log_reclaimed(group.close(), group, label, log_file)
 
-        done_event = threading.Event()
-        threading.Thread(
-            target=_terminate_if_stuck_after_done, args=(process, done_event, label), daemon=True,
-        ).start()
 
-        for raw_line in _read_process_stdout(process):
-            row_count[0] += 1
-            line = raw_line.strip()
-            data = None
-            if line.startswith("{"):
-                with contextlib.suppress(json.JSONDecodeError):
-                    data = json.loads(line)
+def _log_reclaimed(reclaimed: int, group: NullProcessGroup, label: str, log_file) -> None:
+    """Report what tearing the container down actually had to kill. Silent when nothing was
+    left running, which is the normal case — a line per clean session would be pure noise."""
+    if not reclaimed:
+        return
+    count = f"{reclaimed} " if group.count_is_exact else ""
+    message = (
+        f"[{label}] the backend CLI exited but left {count}process(es) of its own still "
+        "running — typically a dev server, build daemon, watcher or test runner it started "
+        "and never stopped. Terminated them along with the session, so they don't sit "
+        "holding memory and ports until the machine is rebooted. Turn off "
+        '"Terminate leftover processes" in Settings → Runs to leave them alone instead.'
+    )
+    log(message)
+    with contextlib.suppress(Exception):
+        log_file.write(f"\n{message}\n")
+        log_file.flush()
 
-            marker_text = _failure_marker_text(raw_line, data)
-            if _handle_usage_limit(marker_text, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            if _handle_auth_error(marker_text, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            if _handle_overloaded(marker_text, process, label, backend):
-                log_file.write(raw_line)
-                log_file.flush()
-                break
-            # Not a `break`: the CLI keeps streaming (and exits 0) after this — the rest of
-            # its output still belongs in the log, and only the flag matters downstream.
-            _handle_background_terminated(marker_text, label, backend)
-            if data is not None:
-                readable = backend.parse_line(data)
-                if readable:
-                    log_file.write(readable + "\n")
-                    log_file.flush()
-                    _apply_done_signal(readable, done_event)
-                if on_json_event:
-                    on_json_event(data)
-            else:
-                log_file.write(raw_line)
-                log_file.flush()
 
-        process.wait()
-        return process.returncode
+def _stream_contained_process(
+    backend: Backend,
+    process: subprocess.Popen,
+    group: NullProcessGroup,
+    stdin_text: str,
+    log_file,
+    label: str,
+    row_count: list[int],
+    on_json_event: Callable[[dict], None] | None,
+) -> int:
+    """The read loop itself, split out only so `_stream_backend_process` stays a legible
+    spawn/contain/teardown shape. Everything here is what that function did inline before
+    containment was added."""
+    if stdin_text:
+        process.stdin.write(stdin_text)
+    process.stdin.close()
+
+    done_event = threading.Event()
+    threading.Thread(
+        target=_terminate_if_stuck_after_done, args=(process, done_event, label),
+        kwargs={"group": group}, daemon=True,
+    ).start()
+
+    for raw_line in _read_process_stdout(process):
+        row_count[0] += 1
+        line = raw_line.strip()
+        data = None
+        if line.startswith("{"):
+            with contextlib.suppress(json.JSONDecodeError):
+                data = json.loads(line)
+
+        marker_text = _failure_marker_text(raw_line, data)
+        if _handle_usage_limit(marker_text, process, label, backend):
+            log_file.write(raw_line)
+            log_file.flush()
+            break
+        if _handle_auth_error(marker_text, process, label, backend):
+            log_file.write(raw_line)
+            log_file.flush()
+            break
+        if _handle_overloaded(marker_text, process, label, backend):
+            log_file.write(raw_line)
+            log_file.flush()
+            break
+        # Not a `break`: the CLI keeps streaming (and exits 0) after this — the rest of
+        # its output still belongs in the log, and only the flag matters downstream.
+        _handle_background_terminated(marker_text, label, backend)
+        if data is not None:
+            readable = backend.parse_line(data)
+            if readable:
+                log_file.write(readable + "\n")
+                log_file.flush()
+                _apply_done_signal(readable, done_event)
+            if on_json_event:
+                on_json_event(data)
+        else:
+            log_file.write(raw_line)
+            log_file.flush()
+
+    return _wait_for_backend_exit(process, group, label)
 
 
 def _run_backend_session(
