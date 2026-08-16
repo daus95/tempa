@@ -10,6 +10,14 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **Tempa's self-update and its `--help` page moved out of the modules they were crowding.**
+  `tempa version`/`check-update`/`update` are now `tempa_update.py` — the only module that
+  talks to GitHub or writes to the install folder — and the dashboard reads the version from
+  there directly instead of lazily importing `tempa_commands` (which drags in the whole
+  dashboard via `dashboard_ui`). The 170-line hand-written help page is now
+  `tempa_cli_help.py`, leaving `tempa_cli.py` a 320-line dispatch layer. Same commands, same
+  output, verified identical string-for-string.
+
 - **The three longest functions in the CLI half are now split into named steps.**
   `run_session`'s 150-line "what does this exit code mean for the epic?" tail moved into a
   new `tempa_session_outcome.py` (`apply_session_outcome`, plus one small function per

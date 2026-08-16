@@ -26,6 +26,7 @@ import dashboard_server
 import dashboard_verify
 import tempa_backend
 import tempa_config
+import tempa_update
 
 STAGES = ("clarify", "clarify_apply", "plan", "implement")
 
@@ -316,17 +317,15 @@ def test_principles_get_is_empty_when_unset(dash):
 
 
 def test_update_status_reports_an_available_update(dash, monkeypatch):
-    import tempa_commands
-    monkeypatch.setattr(tempa_commands, "get_local_version", lambda: "0.1.0")
-    monkeypatch.setattr(tempa_commands, "get_latest_release_version", lambda: "0.2.0")
+    monkeypatch.setattr(tempa_update, "get_local_version", lambda: "0.1.0")
+    monkeypatch.setattr(tempa_update, "get_latest_release_version", lambda: "0.2.0")
     assert dash.get("/api/update/status") == (
         200, {"ok": True, "current": "0.1.0", "latest": "0.2.0", "updateAvailable": True})
 
 
 def test_update_status_when_github_is_unreachable(dash, monkeypatch):
-    import tempa_commands
-    monkeypatch.setattr(tempa_commands, "get_local_version", lambda: "0.1.0")
-    monkeypatch.setattr(tempa_commands, "get_latest_release_version", lambda: None)
+    monkeypatch.setattr(tempa_update, "get_local_version", lambda: "0.1.0")
+    monkeypatch.setattr(tempa_update, "get_latest_release_version", lambda: None)
     status, body = dash.get("/api/update/status")
     assert status == 200
     assert body["updateAvailable"] is False

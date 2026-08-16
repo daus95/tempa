@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 import tempa_backend
 import tempa_config
+import tempa_update
 from dashboard_assets import principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
     _clarify_files_overview,
@@ -431,11 +432,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_update_status(self) -> None:
-        # Imported lazily: tempa_commands imports dashboard_ui (for run_dashboard), which
-        # imports this module — a top-level import here would be circular.
-        import tempa_commands
-        current = tempa_commands.get_local_version()
-        latest = tempa_commands.get_latest_release_version()
+        current = tempa_update.get_local_version()
+        latest = tempa_update.get_latest_release_version()
         if latest is None:
             self._send_json(200, {
                 "ok": True, "current": current, "latest": None, "updateAvailable": False,
@@ -1196,8 +1194,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if result.returncode != 0:
             self._send_json(500, {"ok": False, "error": output.strip() or f"Update failed (exit code {result.returncode})."})
             return
-        import tempa_commands
-        self._send_json(200, {"ok": True, "output": output, "version": tempa_commands.get_local_version()})
+        self._send_json(200, {"ok": True, "output": output, "version": tempa_update.get_local_version()})
 
     def _handle_server_restart(self) -> None:
         """Stop this dashboard process and relaunch a fresh one bound to the same port,

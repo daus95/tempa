@@ -44,6 +44,7 @@ functions directly in-process.
 | Module | Responsibility |
 |---|---|
 | `tempa_cli.py` | Argument parsing and dispatch only. No workflow logic lives here. |
+| `tempa_cli_help.py` | The hand-written `tempa --help` page (`print_help()`), separated from `tempa_cli.py` purely because it is 170 lines of formatted text. `-h`/`--help` is deliberately never registered with argparse — see `_build_arg_parser`. |
 | `tempa_config.py` | Config.json I/O, `workspace`/`sources`/`models`/`backends`/`reasoning_efforts` resolution, plus `workspace_is_writable()` (see [cli-availability.md](cli-availability.md)). The one module every other module can depend on — stdlib-only, imports nothing local. |
 | `tempa_logging.py` | The shared `_state` (`_RunnerState`) and process-log file. Everything that runs a session imports `_state`/`log` from here. |
 | `tempa_prompts.py` | Loads `src/prompt/*.md` templates and builds the final prompt string per stage (`${...}` substitution + Architecture Principles injection). |
@@ -54,6 +55,7 @@ functions directly in-process.
 | `tempa_implement.py` | The implement poll loop and scheduler: `check_and_run` walks four steps in priority order — `_resume_interrupted_qa`, `_resume_in_progress_epic`, `_run_qa_gate`, `_start_next_epic` — and the first one that takes the poll wins. That order IS the policy: resuming interrupted work beats starting new work, and no epic is implemented past one still waiting on QA. |
 | `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
 | `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/backend/reasoning-effort/status/spec/verify/test, plus opening the dashboard. |
+| `tempa_update.py` | Tempa updating itself: `version`, `check-update`, `update`. The only module that talks to GitHub or writes to the install folder, and the one the dashboard's Settings page reads the version from — importing it there avoids pulling in `tempa_commands`, which drags the whole dashboard in via `dashboard_ui`. |
 
 ### Dashboard side (`dashboard_*.py`)
 
