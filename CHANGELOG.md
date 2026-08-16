@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-16
+
 ### Fixed
 
 - **A session the backend CLI cut short no longer gets mistaken for a blocked epic.**
