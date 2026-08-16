@@ -64,6 +64,7 @@ function renderSidebar() {
   treeEl.appendChild(renderLeafSection("implementation", iconSvg("wrench"), "Implementation", !state.workspaceInitialized, state.implementRun.running));
   treeEl.appendChild(renderLeafSection("verification", iconSvg("circle-check"), "Verification", !state.workspaceInitialized));
   treeBottomEl.innerHTML = "";
+  if (state.updateAvailable) treeBottomEl.appendChild(renderUpdateAvailableItem());
   treeBottomEl.appendChild(renderLeafSection("principles", iconSvg("ruler"), "Architecture Principles", !state.workspaceInitialized));
   treeBottomEl.appendChild(renderLeafSection("settings", iconSvg("settings"), "Settings", !state.workspaceInitialized));
 }

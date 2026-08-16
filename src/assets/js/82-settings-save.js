@@ -46,6 +46,22 @@ async function renderUpdateStatus() {
   }
 }
 
+// Passive, silent counterpart to renderUpdateStatus() above: checked once on page load so
+// the sidebar can flag a new release without the user having to open Settings first.
+async function checkForSidebarUpdate() {
+  try {
+    const res = await fetch("/api/update/status");
+    const data = await res.json();
+    if (data.ok && data.updateAvailable && data.latest != null) {
+      state.updateAvailable = true;
+      state.updateLatestVersion = data.latest;
+      renderSidebar();
+    }
+  } catch (e) {
+    // Silent -- this is a passive notice, not a user-initiated action.
+  }
+}
+
 settingsCheckUpdateBtn.addEventListener("click", async () => {
   settingsCheckUpdateBtn.disabled = true;
   try {
