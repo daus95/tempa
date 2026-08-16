@@ -18,6 +18,7 @@
   <symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6M10 11v6M14 11v6"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4c0-.9 1-1.4 1.7-.9l13 8a1 1 0 0 1 0 1.8l-13 8c-.7.5-1.7 0-1.7-.9z"/></symbol>
   <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
   <symbol id="i-square-dashed" viewBox="0 0 24 24"><path d="M5 3a2 2 0 0 0-2 2M19 3a2 2 0 0 1 2 2M21 19a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1M14 3h1M9 21h1M14 21h1M3 9v1M3 14v1M21 9v1M21 14v1"/></symbol>
   <symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M8 16H3v5"/></symbol>
@@ -197,15 +198,23 @@
           <button type="button" class="clarify-run-btn" id="startClarifyBtn">
             <span><svg class="icon-svg filled"><use href="#i-play"></use></svg></span><span>Start Clarification</span>
           </button>
-          <button type="button" class="clarify-run-btn secondary hidden" id="stopClarifyBtn">
-            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Clarification</span>
-          </button>
+          <span class="split-btn hidden" id="stopClarifySplit">
+            <button type="button" class="clarify-run-btn secondary split-btn-main" id="stopClarifyBtn">
+              <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Now</span>
+            </button>
+            <button type="button" class="clarify-run-btn secondary split-btn-toggle" id="stopClarifyMenuBtn"
+                    title="More stop options" aria-label="More stop options"><svg class="icon-svg"><use href="#i-chevron-down"></use></svg></button>
+          </span>
           <button type="button" class="clarify-run-btn secondary" id="applyAnswersBtn" disabled>
             <span><svg class="icon-svg"><use href="#i-upload"></use></svg></span><span>Apply Answers</span>
           </button>
-          <button type="button" class="clarify-run-btn secondary hidden" id="stopApplyAnswersBtn">
-            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Apply Answers</span>
-          </button>
+          <span class="split-btn hidden" id="stopApplyAnswersSplit">
+            <button type="button" class="clarify-run-btn secondary split-btn-main" id="stopApplyAnswersBtn">
+              <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Now</span>
+            </button>
+            <button type="button" class="clarify-run-btn secondary split-btn-toggle" id="stopApplyAnswersMenuBtn"
+                    title="More stop options" aria-label="More stop options"><svg class="icon-svg"><use href="#i-chevron-down"></use></svg></button>
+          </span>
           <span class="clarify-run-status hidden" id="clarifyRunStatus"></span>
         </div>
         <div class="gate-panel hidden" id="clarifyOverlayCard">
@@ -244,9 +253,13 @@
             <button type="button" class="clarify-run-btn" id="finalizeClarifyBtn" disabled>
               <span><svg class="icon-svg"><use href="#i-flag"></use></svg></span><span>Finalized Clarification</span>
             </button>
-            <button type="button" class="clarify-run-btn secondary hidden" id="stopFinalizeClarifyBtn">
-              <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Finalize</span>
-            </button>
+            <span class="split-btn hidden" id="stopFinalizeClarifySplit">
+              <button type="button" class="clarify-run-btn secondary split-btn-main" id="stopFinalizeClarifyBtn">
+                <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Now</span>
+              </button>
+              <button type="button" class="clarify-run-btn secondary split-btn-toggle" id="stopFinalizeClarifyMenuBtn"
+                      title="More stop options" aria-label="More stop options"><svg class="icon-svg"><use href="#i-chevron-down"></use></svg></button>
+            </span>
             <span class="clarify-round-badge hidden" id="finalizeRoundProgress"></span>
           </div>
           <div class="group">
@@ -273,9 +286,13 @@
           <button type="button" class="clarify-run-btn" id="startImplementBtn">
             <span><svg class="icon-svg"><use href="#i-rocket"></use></svg></span><span>Start Implementation</span>
           </button>
-          <button type="button" class="clarify-run-btn secondary hidden" id="stopImplementBtn">
-            <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Implementation</span>
-          </button>
+          <span class="split-btn hidden" id="stopImplementSplit">
+            <button type="button" class="clarify-run-btn secondary split-btn-main" id="stopImplementBtn">
+              <span><svg class="icon-svg filled"><use href="#i-square"></use></svg></span><span>Stop Now</span>
+            </button>
+            <button type="button" class="clarify-run-btn secondary split-btn-toggle" id="stopImplementMenuBtn"
+                    title="More stop options" aria-label="More stop options"><svg class="icon-svg"><use href="#i-chevron-down"></use></svg></button>
+          </span>
           <span class="impl-header-status" id="implHeaderStatus"></span>
         </div>
         <div class="gate-panel" id="implGate">
@@ -660,6 +677,12 @@
 <div class="row-context-menu hidden" id="rowContextMenu">
   <button type="button" id="rowMenuRename">Rename</button>
   <button type="button" id="rowMenuDelete" class="danger">Delete</button>
+</div>
+<!-- Shared by all four Stop split-buttons: only one run can be in progress per pane, so
+     one menu is enough. Its single item's label and action are set when it opens (see
+     openStopOptionsMenu in dashboard.js). -->
+<div class="row-context-menu hidden" id="stopOptionsMenu">
+  <button type="button" id="stopOptionsMenuItem"></button>
 </div>
 <div class="modal-overlay hidden" id="modalOverlay">
   <div class="modal-box" id="modalBox" role="dialog" aria-modal="true">

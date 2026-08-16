@@ -41,8 +41,14 @@ from dashboard_config import (
     _workspace_root,
 )
 from dashboard_runs import (
+    _cancel_graceful_stop_clarify_run,
+    _cancel_graceful_stop_implement_run,
+    _clarify_graceful_stop_pending,
     _epic_sessions,
     _finalize_limit_change_warning,
+    _graceful_stop_clarify_run,
+    _graceful_stop_implement_run,
+    _implement_graceful_stop_pending,
     _implementation_has_started,
     _start_clarify_run,
     _start_implement_run,
@@ -353,6 +359,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # progress badge next to the "Finalized Clarification" button ticks up live,
         # round by round, the same way implement's epic snapshot does.
         dashboard_config = _load_dashboard_config()
+        # Reads the sentinel as well as this process's own flag, so a graceful stop asked
+        # for with `tempa clarify --stop-graceful` in a terminal shows up here too.
+        graceful_pending = _clarify_graceful_stop_pending(self.server)
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -360,6 +369,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"], "mode": run["mode"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
+                "gracefulStopRequested": graceful_pending,
                 "finalizeRound": dashboard_config.get("last_finalize_round") or 0,
                 "maxRound": dashboard_config.get("max_clarification_run") or 0,
                 # "evaluate" | "verify" — which kind of round finalize is on (see
@@ -378,6 +388,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         # tab shows the same data the "Log" tab's run is actively writing into
         # config.json, so it needs to reflect live progress too.
         epics = _epic_sessions()
+        # Same as the clarify status above: OR'd with the sentinel so a request made from
+        # a terminal (`tempa implement --stop-graceful`) is reflected in the UI too.
+        graceful_pending = _implement_graceful_stop_pending(self.server)
         with run["lock"]:
             lines = list(run["lines"][max(since, 0):])
             total = len(run["lines"])
@@ -385,6 +398,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "ok": True, "running": run["running"],
                 "returncode": run["returncode"], "lines": lines, "next": total,
                 "progress": run["progress"],
+                "gracefulStopRequested": graceful_pending,
                 "epics": epics,
                 # Relabels the three Start Implementation buttons to "Continue
                 # Implementation" once any epic has actually run — computed here so
@@ -450,12 +464,20 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_clarify_run_start()
         elif parsed.path == "/api/clarify/stop":
             self._handle_clarify_run_stop()
+        elif parsed.path == "/api/clarify/stop-graceful":
+            self._handle_clarify_stop_graceful()
+        elif parsed.path == "/api/clarify/stop-graceful/cancel":
+            self._handle_clarify_stop_graceful_cancel()
         elif parsed.path == "/api/clarify/skip-minor":
             self._handle_clarify_skip_minor_save()
         elif parsed.path == "/api/implement/run":
             self._handle_implement_run_start()
         elif parsed.path == "/api/implement/stop":
             self._handle_implement_run_stop()
+        elif parsed.path == "/api/implement/stop-graceful":
+            self._handle_implement_stop_graceful()
+        elif parsed.path == "/api/implement/stop-graceful/cancel":
+            self._handle_implement_stop_graceful_cancel()
         elif parsed.path == "/api/clear":
             self._handle_clear_all()
         elif parsed.path == "/api/workspace/init":
@@ -682,6 +704,21 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True})
 
+    # Deliberately separate routes rather than a "mode" field on /api/clarify/stop above:
+    # graceful and immediate differ in whether a live agent session gets killed, and an
+    # empty or malformed body defaulting to one of them is not a coin worth flipping.
+    def _handle_clarify_stop_graceful(self) -> None:
+        if not _graceful_stop_clarify_run(self.server):
+            self._send_json(409, {"ok": False, "error": "No clarification run is currently in progress."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_clarify_stop_graceful_cancel(self) -> None:
+        if not _cancel_graceful_stop_clarify_run(self.server):
+            self._send_json(409, {"ok": False, "error": "No clarification run is currently in progress."})
+            return
+        self._send_json(200, {"ok": True})
+
     def _handle_clarify_skip_minor_save(self) -> None:
         """Persist the Clarification page's "Only evaluate critical & major findings"
         switch (config.json's "skip_minor_findings") — a narrow, single-purpose save
@@ -748,6 +785,19 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_implement_run_stop(self) -> None:
         if not _stop_implement_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Implementation is not running."})
+            return
+        self._send_json(200, {"ok": True})
+
+    # Separate from the immediate stop above for the same reason as the clarify pair.
+    def _handle_implement_stop_graceful(self) -> None:
+        if not _graceful_stop_implement_run(self.server):
+            self._send_json(409, {"ok": False, "error": "Implementation is not running."})
+            return
+        self._send_json(200, {"ok": True})
+
+    def _handle_implement_stop_graceful_cancel(self) -> None:
+        if not _cancel_graceful_stop_implement_run(self.server):
             self._send_json(409, {"ok": False, "error": "Implementation is not running."})
             return
         self._send_json(200, {"ok": True})

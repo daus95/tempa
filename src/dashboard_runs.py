@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dashboard_clarify_parse import _clarify_files_overview
 from dashboard_config import _load_clarify_applied_hashes, _load_dashboard_config
+from tempa_config import clear_graceful_stop, graceful_stop_requested, request_graceful_stop
 from tempa_session import _read_process_stdout
 
 
@@ -82,6 +83,10 @@ def _new_clarify_run_state() -> dict:
         # its auto-chained batches (see worker() below) to skip the next batch instead
         # of starting it.
         "stop_requested": False,
+        # Set by _graceful_stop_clarify_run — the same "don't start the next thing"
+        # intent, but WITHOUT killing what's already running, so the session in progress
+        # gets to finish and record its work (see _graceful_stop_clarify_run).
+        "graceful_stop_requested": False,
     }
 
 
@@ -167,6 +172,10 @@ def _start_clarify_run(server, mode: str) -> bool:
         run["returncode"] = None
         run["process"] = None
         run["stop_requested"] = False
+        run["graceful_stop_requested"] = False
+    # A sentinel left behind by an earlier run (killed before it could read it, machine
+    # restart) would otherwise stop this one on its first check.
+    clear_graceful_stop("clarify")
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
@@ -224,10 +233,19 @@ def _start_clarify_run(server, mode: str) -> bool:
             stopped = False
             stalled = False
             while returncode == 0 and remaining > 0:
+                # The sentinel is read here too, not just the in-memory flag, so a
+                # `tempa clarify --stop-graceful` typed in a terminal reaches this loop
+                # as well — apply's batching lives here, not in the CLI, so this is the
+                # only place that can honour it.
+                graceful_from_cli = graceful_stop_requested("clarify")
                 with run["lock"]:
-                    if run["stop_requested"]:
+                    graceful = run["graceful_stop_requested"] or graceful_from_cli
+                    if run["stop_requested"] or graceful:
                         stopped = True
                         run["lines"].append(
+                            "Apply Answers stopped after the current session finished — "
+                            f"{remaining} remaining file(s) were not applied."
+                            if graceful else
                             f"Apply Answers stopped — {remaining} remaining file(s) were not applied."
                         )
                         break
@@ -259,6 +277,12 @@ def _start_clarify_run(server, mode: str) -> bool:
                         "Apply finished. Run Continue Clarification when you want a fresh "
                         "evaluation of the updated PRD."
                     )
+        # Safety net: the CLI clears the sentinel itself when it acts on one, but it may
+        # have exited for some other reason first (failure, immediate Stop) and left it
+        # behind. `graceful_stop_requested` on the run state is deliberately NOT cleared
+        # here — the client reads it back to describe how the run ended; the next run's
+        # start resets it.
+        clear_graceful_stop("clarify")
         with run["lock"]:
             run["running"] = False
             run["progress"] = None
@@ -302,6 +326,101 @@ def _stop_clarify_run(server) -> bool:
     return True
 
 
+def _graceful_stop_implement_run(server) -> bool:
+    """Ask the running `tempa implement` to stop once the session in progress finishes,
+    instead of killing it. Nothing is terminated here — see _graceful_stop_clarify_run
+    for why that distinction is the entire feature.
+
+    implement is a separate process, so this can only be a request: it writes the
+    sentinel that the runner's poll loop checks between units of work (see
+    tempa_implement._graceful_stop_is_due). The runner honours it only once no session
+    thread is alive, so it lands after the feature or QA session in flight has finished
+    and recorded its work — never in the middle of one. Returns False if nothing is
+    running."""
+    run = server.implement_run
+    with run["lock"]:
+        if not run["running"]:
+            return False
+        run["graceful_stop_requested"] = True
+    request_graceful_stop("implement")
+    return True
+
+
+def _cancel_graceful_stop_implement_run(server) -> bool:
+    """Withdraw a pending graceful stop, letting the runner carry on. Returns False if
+    nothing is running."""
+    run = server.implement_run
+    with run["lock"]:
+        if not run["running"]:
+            return False
+        run["graceful_stop_requested"] = False
+    clear_graceful_stop("implement")
+    return True
+
+
+def _implement_graceful_stop_pending(server) -> bool:
+    """Whether a graceful stop is pending for the implement run — from this dashboard or
+    from a `tempa implement --stop-graceful` typed in a terminal."""
+    run = server.implement_run
+    with run["lock"]:
+        if run["graceful_stop_requested"]:
+            return True
+        running = run["running"]
+    return running and graceful_stop_requested("implement")
+
+
+def _graceful_stop_clarify_run(server) -> bool:
+    """Ask the running clarify run to stop at its next safe seam instead of killing it.
+
+    The point is the tokens already spent: an immediate Stop takes out the backend CLI
+    mid-session, so everything that session had done but not yet written is lost. This
+    sets the flags and returns — nothing is ever killed here.
+
+    Where "the next safe seam" is depends on the mode:
+      - "apply"    — between the auto-chained backlog batches in _start_clarify_run's
+                     worker(), which reads the flag below.
+      - "finalize" — between rounds inside `tempa clarify --finalize`, a separate
+                     process, which reads the sentinel file instead.
+      - "run"      — a single evaluate session with nothing after it, so there is no
+                     seam to stop at; not killing it IS the whole effect, and the session
+                     gets to record its findings normally.
+
+    The sentinel is written for every mode even though only finalize reads it, so that a
+    request made here is visible to `tempa status` and survives a dashboard restart; the
+    modes that don't read it clear it when the run ends. Returns False if no clarify run
+    is currently in progress."""
+    run = server.clarify_run
+    with run["lock"]:
+        if not run["running"]:
+            return False
+        run["graceful_stop_requested"] = True
+    request_graceful_stop("clarify")
+    return True
+
+
+def _cancel_graceful_stop_clarify_run(server) -> bool:
+    """Withdraw a pending graceful stop, letting the run carry on to completion. Returns
+    False if no clarify run is currently in progress."""
+    run = server.clarify_run
+    with run["lock"]:
+        if not run["running"]:
+            return False
+        run["graceful_stop_requested"] = False
+    clear_graceful_stop("clarify")
+    return True
+
+
+def _clarify_graceful_stop_pending(server) -> bool:
+    """Whether a graceful stop is pending for the clarify run — from this dashboard or
+    from a `tempa clarify --stop-graceful` typed in a terminal."""
+    run = server.clarify_run
+    with run["lock"]:
+        if run["graceful_stop_requested"]:
+            return True
+        running = run["running"]
+    return running and graceful_stop_requested("clarify")
+
+
 # ---------------------------------------------------------------------------
 # Implementation run (Start / Stop Implementation) — same subprocess/log-polling
 # shape as the clarify run above, but `tempa implement` is a long-running poll loop
@@ -321,6 +440,8 @@ def _new_implement_run_state() -> dict:
         # --reset-failed pass, then implement itself), and Stop pressed during the
         # first one must not be followed by the second one starting anyway.
         "stop_requested": False,
+        # Same intent, without the kill — see _graceful_stop_implement_run.
+        "graceful_stop_requested": False,
     }
 
 
@@ -346,6 +467,9 @@ def _start_implement_run(server) -> bool:
         run["returncode"] = None
         run["process"] = None
         run["stop_requested"] = False
+        run["graceful_stop_requested"] = False
+    # See the same call in _start_clarify_run: a stale sentinel must not stop a fresh run.
+    clear_graceful_stop("implement")
 
     def worker() -> None:
         tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
@@ -386,6 +510,10 @@ def _start_implement_run(server) -> bool:
             return process.returncode
 
         returncode = run_once(["--reset-failed"])
+        # `--reset-failed` rewrites statuses and exits; it never enters the poll loop, so
+        # a graceful stop pressed while it ran can only be honoured here, by not starting
+        # implement at all. Nothing is lost either way — no session has run yet.
+        graceful_from_cli = graceful_stop_requested("implement")
         with run["lock"]:
             if returncode != 0:
                 # Never fatal on its own: implement itself still refuses to proceed
@@ -395,11 +523,15 @@ def _start_implement_run(server) -> bool:
                     "Could not reset failed epic(s) back to pending — starting "
                     "implementation anyway."
                 )
-            stopped = run["stop_requested"]
+            stopped = (run["stop_requested"] or run["graceful_stop_requested"]
+                       or graceful_from_cli)
             if stopped:
                 run["lines"].append("Stopped before implementation started.")
         if not stopped:
             returncode = run_once([])
+        # Safety net, same as the clarify worker: the runner clears the sentinel itself
+        # when it acts on one, but it may have exited for another reason first.
+        clear_graceful_stop("implement")
         with run["lock"]:
             run["running"] = False
             run["progress"] = None

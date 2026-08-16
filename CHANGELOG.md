@@ -8,6 +8,33 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Every Stop button can now stop *after* the work in flight instead of throwing it away.**
+  Stopping used to mean one thing: `taskkill /T /F` on the whole process tree, backend CLI
+  included. Press it twenty minutes into a feature session and those twenty minutes of tokens
+  are gone — the agent never got to write its results to `config.json` or the spec, and the epic
+  is left `on_progress` for the next run to redo from scratch. Each Stop button is now a split
+  button: **Stop Now** is exactly the old behaviour, and the chevron beside it offers **Stop
+  After Current Session** (**Stop After Current Round** for Finalized Clarification), which lets
+  the session already running finish and record its work, then declines to start the next one.
+  The runner exits cleanly and the run resumes from that boundary. While a request is pending the
+  status reads "Stopping after current session…" and the chevron offers **Cancel Graceful Stop**;
+  Stop Now keeps working throughout, so asking to stop politely never traps you into waiting.
+  Covers Implementation, Clarification, Apply Answers and Finalized Clarification — each stopping
+  at its own natural seam (between epic sessions, after the evaluate session, between apply
+  batches, between finalize rounds).
+- `tempa implement --stop-graceful` / `--stop-graceful-cancel` and the `clarify` equivalents do
+  the same from a terminal, and it is the *same* request either way: a stop asked for in a
+  terminal halts a run started from the dashboard, and the dashboard shows a request made in a
+  terminal. `tempa status` reports a pending one. The channel is a sentinel file in `.tempa/`
+  rather than a key in `config.json`, which the runner's own saves would have overwritten; a
+  request left behind by a crash is cleared automatically the next time a run starts, so it can
+  never stop a fresh run before it does any work.
+
+Nothing about how a run behaves otherwise changed: with no graceful stop requested, every new
+check is a no-op and Stop Now, exit codes and scheduling are byte-for-byte what they were.
+
 ## [0.6.4] - 2026-08-15
 
 ### Added

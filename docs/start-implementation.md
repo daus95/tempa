@@ -256,6 +256,35 @@ strike(s)` badge next to the toggle even while collapsed — visible while the e
 `require_fixing` and the run is still going, not just after the guard gives up and marks it
 `failed`.
 
+## Stopping a run
+
+There are two ways to stop, and the difference is what happens to the session already in flight.
+
+**Stop Now** (the dashboard button, or Ctrl+C in a terminal) kills the runner and the backend CLI
+it spawned, immediately. Whatever the current feature or QA session had worked out but not yet
+written to `config.json` or the spec is lost, and the epic is left `on_progress` (or
+`qa_status=ongoing`) for the next run to resume from. Use it when you need the machine back now.
+
+**Stop After Current Session** — the chevron next to that button, or `tempa implement
+--stop-graceful` — leaves a request instead. The session in progress runs to completion and
+records its work as usual; the runner then exits cleanly (code 0) rather than picking up the next
+epic or QA round. Nothing you have already paid tokens for is thrown away, and the run resumes from
+a clean boundary with **Continue Implementation** (or `tempa implement`).
+
+While the request is pending the header reads *Stopping after current session…*, and the dropdown
+offers **Cancel Graceful Stop** if you change your mind. Stop Now still works during that window,
+so asking to stop politely never traps you into waiting. Requests made in a terminal and from the
+dashboard are the same request — either surface can make it, cancel it, or show it.
+
+```bash
+tempa implement --stop-graceful          # stop after the session in progress finishes
+tempa implement --stop-graceful-cancel   # changed your mind
+tempa status                             # shows "Graceful stop pending" while one is set
+```
+
+A pending request is cleared automatically when a run starts, so one left behind by a crash can
+never stop the next run before it does any work.
+
 ## Recovery (if something goes wrong)
 
 ```bash

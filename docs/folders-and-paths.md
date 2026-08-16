@@ -133,6 +133,7 @@ different workspace and back never loses or overwrites anything.
 | `.tempa/qa/` | QA reports per epic |
 | `.tempa/verify/` | manual verification reports (`verify`) |
 | `.tempa/specs/` | new specifications to be worked on (`workspace.specs`, `sources.prd/epics/clarifications` — see above) |
+| `.tempa/graceful-stop-implement`<br>`.tempa/graceful-stop-clarify` | transient — present only while a **Stop After Current Session/Round** request is pending. Its presence *is* the request (the timestamp inside is just for whoever finds a stray one); it's how the dashboard, or a second terminal, reaches a `tempa implement` / `clarify --finalize` running as its own process. Written by the dashboard button or `--stop-graceful`, and removed when the request is honoured, cancelled, or a new run starts. Safe to delete by hand — that simply cancels the request |
 
 `tempa init <abs>` creates `<abs>/.gitignore` (or appends to it) with a `.tempa/` entry, so
 none of this is committed to the workspace's own repo.

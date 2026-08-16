@@ -173,6 +173,11 @@ Applying is **not** required between clarification rounds — answers ride along
 until you choose to compact them. It **is** required before **Start Implementation**, which
 reads the PRD documents and cannot see decisions that only exist in a clarification file.
 
+From the dashboard, one **Apply Answers** click keeps re-running this until every ready file is
+applied, so **Stop After Current Session** on that button lets the apply session in flight finish
+and stamp what it wrote, then skips the remaining files rather than killing the agent mid-rewrite.
+**Stop Now** kills it immediately, discarding that session's unwritten work.
+
 Only the files that actually still need applying are sent to the agent — every file already
 reflected in `clarify_applied_hashes` (see [config-json.md](config-json.md)) is skipped, so a
 workspace with many past clarification rounds doesn't pay to re-read all of them on every
@@ -258,6 +263,25 @@ budget like any other.
 
 Stopping a `--finalize` run mid-way now leaves the answers **unapplied** (in the overlay)
 rather than a partially-updated PRD — nothing has been written until the compaction step.
+
+### Stopping a finalize run
+
+**Stop Now** (the button, or Ctrl+C) kills the run immediately, discarding whatever the session
+in flight had worked out but not yet written.
+
+**Stop After Current Round** — the chevron next to that button, or `tempa clarify
+--stop-graceful` — leaves a request instead. The run checks for it at the three points where it
+is about to spend another agent session: before the next round, before the compaction apply, and
+before the auto-answer step. Whichever session is already running finishes and records its work;
+the run then exits cleanly (code 0). Because `last_finalize_round` / `last_finalize_phase` and
+the round's findings are saved before each of those checks, the run picks up from exactly where
+it stopped the next time you click **Finalized Clarification**.
+
+Cancel a pending request with the dropdown's **Cancel Graceful Stop**, or
+`tempa clarify --stop-graceful-cancel`. Requests made in a terminal and from the dashboard are
+the same request — either surface can make it, cancel it, or show it. A **Start / Continue
+Clarification** run has no loop to stop between (it is one evaluate session), so the graceful
+option there simply means "let this session finish and record its findings" instead of killing it.
 
 `--skip-minor` also applies here (`tempa clarify --finalize --skip-minor`), skipping minor
 findings on every evaluate pass in the loop.

@@ -29,6 +29,7 @@ def reset_runner_state():
     _state.auth_error_hit = False
     _state.server_overloaded_hit = False
     _state.backend_stuck_after_done_hit = False
+    _state.graceful_stop_hit = False
     _state.running_thread = None
     _state.running_index = None
 
@@ -506,3 +507,117 @@ def test_check_and_run_reconciles_qa_passed_epic_with_require_fixing_features(
     assert repaired["completed_features"] == 2
     assert repaired["status"] == "done"
     assert repaired["qa_passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Graceful stop — "stop after the session in progress finishes", requested from the
+# dashboard or from a second terminal via the .tempa/graceful-stop-implement sentinel.
+# ---------------------------------------------------------------------------
+
+def test_graceful_stop_is_due_false_without_a_request(isolate_tempa_paths):
+    assert ti._graceful_stop_is_due() is False
+
+
+def test_graceful_stop_is_due_true_when_requested_and_idle(isolate_tempa_paths):
+    tempa_config.request_graceful_stop("implement")
+    assert ti._graceful_stop_is_due() is True
+
+
+def test_graceful_stop_is_not_due_while_a_session_thread_is_alive(isolate_tempa_paths):
+    # The entire point of a graceful stop: whatever is running has already been paid for,
+    # so it must be allowed to finish and record its work.
+    tempa_config.request_graceful_stop("implement")
+    release = threading.Event()
+    thread = threading.Thread(target=release.wait, daemon=True)
+    thread.start()
+    _state.running_thread = thread
+    try:
+        assert ti._graceful_stop_is_due() is False
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert ti._graceful_stop_is_due() is True
+
+
+def test_main_stops_gracefully_and_clears_the_sentinel(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+    seen = {"polls": 0}
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        seen["polls"] += 1
+        # Stands in for the user clicking "Stop After Current Session" during this poll's
+        # session; the next loop turn is where it must be noticed.
+        tempa_config.request_graceful_stop("implement")
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert exc.value.code == 0
+    assert seen["polls"] == 1  # nothing new was dispatched after the request
+    assert _state.all_done is False  # exit 0, but NOT by claiming every epic is done
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_main_clears_a_stale_sentinel_before_the_first_poll(isolate_tempa_paths, monkeypatch):
+    # A sentinel left behind by a run that was killed outright must not stop the next run
+    # before it does any work.
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+    tempa_config.request_graceful_stop("implement")
+    seen = {"polls": 0}
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        seen["polls"] += 1
+        _state.all_done = True
+        _state.stop_event.set()
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert exc.value.code == 0
+    assert seen["polls"] == 1  # it ran normally rather than stopping instantly
+
+
+def test_main_skips_the_usage_limit_wait_when_a_graceful_stop_is_pending(
+    isolate_tempa_paths, monkeypatch,
+):
+    # Without this, asking to stop and then hitting a usage limit would sit out a wait
+    # measured in hours before honouring the request.
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        tempa_config.request_graceful_stop("implement")
+        _state.usage_limit_hit = True
+        _state.stop_event.set()
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+    monkeypatch.setattr(ti, "wait_out_usage_limit",
+                        lambda *a, **k: pytest.fail("must not wait out the limit"))
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert exc.value.code == 0
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_main_reports_a_real_failure_even_with_a_graceful_stop_pending(
+    isolate_tempa_paths, monkeypatch,
+):
+    # A session that genuinely failed never sets graceful_stop_hit (only the poll loop
+    # does, and only from a clean seam), so the failure still wins and exits 1.
+    tempa_config.save_config({"epic": [{"epic_name": "e1", "status": "on_progress"}]})
+
+    def fake_check_and_run(features_override: int | None = None) -> None:
+        tempa_config.request_graceful_stop("implement")
+        _state.stop_event.set()  # a failure stop: no all_done, no *_hit flag
+
+    monkeypatch.setattr(ti, "check_and_run", fake_check_and_run)
+
+    with pytest.raises(SystemExit) as exc:
+        ti.main()
+
+    assert exc.value.code == 1

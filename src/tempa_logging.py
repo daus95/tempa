@@ -41,6 +41,11 @@ class _RunnerState:
         self.auth_error_message = ""
         self.server_overloaded_hit = False
         self.backend_stuck_after_done_hit = False
+        # Set only by the poll loop itself, and only once it has confirmed no session
+        # thread is running — so "the user asked to stop and we reached a clean seam"
+        # stays distinguishable from every other reason stop_event gets set (a failure,
+        # a usage limit, all epics done), each of which still reports itself normally.
+        self.graceful_stop_hit = False
 
 
 _state = _RunnerState()

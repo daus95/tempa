@@ -40,6 +40,7 @@ from tempa_config import (
     get_sources,
     get_verify_dir,
     get_workspace,
+    graceful_stop_requested,
     load_config,
     read_principles,
     resolve_workspace_paths,
@@ -553,6 +554,12 @@ def print_status() -> None:
     config = load_config()
     sessions = (config.get("epic") or [])
     _banner("SESSION STATUS")
+    # Otherwise a pending request is invisible from the terminal — nothing else surfaces
+    # the sentinel, so a run that looks stalled would give no hint why it's about to stop.
+    if graceful_stop_requested("implement"):
+        print("⏸ Graceful stop pending — a running agent runner will stop once the session "
+              "in progress finishes.")
+        print("   Cancel with:  tempa implement --stop-graceful-cancel")
     for s in sessions:
         epic = s.get("epic_name", "?")
         status = s["status"]

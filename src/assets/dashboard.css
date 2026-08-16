@@ -366,6 +366,14 @@
   .clarify-run-btn:disabled { opacity: 0.5; cursor: default; }
   .clarify-run-btn.secondary { background: var(--panel); color: var(--text); border-color: var(--border-strong); }
   .clarify-run-btn.secondary:hover:not(:disabled) { opacity: 1; border-color: var(--accent); }
+  /* ---- split button (Stop Now + a chevron opening #stopOptionsMenu) ----
+     The wrapper is what gets .hidden, not the buttons — both halves have to appear and
+     disappear together. No new colours: both halves are .clarify-run-btn.secondary, so
+     light/dark are already handled; this only joins their facing edges. */
+  .split-btn { display: inline-flex; }
+  .split-btn-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .split-btn-toggle { border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-left-width: 0; padding-left: 8px; padding-right: 8px; }
   .clarify-run-status { color: var(--accent); font-weight: 600; font-size: 0.8rem;
     display: inline-flex; align-items: center; gap: 4px; }
   .clarify-status-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }

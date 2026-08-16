@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import dashboard_runs as dr
+import tempa_config
 
 
 def _item(item_id, severity, answer):
@@ -200,3 +201,119 @@ def test_implementation_has_started_ignores_malformed_entries():
 def test_implementation_has_started_reads_config_when_no_epics_passed(monkeypatch):
     monkeypatch.setattr(dr, "_epic_sessions", lambda: [{"status": "done"}])
     assert dr._implementation_has_started() is True
+
+
+# ---------------------------------------------------------------------------
+# Graceful stop — the whole point is what it does NOT do: unlike _stop_*_run, it never
+# touches the live process, so the agent session already paid for gets to finish.
+# ---------------------------------------------------------------------------
+
+class _SpyProcess:
+    """Stands in for a live Popen. Records whether anything tried to kill it."""
+
+    pid = 4321
+
+    def __init__(self):
+        self.terminated = False
+
+    def terminate(self):
+        self.terminated = True
+
+
+def _implement_server(running: bool, process=None):
+    run = dr._new_implement_run_state()
+    run["running"] = running
+    run["process"] = process
+    return SimpleNamespace(implement_run=run)
+
+
+def _clarify_server(running: bool, mode: str | None, process=None):
+    run = dr._new_clarify_run_state()
+    run["running"] = running
+    run["mode"] = mode
+    run["process"] = process
+    return SimpleNamespace(clarify_run=run)
+
+
+def test_graceful_stop_implement_returns_false_when_nothing_is_running(isolate_tempa_paths):
+    server = _implement_server(False)
+    assert dr._graceful_stop_implement_run(server) is False
+    # No request may be left behind by a rejected call, or the next run would stop early.
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_graceful_stop_implement_sets_the_flag_without_killing_the_process(isolate_tempa_paths):
+    process = _SpyProcess()
+    server = _implement_server(True, process)
+
+    assert dr._graceful_stop_implement_run(server) is True
+
+    assert process.terminated is False  # the distinction from _stop_implement_run
+    assert server.implement_run["graceful_stop_requested"] is True
+    assert tempa_config.graceful_stop_requested("implement") is True
+
+
+def test_cancel_graceful_stop_implement_clears_flag_and_sentinel(isolate_tempa_paths):
+    server = _implement_server(True, _SpyProcess())
+    dr._graceful_stop_implement_run(server)
+
+    assert dr._cancel_graceful_stop_implement_run(server) is True
+
+    assert server.implement_run["graceful_stop_requested"] is False
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_graceful_stop_clarify_sets_the_flag_without_killing_the_process(isolate_tempa_paths):
+    process = _SpyProcess()
+    server = _clarify_server(True, "finalize", process)
+
+    assert dr._graceful_stop_clarify_run(server) is True
+
+    assert process.terminated is False
+    assert server.clarify_run["graceful_stop_requested"] is True
+    assert tempa_config.graceful_stop_requested("clarify") is True
+
+
+def test_graceful_stop_clarify_returns_false_when_nothing_is_running(isolate_tempa_paths):
+    assert dr._graceful_stop_clarify_run(_clarify_server(False, None)) is False
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_cancel_graceful_stop_clarify_clears_flag_and_sentinel(isolate_tempa_paths):
+    server = _clarify_server(True, "apply")
+    dr._graceful_stop_clarify_run(server)
+
+    assert dr._cancel_graceful_stop_clarify_run(server) is True
+
+    assert server.clarify_run["graceful_stop_requested"] is False
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_graceful_stop_kinds_do_not_leak_into_each_other(isolate_tempa_paths):
+    dr._graceful_stop_implement_run(_implement_server(True))
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_implement_graceful_pending_reports_a_request_made_from_the_cli(isolate_tempa_paths):
+    # `tempa implement --stop-graceful` in a terminal writes only the sentinel — the
+    # dashboard has to notice it so its button doesn't keep saying "Running…".
+    server = _implement_server(True)
+    assert dr._implement_graceful_stop_pending(server) is False
+
+    tempa_config.request_graceful_stop("implement")
+
+    assert dr._implement_graceful_stop_pending(server) is True
+
+
+def test_implement_graceful_pending_ignores_a_sentinel_when_nothing_is_running(isolate_tempa_paths):
+    tempa_config.request_graceful_stop("implement")
+    assert dr._implement_graceful_stop_pending(_implement_server(False)) is False
+
+
+def test_clarify_graceful_pending_reports_a_request_made_from_the_cli(isolate_tempa_paths):
+    server = _clarify_server(True, "apply")
+    assert dr._clarify_graceful_stop_pending(server) is False
+
+    tempa_config.request_graceful_stop("clarify")
+
+    assert dr._clarify_graceful_stop_pending(server) is True
