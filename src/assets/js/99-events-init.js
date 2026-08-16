@@ -89,3 +89,4 @@ if (INITIAL_VIEW === "specification") {
 }
 checkClarifyRunOnLoad();
 refreshImplementRun();
+checkForSidebarUpdate();

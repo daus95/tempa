@@ -8,6 +8,14 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Sidebar now flags an available update.** Previously the only way to learn a newer Tempa
+  release existed was to open Settings → Maintenance and check manually. The dashboard now
+  checks once on load and, if a newer version is available, shows an "Update available"
+  item above Architecture Principles in the sidebar; clicking it jumps straight to
+  Settings → Maintenance.
+
 ## [0.6.8] - 2026-08-16
 
 ### Added

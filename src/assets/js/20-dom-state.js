@@ -171,6 +171,8 @@ const state = {
   implementStarted: false,
   implTab: "status",
   settingsTab: "models",
+  updateAvailable: false,
+  updateLatestVersion: null,
   // Whether the form currently differs from the config it was last filled from — one Save
   // writes every tab, so the user needs to know edits are pending on a tab they can't see.
   settingsDirty: false,

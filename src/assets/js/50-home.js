@@ -202,6 +202,21 @@ function renderLeafSection(key, icon, label, disabled, running) {
   return wrap;
 }
 
+function renderUpdateAvailableItem() {
+  const wrap = document.createElement("div");
+  wrap.className = "node";
+  const row = document.createElement("div");
+  row.className = "row top update-available";
+  row.innerHTML = `<span class="twist hidden"></span><span class="icon">${iconSvg("arrow-up")}</span>` +
+    `<span class="label">Update available (${state.updateLatestVersion})</span>`;
+  row.addEventListener("click", async () => {
+    await selectTop("settings");
+    setSettingsTab("maintenance");
+  });
+  wrap.appendChild(row);
+  return wrap;
+}
+
 function renderSpecSection() {
   const disabled = !state.workspaceInitialized;
   const wrap = document.createElement("div");
