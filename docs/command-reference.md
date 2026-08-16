@@ -25,6 +25,8 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `clarify --apply` | Applies answers from the clarification file into the PRD/spec document (no re-evaluation), then asks whether to run another round |
 | `clarify --finalize` | Evaluate + auto-answer, looping until there's no critical/major left |
 | `clarify --clear [--yes]` | Deletes all files in `.tempa/specs/clarifications` except `claude.md` (asks for confirmation) |
+| `clarify --stop-graceful` | Asks a running clarification to stop at its next safe point instead of being killed mid-session: `--finalize` stops after the round in progress, Apply Answers after the session in progress. Leaves a request and exits immediately — it doesn't wait, and it works whether the run was started here or from the dashboard |
+| `clarify --stop-graceful-cancel` | Withdraws that request; the run continues normally |
 | `implement --clear-plan [--yes]` | Clears the plan: wipes all of `.tempa/specs/pbi` + empties the `epic` array (asks for confirmation) |
 | `implement [--features N]` | Runs the implementation loop (polls every 60s). Drafts a plan automatically first if there's no task yet |
 | `implement --replan` | Forces a fresh plan first, then continues/starts implementation |
@@ -34,6 +36,8 @@ See [README.md](../README.md) for a workflow summary. Full list of every command
 | `implement --reset-failed` | `failed` → `pending` |
 | `implement --reset-qa [EPIC]` | Forces re-QA for all `done` epics, or just `EPIC` if given — also routes it back to `require_fixing` first if its own features weren't actually all done |
 | `implement --clear [--yes]` | Deletes ALL files in `.tempa/qa/` and `.tempa/logs/` (asks for confirmation) |
+| `implement --stop-graceful` | Asks a running agent runner to stop once the session in progress (feature or QA) finishes, instead of being killed mid-session — so nothing already paid for is thrown away. Leaves a request and exits immediately; works whether the run was started here or from the dashboard. Ctrl+C remains the immediate stop |
+| `implement --stop-graceful-cancel` | Withdraws that request; the runner continues normally |
 | `clear [--yes]` | Runs `implement --clear` + `implement --clear-plan` + `clarify --clear` together, behind a single confirmation |
 | `test` | Permission test (verifies the `implement` stage's configured backend CLI works). For a lighter, non-invoking check across all three backends, see the dashboard's readiness checklist: [cli-availability.md](cli-availability.md) |
 | `version` | Shows the locally installed Tempa version (read from the `VERSION` file at the install root) |

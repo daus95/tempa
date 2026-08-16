@@ -18,6 +18,7 @@ import copy
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # Modules live in src/, so anchor to the parent of src/ (the Tempa install root) for
@@ -86,6 +87,53 @@ def get_qa_dir() -> Path:
 
 def get_verify_dir() -> Path:
     return _tempa_dir() / "verify"
+
+
+# ---------------------------------------------------------------------------
+# Graceful stop — the one cross-process channel between the dashboard and a running
+# `tempa implement` / `tempa clarify --finalize`.
+#
+# The dashboard never runs those in-process: it spawns `python tempa.py <command>` as a
+# child and only reads its stdout (see dashboard_runs.py), so an in-memory flag can't
+# reach the runner. A key in config.json can't either — the runner's session threads
+# read-modify-write that file constantly, so a flag written from outside would be lost
+# the next time the runner saved. A sentinel file has exactly one writer and one reader
+# and races with nothing.
+#
+# Presence of the file IS the request; its contents are never read. Every helper below
+# fails open (does nothing / reports "no request") so a permission or disk error can
+# never turn into a stalled run or a crashed dashboard — the worst case is that a
+# graceful stop has to be repeated as an immediate one.
+# ---------------------------------------------------------------------------
+def get_graceful_stop_path(kind: str) -> Path:
+    """Sentinel path for `kind` ("implement" or "clarify"). Lives next to config.json so
+    it follows the active workspace, and so the CLI and the dashboard — separate
+    processes that both resolve it through _tempa_dir() — always mean the same file."""
+    return _tempa_dir() / f"graceful-stop-{kind}"
+
+
+def request_graceful_stop(kind: str) -> None:
+    """Ask the running `kind` process to stop once the session in progress finishes."""
+    path = get_graceful_stop_path(kind)
+    # The timestamp is only ever read by a human wondering where a stray file came from —
+    # every check below is presence-only.
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(datetime.now().isoformat(), encoding="utf-8")
+
+
+def graceful_stop_requested(kind: str) -> bool:
+    try:
+        return get_graceful_stop_path(kind).exists()
+    except OSError:
+        return False
+
+
+def clear_graceful_stop(kind: str) -> None:
+    """Drop any pending request. Called when one is honoured, cancelled, or when a fresh
+    run starts (so a sentinel left behind by a crash can't stop the next run instantly)."""
+    with contextlib.suppress(OSError):
+        get_graceful_stop_path(kind).unlink(missing_ok=True)
 
 
 def get_principles_path() -> Path:

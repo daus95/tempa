@@ -850,3 +850,111 @@ def test_auto_answer_uses_clarify_apply_backend_and_effort(tmp_path, isolate_tem
 
     assert seen["backend"] == "copilot"
     assert seen["reasoning_effort"] == "medium"
+
+
+# ---------------------------------------------------------------------------
+# Graceful stop — finalize checks the .tempa/graceful-stop-clarify sentinel at each of
+# the three points where it is about to spend another agent session, so a stop lands
+# between paid-for sessions instead of killing one mid-flight.
+# ---------------------------------------------------------------------------
+
+def test_finalize_clears_a_stale_sentinel_before_starting(tmp_path, isolate_tempa_paths, monkeypatch):
+    # A sentinel left behind by a run that was killed outright must not stop the next one.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    tempa_config.request_graceful_stop("clarify")
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> compaction
+        {"critical": 0, "major": 0, "minor": 0},   # verification round -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    # Every checkpoint was passed rather than tripped: a full multi-round run happened.
+    assert (calls["evaluate"], calls["answer"], calls["apply"]) == (3, 1, 1)
+
+
+def test_finalize_stops_before_starting_another_round(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 2, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+    ])
+    real_auto_answer = tc._run_auto_answer_step
+
+    def answer_then_request_stop(config, unanswered_files):
+        result = real_auto_answer(config, unanswered_files)
+        tempa_config.request_graceful_stop("clarify")
+        return result
+
+    monkeypatch.setattr(tc, "_run_auto_answer_step", answer_then_request_stop)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 1  # round 2 never started
+    assert calls["answer"] == 1    # round 1's answer step still completed
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_finalize_stops_before_the_compaction_apply(tmp_path, isolate_tempa_paths, monkeypatch):
+    # The compaction is a full PRD rewrite — the single most expensive session in the run,
+    # and the one most worth not starting once the user has asked to stop.
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> would compact next
+    ])
+    real_session = tc.run_clarification_session
+
+    def evaluate_then_request_stop(prompt, run_number, backend, model, reasoning_effort=""):
+        result = real_session(prompt, run_number, backend, model, reasoning_effort)
+        if run_number == 2:
+            tempa_config.request_graceful_stop("clarify")
+        return result
+
+    monkeypatch.setattr(tc, "run_clarification_session", evaluate_then_request_stop)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 2
+    assert calls["apply"] == 0     # the PRD was never rewritten
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_finalize_stops_before_the_auto_answer_session(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 2, "major": 0, "minor": 0},
+    ])
+    real_session = tc.run_clarification_session
+
+    def evaluate_then_request_stop(prompt, run_number, backend, model, reasoning_effort=""):
+        result = real_session(prompt, run_number, backend, model, reasoning_effort)
+        tempa_config.request_graceful_stop("clarify")
+        return result
+
+    monkeypatch.setattr(tc, "run_clarification_session", evaluate_then_request_stop)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 1
+    assert calls["answer"] == 0
+    # The round's own findings were still saved before the stop — this is what makes the
+    # stopped run resumable rather than a wasted round.
+    assert tempa_config.load_config()["last_finalize_round"] == 1

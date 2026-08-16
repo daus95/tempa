@@ -16,6 +16,7 @@ from pathlib import Path
 from tempa_backend import get_backend_def
 from tempa_config import (
     WORKING_DIR,
+    clear_graceful_stop,
     get_backend,
     get_config_path,
     get_epic_session_id,
@@ -25,6 +26,7 @@ from tempa_config import (
     get_reasoning_effort,
     get_resume_implementation_sessions,
     get_sources,
+    graceful_stop_requested,
     load_config,
     save_config,
 )
@@ -181,6 +183,28 @@ def _await_session_thread(timeout_sec: float = 120.0) -> None:
     thread = _state.running_thread
     if thread is not None and thread.is_alive():
         thread.join(timeout=timeout_sec)
+
+
+# How often the poll loop wakes while a graceful stop is pending. The normal poll interval
+# is 60s by default, which would leave the runner idling for up to a minute after the
+# session it was waiting on already finished — nothing is being spent in that window, but
+# the dashboard sits on "Stopping after current session…" for no reason.
+_GRACEFUL_STOP_POLL_SEC = 5
+
+
+def _graceful_stop_is_due() -> bool:
+    """Whether the user's graceful stop can be honoured right now — i.e. one was requested
+    AND no session thread is still running.
+
+    The whole point of a graceful stop is that the session in progress gets to finish and
+    record its work, so this deliberately reports False (keep waiting) for as long as one
+    is alive, however long that takes. The immediate Stop is still there for anyone who
+    doesn't want to wait."""
+    if not graceful_stop_requested("implement"):
+        return False
+    with _state.lock:
+        thread = _state.running_thread
+        return thread is None or not thread.is_alive()
 
 
 def check_and_run(features_override: int | None = None) -> None:
@@ -484,6 +508,13 @@ def _has_pending_work(config: dict) -> bool:
 def main(features_override: int | None = None, replan: bool = False) -> None:
     _init_process_log()
     flush_pending_notifications()
+    # A stop is a request aimed at THIS run, so anything left over from a previous one
+    # (a run that was killed outright before it could read the sentinel, a machine
+    # restart) must not stop this one before it does any work. Safe to do here: the
+    # `implement --reset-failed` pass the dashboard runs first never reaches main()
+    # (see _dispatch_implement), so this can't wipe a request made during it — the
+    # dashboard's own run-state flag covers that window.
+    clear_graceful_stop("implement")
 
     config = load_config()
     if replan or not _has_pending_work(config):
@@ -527,6 +558,13 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
     overload_retries = 0
     while True:
         while not _state.stop_event.is_set():
+            # Checked before dispatching anything, so a graceful stop can only ever land
+            # BETWEEN units of work — never mid-session. If a session is still running,
+            # this is False and the loop just waits for it below.
+            if _graceful_stop_is_due():
+                _state.graceful_stop_hit = True
+                _state.stop_event.set()
+                break
             try:
                 check_and_run(features_override=features_override)
             except SystemExit:
@@ -536,7 +574,10 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
 
             # Re-read every cycle (load_config() never caches) so a Settings change to
             # poll_interval_sec reaches this already-running loop without a restart.
-            _state.stop_event.wait(timeout=get_poll_interval_sec(load_config()))
+            interval = get_poll_interval_sec(load_config())
+            if graceful_stop_requested("implement"):
+                interval = min(interval, _GRACEFUL_STOP_POLL_SEC)
+            _state.stop_event.wait(timeout=interval)
 
         # The session thread that raised this stop may still be finishing its own bookkeeping
         # — wait for it before reading any of the flags below (see _await_session_thread).
@@ -546,6 +587,20 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             log("Agent runner stopped — authentication failed (see message above). "
                 "Re-authenticate the configured CLI backend, then run this command again.")
             sys.exit(3)
+        # Honoured here rather than inside the retry branches below so a pending
+        # usage-limit/overload wait — which can be hours — is skipped rather than sat
+        # through. Deliberately NOT ahead of the failure path: a session that genuinely
+        # failed never sets graceful_stop_hit (only the poll loop does, and only from a
+        # clean seam), so a real failure still reports itself and exits 1.
+        if _state.graceful_stop_hit or (
+            graceful_stop_requested("implement")
+            and (_state.usage_limit_hit or _state.server_overloaded_hit)
+        ):
+            clear_graceful_stop("implement")
+            log("Agent runner stopped at your request — the session in progress was "
+                "allowed to finish first, so nothing it had already done was thrown away. "
+                "Run `tempa implement` (or Continue Implementation) to pick up from here.")
+            sys.exit(0)
         if _state.usage_limit_hit:
             # Not a real stop — the epic/QA in progress was left exactly as check_and_run
             # would resume it (on_progress / qa_status=ongoing), so waiting out the limit

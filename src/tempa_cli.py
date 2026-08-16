@@ -48,6 +48,7 @@ from tempa_commands import (
 )
 from tempa_config import (
     WORKING_DIR,
+    clear_graceful_stop,
     get_backend,
     get_config_path,
     get_epic_session_id,
@@ -55,6 +56,7 @@ from tempa_config import (
     get_qa_dir,
     get_skip_minor_findings,
     load_config,
+    request_graceful_stop,
 )
 from tempa_implement import main
 from tempa_maintenance import (
@@ -127,6 +129,9 @@ USAGE
   tempa clarify --apply      Apply answers from the clarification files to the PRD/spec documents (without re-evaluating)
   tempa clarify --finalize   Automatic PRD clarification loop (evaluate + answer until no critical/major remain)
   tempa clarify --clear      Delete all files in .tempa/specs/clarifications except claude.md (asks for confirmation; --yes to skip)
+  tempa clarify --stop-graceful  Ask a running clarification to stop at its next safe point — after the
+                                  current finalize round / apply session — instead of killing it mid-session
+  tempa clarify --stop-graceful-cancel  Withdraw that request; the run continues normally
 
   -- Plan & Start Implementation --
   tempa implement            Start the agent runner (polls every {get_poll_interval_sec(config)}s).
@@ -142,6 +147,9 @@ USAGE
   tempa implement --reset-qa EPIC-04  Same, but only for that one epic — also routes it back to
                                   require_fixing first if its features weren't all actually done
   tempa implement --clear    Delete ALL files in the workspace's .tempa/qa and .tempa/logs folders (asks for confirmation; --yes to skip)
+  tempa implement --stop-graceful  Ask a running agent runner to stop once the session in progress
+                                  (feature or QA) finishes, instead of killing it mid-session
+  tempa implement --stop-graceful-cancel  Withdraw that request; the runner continues normally
 
   -- Monitoring & Utilities --
   tempa dashboard            Open the web dashboard (Home / Specification / Clarification / Implementation
@@ -309,6 +317,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", action="store_true")
     p.add_argument("--noui", action="store_true")
     p.add_argument("--skip-minor", action="store_true")
+    p.add_argument("--stop-graceful", action="store_true")
+    p.add_argument("--stop-graceful-cancel", action="store_true")
 
     sub.add_parser("answer", parents=[common], add_help=False)
 
@@ -328,6 +338,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--features")
     p.add_argument("--replan", action="store_true")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--stop-graceful", action="store_true")
+    p.add_argument("--stop-graceful-cancel", action="store_true")
 
     p = sub.add_parser("clear", parents=[common], add_help=False)
     p.add_argument("--yes", action="store_true")
@@ -336,6 +348,23 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _dispatch_clarify(args: argparse.Namespace) -> None:
+    # Checked first: these only leave (or withdraw) a request for a run happening
+    # elsewhere, and must never fall through into starting a clarification of their own.
+    if args.stop_graceful:
+        request_graceful_stop("clarify")
+        print("Graceful stop requested for clarification.")
+        print("A running Finalized Clarification will stop once the round in progress "
+              "finishes; Apply Answers will stop after the session in progress finishes "
+              "— nothing already paid for is thrown away.")
+        print("If nothing is running, this request is cleared automatically the next "
+              "time clarification starts.")
+        print("Cancel with:  tempa clarify --stop-graceful-cancel")
+        return
+    if args.stop_graceful_cancel:
+        clear_graceful_stop("clarify")
+        print("Pending graceful stop for clarification cancelled — a run in progress "
+              "will continue normally.")
+        return
     if args.clear:
         run_clarify_clear()
     elif args.finalize:
@@ -351,6 +380,22 @@ def _dispatch_clarify(args: argparse.Namespace) -> None:
 
 
 def _dispatch_implement(args: argparse.Namespace) -> None:
+    # Checked first, for the same reason as the clarify pair: leaving a request must
+    # never be able to start a runner of its own.
+    if args.stop_graceful:
+        request_graceful_stop("implement")
+        print("Graceful stop requested for implementation.")
+        print("A running `tempa implement` will stop once the session in progress "
+              "(feature or QA) finishes — nothing already paid for is thrown away.")
+        print("If nothing is running, this request is cleared automatically the next "
+              "time implementation starts.")
+        print("Cancel with:  tempa implement --stop-graceful-cancel")
+        return
+    if args.stop_graceful_cancel:
+        clear_graceful_stop("implement")
+        print("Pending graceful stop for implementation cancelled — the runner will "
+              "continue normally.")
+        return
     if args.reset_failed:
         _reset_failed_epics()
     elif args.reset_qa:

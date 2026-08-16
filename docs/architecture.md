@@ -94,8 +94,10 @@ boundary, not just an implementation detail:
 
 - A background run has its own process log (see [logging.md](logging.md)), separate from the
   dashboard server's own output.
-- **Stop Implementation** works by killing that child process — there's no in-process cancellation
-  to build.
+- **Stop Now** works by killing that child process tree — there's no in-process cancellation to
+  build. **Stop After Current Session** (the chevron next to it) is the one thing that genuinely
+  needs to reach *into* the child, and it does so through a sentinel file — see
+  [Graceful stop](#graceful-stop-the-one-request-that-crosses-the-process-boundary) below.
 - The dashboard staying up doesn't hold a `_RunnerState` for a run that's actually happening in a
   different process; live status is read back from `config.json` and the log tail instead
   (see `dashboard_runs.py`).
@@ -103,14 +105,49 @@ boundary, not just an implementation detail:
   see `tempa_session.wait_out_usage_limit`/`run_with_usage_limit_retry`) lives entirely on the
   CLI side and needs nothing dashboard-specific: the child process just blocks for the wait
   (logging a heartbeat) instead of exiting, so the dashboard's plain stdout-streaming shows
-  that as ordinary log lines, and **Stop Implementation**'s existing kill-the-process-tree
-  already interrupts a paused wait exactly like it interrupts a running session.
+  that as ordinary log lines, and **Stop Now**'s kill-the-process-tree already interrupts a
+  paused wait exactly like it interrupts a running session.
 
 If you're adding a new heavy workflow reachable from both the CLI and the dashboard, follow this
 pattern: put the logic in a `tempa_*.py` module reachable from `tempa_cli.py`, and if the
 dashboard needs to trigger it as a background run, add it to `dashboard_runs.py` as another
 `python tempa.py <command>` subprocess spawn — don't import the `tempa_*` workflow module
 directly from `dashboard_*`.
+
+### Graceful stop: the one request that crosses the process boundary
+
+Killing the process tree throws away whatever the agent session in flight had done but not yet
+written — tokens already spent, for nothing. **Stop After Current Session** exists to avoid that:
+let the session finish and record its work, then don't start the next one. Because the runner is a
+different process, that has to be a *request*, and the only channels available are stdout (wrong
+direction) and the filesystem.
+
+The channel is a sentinel file, `.tempa/graceful-stop-implement` or `.tempa/graceful-stop-clarify`
+(see `tempa_config.request_graceful_stop` / `graceful_stop_requested` / `clear_graceful_stop`).
+Presence is the whole message; the timestamp inside is only for a human who finds a stray one.
+
+A key in `config.json` was the obvious alternative and is the wrong one: the runner's session
+threads read-modify-write that file constantly, so a flag written from outside would be lost the
+next time the runner saved. A separate file has one writer and one reader and races with nothing.
+
+Who reads it, and where the stop lands:
+
+| Run | Reader | Seam |
+|---|---|---|
+| `tempa implement` | `tempa_implement._graceful_stop_is_due`, checked in `main`'s poll loop | Only once no session thread is alive — so after the feature or QA session in flight has finished |
+| `tempa clarify --finalize` | `tempa_clarify._exit_if_graceful_stop` | The three points where the loop is about to spend another session: next round, the compaction apply, the auto-answer step |
+| Apply Answers | `dashboard_runs`' auto-chain loop | Between backlog batches — apply's batching lives in the dashboard, not the CLI |
+| Clarification (evaluate) | nobody | A single session with nothing after it; *not killing it* is the entire effect |
+
+Lifecycle rules that keep a stale file harmless: the sentinel is cleared at the start of every run
+(both by the CLI entry points and by `dashboard_runs`), when it is honoured, when the user cancels,
+and as a safety net when a run ends for any other reason. Every read fails open — an unreadable
+sentinel means "no request", never a stalled run.
+
+The same file is what makes `tempa implement --stop-graceful` in a terminal stop a run started from
+the dashboard, and vice versa: both sides resolve it through the active workspace. The dashboard's
+status endpoints OR the sentinel into the in-memory flag so a request made either way shows up in
+the UI.
 
 ## Prompt construction
 

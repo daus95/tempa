@@ -171,9 +171,14 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   addFileBtn = $("addFileBtn"), addFolderBtn = $("addFolderBtn"),
   addFileInput = $("addFileInput"), addFolderInput = $("addFolderInput"),
   startClarifyBtn = $("startClarifyBtn"), stopClarifyBtn = $("stopClarifyBtn"),
+  stopClarifySplit = $("stopClarifySplit"), stopClarifyMenuBtn = $("stopClarifyMenuBtn"),
   finalizeClarifyBtn = $("finalizeClarifyBtn"),
   stopFinalizeClarifyBtn = $("stopFinalizeClarifyBtn"),
+  stopFinalizeClarifySplit = $("stopFinalizeClarifySplit"),
+  stopFinalizeClarifyMenuBtn = $("stopFinalizeClarifyMenuBtn"),
   applyAnswersBtn = $("applyAnswersBtn"), stopApplyAnswersBtn = $("stopApplyAnswersBtn"),
+  stopApplyAnswersSplit = $("stopApplyAnswersSplit"),
+  stopApplyAnswersMenuBtn = $("stopApplyAnswersMenuBtn"),
   finalizeGateList = $("finalizeGateList"),
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   finalizeRoundProgress = $("finalizeRoundProgress"),
@@ -200,6 +205,8 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeApplyAnswersBtn = $("homeApplyAnswersBtn"),
   homeStartImplementBtn = $("homeStartImplementBtn"), homeClearAllBtn = $("homeClearAllBtn"),
   startImplementBtn = $("startImplementBtn"), stopImplementBtn = $("stopImplementBtn"),
+  stopImplementSplit = $("stopImplementSplit"), stopImplementMenuBtn = $("stopImplementMenuBtn"),
+  stopOptionsMenu = $("stopOptionsMenu"), stopOptionsMenuItem = $("stopOptionsMenuItem"),
   implHeaderStatus = $("implHeaderStatus"), implGateList = $("implGateList"),
   implTabStatusBtn = $("implTabStatusBtn"), implTabLogBtn = $("implTabLogBtn"),
   implStatusPanel = $("implStatusPanel"), implLogPanel = $("implLogPanel"),
@@ -289,7 +296,8 @@ const state = {
   selectedClarifyPath: null,
   clarifyDirty: false,
   clarifyShowingOverview: true,   // true = Clarification pane shows the file-list overview, not a single file
-  clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null },
+  clarifyRun: { running: false, mode: null, lines: [], progress: null, nextIndex: 0, pollTimer: null,
+    gracefulStopRequested: false },
   clarifyTab: "overview",
   workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
   workspaceRoot: INITIAL_WORKSPACE_ROOT || "",
@@ -325,7 +333,8 @@ const state = {
   // Whether the form currently differs from the config it was last filled from — one Save
   // writes every tab, so the user needs to know edits are pending on a tab they can't see.
   settingsDirty: false,
-  implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null },
+  implementRun: { running: false, lines: [], progress: null, nextIndex: 0, pollTimer: null,
+    gracefulStopRequested: false },
   verifyRuns: [],
   verifyListPollTimer: null,
   // id of the verification run currently open on the detail pane, so its own poll tick
@@ -1272,7 +1281,8 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
   finalizeClarifyBtn.disabled = runDisabled || !st.ready;
   finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
-  stopFinalizeClarifyBtn.classList.toggle("hidden", !finalizeRunning);
+  // The wrapper, not the button: Stop Now and its chevron have to appear together.
+  stopFinalizeClarifySplit.classList.toggle("hidden", !finalizeRunning);
 
   // Once clarification has run at least once but isn't finalize-ready yet, relabel
   // Start Clarification -> Continue Clarification and explain why in plain language,
@@ -1321,9 +1331,9 @@ function setClarifyRunButtonsDisabled(disabled) {
   const runRunning = disabled && state.clarifyRun.mode === "run";
   const applyRunning = disabled && state.clarifyRun.mode === "apply";
   startClarifyBtn.classList.toggle("hidden", runRunning);
-  stopClarifyBtn.classList.toggle("hidden", !runRunning);
+  stopClarifySplit.classList.toggle("hidden", !runRunning);
   applyAnswersBtn.classList.toggle("hidden", applyRunning);
-  stopApplyAnswersBtn.classList.toggle("hidden", !applyRunning);
+  stopApplyAnswersSplit.classList.toggle("hidden", !applyRunning);
   renderFinalizeGate(disabled, hasUnanswered, hasUnapplied);
 }
 
@@ -1344,8 +1354,13 @@ function renderClarifyRunStatus() {
     return;
   }
   const tick = run.progress ? formatClarifyLogLine(run.progress).msg : "";
+  const target = GRACEFUL_STOP_TARGETS[run.mode];
+  // Appended rather than replacing the label: the run genuinely is still running, and the
+  // live progress tick is exactly what tells the user how much longer that will be.
+  const stopping = run.gracefulStopRequested && target ? ` — ${target.pendingStatus}` : "";
   clarifyRunStatus.innerHTML = iconSvg("loader-circle", "icon-spin") +
-    `<span>${escapeHtml(clarifyRunStatusLabel(run.mode))}${tick ? " — " + escapeHtml(tick) : ""}</span>`;
+    `<span>${escapeHtml(clarifyRunStatusLabel(run.mode))}${tick ? " — " + escapeHtml(tick) : ""}` +
+    `${escapeHtml(stopping)}</span>`;
   clarifyRunStatus.classList.remove("hidden");
 }
 
@@ -1440,6 +1455,18 @@ function returncodeMessage(code, mode) {
   return `${label} run exited with an error (code ${code}).`;
 }
 
+// A graceful stop exits 0, which returncodeMessage would report as "run finished" — true
+// of the process, misleading about the work: epics or rounds are still outstanding. Only
+// the success case is reworded; a non-zero exit means something else ended the run and
+// that reason is the one worth showing.
+function stopAwareReturncodeMessage(code, mode, gracefulStopRequested) {
+  if (code === 0 && gracefulStopRequested) {
+    const label = returncodeMessage(0, mode).replace(/ run finished\.$/, "");
+    return `${label} stopped after the session in progress finished.`;
+  }
+  return returncodeMessage(code, mode);
+}
+
 async function pollClarifyRun() {
   try {
     const res = await fetch("/api/clarify/run?since=" + state.clarifyRun.nextIndex);
@@ -1460,6 +1487,9 @@ async function pollClarifyRun() {
     // elapsed-time tick) changes every second on its own and isn't part of `lines`.
     state.clarifyRun.progress = data.progress;
     state.clarifyRun.mode = data.mode;
+    // Server-computed, so a graceful stop asked for from a terminal
+    // (`tempa clarify --stop-graceful`) shows up here as well as one asked for here.
+    state.clarifyRun.gracefulStopRequested = !!data.gracefulStopRequested;
     renderClarifyLog();
     const wasRunning = state.clarifyRun.running;
     state.clarifyRun.running = data.running;
@@ -1476,7 +1506,10 @@ async function pollClarifyRun() {
     }
     if (!data.running) {
       stopClarifyPolling();
-      if (data.returncode !== null) toast(returncodeMessage(data.returncode, data.mode), data.returncode !== 0);
+      if (data.returncode !== null) {
+        toast(stopAwareReturncodeMessage(data.returncode, data.mode, data.gracefulStopRequested),
+          data.returncode !== 0);
+      }
       refreshClarifyList();
     }
   } catch (e) { /* transient network hiccup — next tick retries */ }
@@ -1497,6 +1530,7 @@ async function startClarifyRun(mode) {
   state.clarifyRun.lines = [];
   state.clarifyRun.progress = null;
   state.clarifyRun.nextIndex = 0;
+  state.clarifyRun.gracefulStopRequested = false;
   // Set optimistically, before the POST resolves, so the running badge appears the
   // instant the button is clicked instead of waiting on a network round trip.
   state.clarifyRun.running = true;
@@ -1537,6 +1571,9 @@ async function checkClarifyRunOnLoad() {
     state.clarifyRun.mode = data.mode;
     state.clarifyRun.progress = data.progress;
     state.clarifyRun.running = data.running;
+    // A graceful stop asked for before this page was opened (or before it was reloaded)
+    // is still pending — the button has to come back showing that, not "Running…".
+    state.clarifyRun.gracefulStopRequested = !!data.gracefulStopRequested;
     renderClarifyLog();
     renderClarifyRunStatus();
     setClarifyRunButtonsDisabled(data.running);
@@ -1548,6 +1585,135 @@ async function checkClarifyRunOnLoad() {
     if (data.running) startClarifyPolling();
   } catch (e) { /* ignore — buttons stay enabled */ }
 }
+
+// ---------------------------------------------------------------------------
+// Graceful stop — the chevron half of every Stop split-button.
+//
+// "Stop Now" kills the process tree, which throws away whatever the agent session in
+// flight had done but not yet written. The chevron offers the other choice: let that
+// session finish and record its work, then don't start the next one. Where "the next
+// one" is differs per run, which is the only thing this table holds — everything else
+// (menu element, positioning, outside-click) is shared.
+// ---------------------------------------------------------------------------
+const GRACEFUL_STOP_TARGETS = {
+  implement: {
+    what: "Implementation",
+    // Named after where the stop actually lands, rather than a vaguer "Graceful Stop" —
+    // the whole question a user has here is *when* it will stop.
+    label: "Stop After Current Session",
+    requestedToast: "Implementation will stop once the session in progress finishes.",
+    pendingStatus: "Stopping after current session…",
+    request: "/api/implement/stop-graceful",
+    cancel: "/api/implement/stop-graceful/cancel",
+    isPending: () => state.implementRun.gracefulStopRequested,
+    setPending(value) {
+      state.implementRun.gracefulStopRequested = value;
+      updateImplementControls();
+    },
+  },
+  run: {
+    what: "Clarification",
+    label: "Stop After Current Session",
+    requestedToast: "Clarification will stop once the session in progress finishes.",
+    pendingStatus: "stopping after current session",
+    request: "/api/clarify/stop-graceful",
+    cancel: "/api/clarify/stop-graceful/cancel",
+    isPending: () => state.clarifyRun.gracefulStopRequested,
+    setPending: setClarifyGracefulStopPending,
+  },
+  apply: {
+    what: "Apply Answers",
+    label: "Stop After Current Session",
+    requestedToast: "Apply Answers will stop once the session in progress finishes.",
+    pendingStatus: "stopping after current session",
+    request: "/api/clarify/stop-graceful",
+    cancel: "/api/clarify/stop-graceful/cancel",
+    isPending: () => state.clarifyRun.gracefulStopRequested,
+    setPending: setClarifyGracefulStopPending,
+  },
+  finalize: {
+    what: "Finalized Clarification",
+    // Finalize's unit of work is a whole evaluate/answer round, not a single session.
+    label: "Stop After Current Round",
+    requestedToast: "Finalized Clarification will stop once the round in progress finishes.",
+    pendingStatus: "stopping after current round",
+    request: "/api/clarify/stop-graceful",
+    cancel: "/api/clarify/stop-graceful/cancel",
+    isPending: () => state.clarifyRun.gracefulStopRequested,
+    setPending: setClarifyGracefulStopPending,
+  },
+};
+
+function setClarifyGracefulStopPending(value) {
+  state.clarifyRun.gracefulStopRequested = value;
+  renderClarifyRunStatus();
+  setClarifyRunButtonsDisabled(state.clarifyRun.running);
+}
+
+// The active clarify mode doubles as its key here; implementation has only one run.
+function clarifyStopTargetKey() {
+  const mode = state.clarifyRun.mode;
+  return state.clarifyRun.running && GRACEFUL_STOP_TARGETS[mode] ? mode : null;
+}
+
+// What the menu was opened for, captured at open time: the item's meaning flips between
+// "request" and "cancel" depending on whether one is already pending, and a poll tick
+// landing between opening and clicking must not silently change which one fires.
+let stopOptionsSelection = null;
+
+function openStopOptionsMenu(anchorEl, key) {
+  const target = GRACEFUL_STOP_TARGETS[key];
+  if (!target) return;
+  const pending = !!target.isPending();
+  stopOptionsSelection = { key, pending };
+  stopOptionsMenuItem.textContent = pending ? "Cancel Graceful Stop" : target.label;
+  openAnchoredMenu(anchorEl, stopOptionsMenu);
+}
+
+// Neither action goes through a confirm modal: asking to stop later is not destructive
+// (the immediate Stop next to it still is, and keeps its confirmation), and reaching the
+// item already took two clicks.
+stopOptionsMenuItem.addEventListener("click", async () => {
+  const selection = stopOptionsSelection;
+  closeAnchoredMenu(stopOptionsMenu);
+  if (!selection) return;
+  const target = GRACEFUL_STOP_TARGETS[selection.key];
+  const url = selection.pending ? target.cancel : target.request;
+  try {
+    const res = await fetch(url, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      toast(data.error || `Could not change the stop request for ${target.what}.`, true);
+      return;
+    }
+    // Applied locally rather than waiting for the next 1s poll to report it back, so the
+    // button reacts to the click immediately; the poll then simply confirms it.
+    target.setPending(!selection.pending);
+    toast(selection.pending
+      ? `Graceful stop cancelled — ${target.what} will continue.`
+      : target.requestedToast);
+  } catch (e) {
+    toast(`Network error changing the stop request for ${target.what}.`, true);
+  }
+});
+
+// stopPropagation, or the document-level outside-click listener that closes the menu
+// (see closeAnchoredMenu's registration) fires on this very click and closes it again.
+for (const [btn, key] of [
+  [stopClarifyMenuBtn, "run"],
+  [stopApplyAnswersMenuBtn, "apply"],
+  [stopFinalizeClarifyMenuBtn, "finalize"],
+]) {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const active = clarifyStopTargetKey();
+    if (active === key) openStopOptionsMenu(btn, key);
+  });
+}
+stopImplementMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (state.implementRun.running) openStopOptionsMenu(stopImplementMenuBtn, "implement");
+});
 
 // One handler for all three Stop buttons — /api/clarify/stop is already mode-agnostic
 // (it just kills whatever's running), so the only per-mode thing left is copy + which
@@ -1834,8 +2000,12 @@ function updateImplementButtonLabels() {
 function updateImplementControls() {
   startImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
   clarifyStartImplementBtn.disabled = state.implementRun.running || !state.implementReadiness.ready;
-  stopImplementBtn.classList.toggle("hidden", !state.implementRun.running);
-  implHeaderStatus.textContent = state.implementRun.running ? "Running…" : "";
+  // The wrapper, not the button: Stop Now and its chevron have to appear together.
+  stopImplementSplit.classList.toggle("hidden", !state.implementRun.running);
+  implHeaderStatus.textContent = !state.implementRun.running ? ""
+    : state.implementRun.gracefulStopRequested
+      ? GRACEFUL_STOP_TARGETS.implement.pendingStatus
+      : "Running…";
   updateImplementButtonLabels();
   renderImplementGate();
 }
@@ -1861,6 +2031,9 @@ async function refreshImplementRun() {
       state.implementRun.nextIndex = data.next;
     }
     state.implementRun.progress = data.progress;
+    // Server-computed, so a `tempa implement --stop-graceful` typed in a terminal is
+    // reflected here too, not just a request made from this dashboard.
+    state.implementRun.gracefulStopRequested = !!data.gracefulStopRequested;
     state.epics = data.epics || [];
     state.implementStarted = !!data.started;
     renderImplementLog();
@@ -1878,7 +2051,8 @@ async function refreshImplementRun() {
     if (!data.running) {
       if (!qaActive) stopImplementPolling();
       if (wasRunning && data.returncode !== null) {
-        toast(returncodeMessage(data.returncode, "implement"), data.returncode !== 0);
+        toast(stopAwareReturncodeMessage(data.returncode, "implement", data.gracefulStopRequested),
+          data.returncode !== 0);
       }
     }
   } catch (e) { /* transient network hiccup — next tick retries */ }
@@ -1900,6 +2074,7 @@ async function startImplementRun() {
   state.implementRun.lines = [];
   state.implementRun.progress = null;
   state.implementRun.nextIndex = 0;
+  state.implementRun.gracefulStopRequested = false;
   implHeaderStatus.textContent = "Running…";
   renderImplementLog();
   setImplTab("log");
@@ -3001,25 +3176,42 @@ addFolderInput.addEventListener("change", () => {
 const rowContextMenu = $("rowContextMenu"), rowMenuRename = $("rowMenuRename"), rowMenuDelete = $("rowMenuDelete");
 let contextMenuNode = null;
 
+// Position a .row-context-menu under the element that opened it. Shared by the row menu
+// here and the Stop split-buttons' menu (see openStopOptionsMenu) — same look, same
+// outside-click/Escape behaviour, one implementation.
+function openAnchoredMenu(anchorEl, menuEl) {
+  const rect = anchorEl.getBoundingClientRect();
+  menuEl.classList.remove("hidden");
+  const menuWidth = menuEl.offsetWidth || 130;
+  menuEl.style.top = rect.bottom + 4 + "px";
+  menuEl.style.left = Math.min(rect.left, window.innerWidth - menuWidth - 8) + "px";
+}
+
+function closeAnchoredMenu(menuEl) {
+  menuEl.classList.add("hidden");
+}
+
 function openRowContextMenu(anchorEl, node) {
   contextMenuNode = node;
-  const rect = anchorEl.getBoundingClientRect();
-  rowContextMenu.classList.remove("hidden");
-  const menuWidth = rowContextMenu.offsetWidth || 130;
-  rowContextMenu.style.top = rect.bottom + 4 + "px";
-  rowContextMenu.style.left = Math.min(rect.left, window.innerWidth - menuWidth - 8) + "px";
+  openAnchoredMenu(anchorEl, rowContextMenu);
 }
 
 function closeRowContextMenu() {
-  rowContextMenu.classList.add("hidden");
+  closeAnchoredMenu(rowContextMenu);
   contextMenuNode = null;
 }
 
 document.addEventListener("click", (e) => {
   if (!rowContextMenu.classList.contains("hidden") && !rowContextMenu.contains(e.target)) closeRowContextMenu();
+  if (!stopOptionsMenu.classList.contains("hidden") && !stopOptionsMenu.contains(e.target)) {
+    closeAnchoredMenu(stopOptionsMenu);
+  }
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeRowContextMenu();
+  if (e.key === "Escape") {
+    closeRowContextMenu();
+    closeAnchoredMenu(stopOptionsMenu);
+  }
 });
 
 rowMenuRename.addEventListener("click", async () => {

@@ -335,8 +335,10 @@ findings inline: for each finding, choose **Follow the recommendation** or **I'l
 own answer** (a text box appears), then **Save**. Once clarification has run at least once,
 the button relabels to **Continue Clarification** (with a hint explaining what's still
 blocking it, if anything is) for the rest of this loop. While a run is in progress the button
-swaps to **Stop Clarification** — click it (after a confirmation prompt) to cancel it early,
-the same process-tree kill **Stop Implementation** uses in Step 3 below.
+swaps to **Stop Now** — click it (after a confirmation prompt) to cancel it early, the same
+process-tree kill Step 3 uses. Its chevron offers **Stop After Current Session** instead: the
+evaluate session finishes and records its findings, and nothing you've already paid tokens for
+is thrown away. See [Two ways to stop](#two-ways-to-stop) below.
 
 **You don't have to apply before continuing.** Saved answers are carried into every
 subsequent round as already-decided resolutions — the **Pending resolutions** card shows how
@@ -347,8 +349,9 @@ rewrite in between. Only findings you haven't answered yet hold up the next roun
 themselves brought up to date. It's required once, before **Start Implementation** in Step 3:
 implementation reads the PRD, so decisions living only in a clarification file would be
 invisible to it. It auto-chains through the backlog one file at a time until everything's
-applied, so one click finishes the job; while it's running the button swaps to **Stop Apply
-Answers**, which skips the next queued file instead of waiting for it to start and killing it.
+applied, so one click finishes the job; while it's running the button swaps to **Stop Now**,
+with **Stop After Current Session** on its chevron — that one lets the apply session in flight
+finish and stamp what it wrote, then skips the remaining files.
 See [docs/clarify-modes.md](docs/clarify-modes.md#pending-resolutions-overlay) for the
 details.
 
@@ -403,8 +406,9 @@ This can take a while — Finalize repeats the evaluate → answer cycle on its 
 clean, which can mean several rounds depending on how much the PRD still needs resolving.
 Switch to the **Log** tab to watch it live (running status plus streamed console output) so
 you can tell it's still working rather than stuck. **Finalized Clarification** swaps to a
-**Stop Finalize** button while it runs — click it (after a confirmation prompt) if you want
-to cancel mid-way, the same process-tree kill **Stop Implementation** uses in Step 3 below.
+**Stop Now** button while it runs — click it (after a confirmation prompt) if you want to
+cancel mid-way. Its chevron offers **Stop After Current Round**, which lets the round in
+progress finish and exits from a clean, resumable boundary instead.
 
 **Running out of tokens doesn't break the run.** If the configured backend's usage/session
 limit is hit mid-way — during **Start Clarification**, **Apply Answers**, **Finalized
@@ -440,7 +444,32 @@ button, so it holds for the dashboard regardless of what the page shows. The
 **Status** tab shows live epic/feature progress and QA results; **Log** shows the raw
 console output — any `session_*.txt`/`qa_*.txt`/`process_*.txt` filename it mentions is
 clickable and opens that file in a viewer modal, see [docs/logging.md](docs/logging.md);
-**Stop Implementation** is available while it's running.
+**Stop Now** is available while it's running.
+
+#### Two ways to stop
+
+Every Stop button is a split button: the main half stops immediately, the chevron next to it
+offers the patient option.
+
+- **Stop Now** kills the runner and the backend CLI it spawned, right away. Whatever the agent
+  session in flight had worked out but not yet written is lost. Use it when you need the machine
+  back now.
+- **Stop After Current Session** (**…Current Round** for Finalized Clarification) leaves a
+  request instead. The session already running finishes and records its work as usual, and then
+  nothing new starts — so none of the tokens you've already spent are wasted, and the run resumes
+  from a clean boundary. While it's pending the status reads *Stopping after current session…*,
+  and the chevron offers **Cancel Graceful Stop**; **Stop Now** still works throughout, so asking
+  to stop politely never traps you into waiting.
+
+Both are available from the terminal too, and it's the same request either way — `tempa implement
+--stop-graceful` stops a run you started from the dashboard, and the dashboard shows a request you
+made in a terminal:
+
+```bash
+tempa implement --stop-graceful          # stop after the session in progress finishes
+tempa implement --stop-graceful-cancel   # changed your mind
+tempa clarify --stop-graceful            # same, for Apply Answers / Finalized Clarification
+```
 
 ![Tempa dashboard Implementation page, Status tab, showing live epic/feature progress and QA results](docs/assets/implement-status.webp)
 

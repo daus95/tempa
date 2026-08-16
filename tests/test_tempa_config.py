@@ -613,3 +613,61 @@ def test_clarify_overlay_warn_findings_rejects_non_positive_and_junk(value):
     default = tempa_config.DEFAULT_CONFIG["clarify_overlay_warn_findings"]
     assert tempa_config.get_clarify_overlay_warn_findings(
         {"clarify_overlay_warn_findings": value}) == default
+
+
+# ---------------------------------------------------------------------------
+# Graceful-stop sentinel — the one cross-process channel between the dashboard
+# (or a second terminal) and a running implement/clarify process.
+# ---------------------------------------------------------------------------
+
+def test_graceful_stop_not_requested_by_default(isolate_tempa_paths):
+    assert tempa_config.graceful_stop_requested("implement") is False
+    assert tempa_config.graceful_stop_requested("clarify") is False
+
+
+def test_graceful_stop_request_then_clear_round_trip(isolate_tempa_paths):
+    tempa_config.request_graceful_stop("implement")
+    assert tempa_config.graceful_stop_requested("implement") is True
+    assert tempa_config.get_graceful_stop_path("implement").exists()
+
+    tempa_config.clear_graceful_stop("implement")
+    assert tempa_config.graceful_stop_requested("implement") is False
+    assert not tempa_config.get_graceful_stop_path("implement").exists()
+
+
+def test_graceful_stop_kinds_are_independent(isolate_tempa_paths):
+    # Stopping a clarification must never stop an implement run happening alongside it.
+    tempa_config.request_graceful_stop("clarify")
+    assert tempa_config.graceful_stop_requested("clarify") is True
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_clear_graceful_stop_is_a_noop_when_nothing_is_pending(isolate_tempa_paths):
+    # Called unconditionally at the start of every run, so "no request" must not raise.
+    tempa_config.clear_graceful_stop("implement")
+    assert tempa_config.graceful_stop_requested("implement") is False
+
+
+def test_graceful_stop_path_follows_the_active_workspace(tmp_path, isolate_tempa_paths):
+    # The dashboard and the CLI are separate processes; they only ever agree on this file
+    # because both resolve it through the active workspace pointer.
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    tempa_config.set_active_workspace_root(workspace_root)
+
+    tempa_config.request_graceful_stop("implement")
+
+    assert tempa_config.get_graceful_stop_path("implement").parent == workspace_root / ".tempa"
+    assert (workspace_root / ".tempa" / "graceful-stop-implement").exists()
+
+
+def test_request_graceful_stop_creates_the_tempa_dir_if_absent(tmp_path, isolate_tempa_paths):
+    # A stop can be requested before anything else has written to .tempa/ in this workspace.
+    workspace_root = tmp_path / "fresh"
+    workspace_root.mkdir()
+    tempa_config.set_active_workspace_root(workspace_root)
+    assert not (workspace_root / ".tempa").exists()
+
+    tempa_config.request_graceful_stop("clarify")
+
+    assert tempa_config.graceful_stop_requested("clarify") is True

@@ -24,6 +24,7 @@ from dashboard_clarify_parse import (
 from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
 from tempa_config import (
+    clear_graceful_stop,
     get_backend,
     get_clarify_apply_session_id,
     get_clarify_session_id,
@@ -31,6 +32,7 @@ from tempa_config import (
     get_model,
     get_reasoning_effort,
     get_sources,
+    graceful_stop_requested,
     load_config,
     save_config,
 )
@@ -413,6 +415,24 @@ def _prepare_finalize_backlog(config: dict, clar_dir: Path) -> None:
         log("No pre-existing clarification backlog — starting the finalize loop.")
 
 
+def _exit_if_graceful_stop(about_to: str) -> None:
+    """Honour a pending graceful stop, if there is one, instead of spending another agent
+    session on `about_to`.
+
+    Called only at points where the state on disk is complete and resumable — the round's
+    findings and last_finalize_round/_phase are already saved, and the pending overlay is
+    untouched — so a stopped run picks up from exactly where it left off. The one thing a
+    graceful stop must never do is interrupt a session that is already being paid for,
+    which is why every call site sits BEFORE a session rather than inside one."""
+    if not graceful_stop_requested("clarify"):
+        return
+    clear_graceful_stop("clarify")
+    log(f"Clarify (finalize) stopped at your request, before {about_to} — the round in "
+        "progress was allowed to finish first, so nothing already paid for was thrown "
+        "away. Run Finalized Clarification again to continue from here.")
+    sys.exit(0)
+
+
 def run_clarify_finalize(skip_minor: bool = False) -> None:
     """Unattended clarification: loop evaluate -> auto-answer until an evaluation reports no
     critical/major findings, then write every accumulated answer into the PRD/spec in ONE
@@ -463,6 +483,10 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | max_runs={max_run}")
 
+    # Same reasoning as tempa_implement.main(): a stop is a request aimed at THIS run, so
+    # a sentinel left behind by a previous one must not stop this one before it starts.
+    clear_graceful_stop("clarify")
+
     _prepare_finalize_backlog(config, clar_dir)
 
     # Reset the finalize-only round counter to 0 for every fresh `clarify --finalize`
@@ -474,6 +498,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     save_config(config)
 
     while run_number < max_run:
+        _exit_if_graceful_stop("starting another round")
         run_number += 1
 
         round_header = (f"ROUND {run_number}/{max_run} — {phase} — "
@@ -574,6 +599,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             # different backend than clarify (e.g. evaluate on Claude, apply on Codex), there
             # is nothing to resume and this correctly returns None.
             resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
+            _exit_if_graceful_stop("writing the resolutions into the PRD/spec")
             if not _run_apply_step(config, resume_session_id=resume_sid):
                 log(f"Apply-clarification run #{run_number} failed — stopping the loop.")
                 notify_attention(
@@ -623,6 +649,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         applied_hashes = config.get("clarify_applied_hashes", {}) or {}
         unanswered_files, _ = _clarification_backlog(clar_dir, applied_hashes)
         if unanswered_files:
+            _exit_if_graceful_stop("auto-answering this round's findings")
             log(f"Still {critical} critical and {major} major finding(s) — answering "
                 f"{len(unanswered_files)} file(s) with unanswered findings...")
             if not _run_auto_answer_step(config, unanswered_files):
