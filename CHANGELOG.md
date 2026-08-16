@@ -10,6 +10,13 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **The dashboard's background-run workers are no longer closures.** `_start_clarify_run`
+  and `_start_implement_run` each wrapped a `worker()` around a near-identical `run_once()`,
+  reachable only by actually spawning `tempa.py`. Both are now module-level functions over a
+  single `_stream_tempa_command`, which means the apply auto-chain loop, its stalled/stopped
+  message paths, and implement's `--reset-failed` pass are covered by tests for the first
+  time (10 new ones) instead of being exercised only in production.
+
 - **The dashboard's HTTP handler is now routing only, with each pane's logic in its own
   module.** `dashboard_server.py` was a 1,238-line class where routing, validation and
   business logic for seven feature areas sat in one 50-method block; it is 447 lines now —

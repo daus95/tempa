@@ -93,6 +93,54 @@ def _new_clarify_run_state() -> dict:
 _CLARIFY_RUN_ARGS = {"run": ["--noui"], "finalize": ["--finalize"], "apply": ["--apply"]}
 
 
+TEMPA_PY = Path(__file__).resolve().parent.parent / "tempa.py"
+
+
+def _stream_tempa_command(run: dict, command: str, args: list[str]) -> int:
+    """Run `tempa.py <command> <args>` to completion, streaming its console output into
+    `run` as it arrives, and return its exit code (-1 if it couldn't be started at all).
+
+    Progress lines (see _PROGRESS_LINE_RE) replace the single `progress` slot instead of
+    being appended, so a self-overwriting counter stays one line in the log panel.
+
+    stdin is DEVNULL so a child that decides to ask something can't block forever waiting
+    for a keypress nobody can give it: `tempa clarify --apply` asks (via input()) whether to
+    run another clarification round, but only when stdin is a tty, and DEVNULL guarantees it
+    never is. `implement` never prompts on this path (only its destructive --clear flags do),
+    so there it is defense in depth in case that changes.
+
+    The live process is tracked on `run` so Stop can kill it — a run may be several
+    processes in sequence (apply's backlog batches, implement's --reset-failed pass before
+    implement itself), and Stop needs whichever one is current.
+    """
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(TEMPA_PY), command, *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+        )
+    except OSError as e:
+        with run["lock"]:
+            run["lines"].append(f"[error] Could not start {command} process: {e}")
+        return -1
+    with run["lock"]:
+        run["process"] = process
+    for raw_line in _read_process_stdout(process):
+        line = raw_line.strip()
+        if not line:
+            continue
+        with run["lock"]:
+            if _PROGRESS_LINE_RE.match(line):
+                run["progress"] = line
+            else:
+                run["lines"].append(line)
+    process.wait()
+    with run["lock"]:
+        run["process"] = None
+    return process.returncode
+
+
 # The run limits `clarify --finalize` snapshots at process start, mapped to the label the
 # dashboard Settings pane shows for each (see _finalize_limit_change_warning below).
 _FINALIZE_SNAPSHOT_LIMITS = {
@@ -141,6 +189,84 @@ def _finalize_limit_change_warning(server, previous: dict, current: dict) -> str
     )
 
 
+def _apply_backlog_loop(server, run: dict, returncode: int) -> int:
+    """Keep re-running `clarify --apply`, one backlog batch at a time, until every
+    fully-answered clarification file has been applied. Returns the last exit code.
+
+    Three ways out, and the log has to say which: everything applied (the only one that
+    prints "Apply finished"), the user stopped it, or a batch stopped clearing files.
+    `returncode` alone can't tell them apart — it is 0 in all three, since the last
+    individual batch succeeded either way.
+    """
+    remaining = _unapplied_answered_count(server)
+    stopped = False
+    stalled = False
+    while returncode == 0 and remaining > 0:
+        # The sentinel is read here too, not just the in-memory flag, so a
+        # `tempa clarify --stop-graceful` typed in a terminal reaches this loop
+        # as well — apply's batching lives here, not in the CLI, so this is the
+        # only place that can honour it.
+        graceful_from_cli = graceful_stop_requested("clarify")
+        with run["lock"]:
+            graceful = run["graceful_stop_requested"] or graceful_from_cli
+            if run["stop_requested"] or graceful:
+                stopped = True
+                run["lines"].append(
+                    "Apply Answers stopped after the current session finished — "
+                    f"{remaining} remaining file(s) were not applied."
+                    if graceful else
+                    f"Apply Answers stopped — {remaining} remaining file(s) were not applied."
+                )
+                break
+            run["lines"].append(
+                f"{remaining} more fully-answered clarification file(s) still "
+                "need to be applied — running Apply Answers again..."
+            )
+            run["progress"] = None
+        returncode = _stream_tempa_command(run, "clarify", _CLARIFY_RUN_ARGS["apply"])
+        if returncode != 0:
+            break
+        next_remaining = _unapplied_answered_count(server)
+        if next_remaining >= remaining:
+            # Not making progress (e.g. a file apply can't resolve) — stop
+            # looping rather than spinning forever, and evaluate with
+            # whatever has actually been applied so far.
+            stalled = True
+            with run["lock"]:
+                run["lines"].append(
+                    f"Apply Answers isn't clearing the remaining "
+                    f"{next_remaining} file(s) — stopping the auto-apply loop. "
+                    "Review those file(s) by hand."
+                )
+            break
+        remaining = next_remaining
+    if returncode == 0 and not stopped and not stalled:
+        with run["lock"]:
+            run["lines"].append(
+                "Apply finished. Run Continue Clarification when you want a fresh "
+                "evaluation of the updated PRD."
+            )
+    return returncode
+
+
+def _clarify_run_worker(server, run: dict, mode: str) -> None:
+    """The body of a clarification run, on its own thread: one `tempa clarify` process
+    (plus, for "apply", however many more the backlog needs)."""
+    returncode = _stream_tempa_command(run, "clarify", _CLARIFY_RUN_ARGS[mode])
+    if mode == "apply" and returncode == 0:
+        returncode = _apply_backlog_loop(server, run, returncode)
+    # Safety net: the CLI clears the sentinel itself when it acts on one, but it may
+    # have exited for some other reason first (failure, immediate Stop) and left it
+    # behind. `graceful_stop_requested` on the run state is deliberately NOT cleared
+    # here — the client reads it back to describe how the run ended; the next run's
+    # start resets it.
+    clear_graceful_stop("clarify")
+    with run["lock"]:
+        run["running"] = False
+        run["progress"] = None
+        run["returncode"] = returncode
+
+
 def _start_clarify_run(server, mode: str) -> bool:
     """Start `tempa clarify` (mode "run"), `tempa clarify --finalize` (mode "finalize"),
     or `tempa clarify --apply` (mode "apply") as a background subprocess, appending its
@@ -177,118 +303,7 @@ def _start_clarify_run(server, mode: str) -> bool:
     # restart) would otherwise stop this one on its first check.
     clear_graceful_stop("clarify")
 
-    def worker() -> None:
-        tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
-
-        def run_once(args: list[str]) -> int:
-            cmd = [sys.executable, str(tempa_py), "clarify", *args]
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    # `tempa clarify --apply` asks (via input()) whether to run another
-                    # clarification round right away, but only if stdin is a tty — DEVNULL
-                    # guarantees it never is, so a dashboard-triggered apply can't block
-                    # forever waiting for a keypress no one can give it. (The dashboard
-                    # leaves that call to the user: Continue Clarification is one click
-                    # away and no longer requires an apply first.)
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace",
-                )
-            except OSError as e:
-                with run["lock"]:
-                    run["lines"].append(f"[error] Could not start clarify process: {e}")
-                return -1
-            # Tracked so Stop (see _stop_clarify_run) can kill it. "run" and "finalize"
-            # are each a single subprocess for their whole session (finalize's rounds
-            # happen inside tempa_clarify.py, not as separate Popen calls here), so one
-            # PID is all Stop ever needs to kill. "apply" is spread across multiple
-            # Popen calls below (one per backlog batch) — Stop kills whichever one is
-            # live, and the stop_requested check below skips any batch still queued.
-            with run["lock"]:
-                run["process"] = process
-            for raw_line in _read_process_stdout(process):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                with run["lock"]:
-                    if _PROGRESS_LINE_RE.match(line):
-                        run["progress"] = line
-                    else:
-                        run["lines"].append(line)
-            process.wait()
-            with run["lock"]:
-                run["process"] = None
-            return process.returncode
-
-        returncode = run_once(_CLARIFY_RUN_ARGS[mode])
-        if mode == "apply" and returncode == 0:
-            remaining = _unapplied_answered_count(server)
-            # Distinguishes "the loop exited because everything's applied" (the only
-            # case that should print the "Apply finished" message below) from a stop
-            # mid-loop or a stalled (no-progress) exit — otherwise that message would
-            # follow right after "Apply Answers stopped..."/"...stopping the auto-apply
-            # loop", contradicting it. returncode alone can't tell them apart: it's
-            # still 0 in all three cases, since the last individual batch succeeded.
-            stopped = False
-            stalled = False
-            while returncode == 0 and remaining > 0:
-                # The sentinel is read here too, not just the in-memory flag, so a
-                # `tempa clarify --stop-graceful` typed in a terminal reaches this loop
-                # as well — apply's batching lives here, not in the CLI, so this is the
-                # only place that can honour it.
-                graceful_from_cli = graceful_stop_requested("clarify")
-                with run["lock"]:
-                    graceful = run["graceful_stop_requested"] or graceful_from_cli
-                    if run["stop_requested"] or graceful:
-                        stopped = True
-                        run["lines"].append(
-                            "Apply Answers stopped after the current session finished — "
-                            f"{remaining} remaining file(s) were not applied."
-                            if graceful else
-                            f"Apply Answers stopped — {remaining} remaining file(s) were not applied."
-                        )
-                        break
-                    run["lines"].append(
-                        f"{remaining} more fully-answered clarification file(s) still "
-                        "need to be applied — running Apply Answers again..."
-                    )
-                    run["progress"] = None
-                returncode = run_once(_CLARIFY_RUN_ARGS["apply"])
-                if returncode != 0:
-                    break
-                next_remaining = _unapplied_answered_count(server)
-                if next_remaining >= remaining:
-                    # Not making progress (e.g. a file apply can't resolve) — stop
-                    # looping rather than spinning forever, and evaluate with
-                    # whatever has actually been applied so far.
-                    stalled = True
-                    with run["lock"]:
-                        run["lines"].append(
-                            f"Apply Answers isn't clearing the remaining "
-                            f"{next_remaining} file(s) — stopping the auto-apply loop. "
-                            "Review those file(s) by hand."
-                        )
-                    break
-                remaining = next_remaining
-            if returncode == 0 and not stopped and not stalled:
-                with run["lock"]:
-                    run["lines"].append(
-                        "Apply finished. Run Continue Clarification when you want a fresh "
-                        "evaluation of the updated PRD."
-                    )
-        # Safety net: the CLI clears the sentinel itself when it acts on one, but it may
-        # have exited for some other reason first (failure, immediate Stop) and left it
-        # behind. `graceful_stop_requested` on the run state is deliberately NOT cleared
-        # here — the client reads it back to describe how the run ended; the next run's
-        # start resets it.
-        clear_graceful_stop("clarify")
-        with run["lock"]:
-            run["running"] = False
-            run["progress"] = None
-            run["returncode"] = returncode
-
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=_clarify_run_worker, args=(server, run, mode), daemon=True).start()
     return True
 
 
@@ -445,6 +460,39 @@ def _new_implement_run_state() -> dict:
     }
 
 
+def _implement_run_worker(run: dict) -> None:
+    """The body of an implementation run, on its own thread: a `--reset-failed` pass, then
+    implement itself."""
+    returncode = _stream_tempa_command(run, "implement", ["--reset-failed"])
+    # `--reset-failed` rewrites statuses and exits; it never enters the poll loop, so
+    # a graceful stop pressed while it ran can only be honoured here, by not starting
+    # implement at all. Nothing is lost either way — no session has run yet.
+    graceful_from_cli = graceful_stop_requested("implement")
+    with run["lock"]:
+        if returncode != 0:
+            # Never fatal on its own: implement itself still refuses to proceed
+            # past a `failed` epic and says so in the log, which is a clearer
+            # message than anything this could add.
+            run["lines"].append(
+                "Could not reset failed epic(s) back to pending — starting "
+                "implementation anyway."
+            )
+        stopped = (run["stop_requested"] or run["graceful_stop_requested"]
+                   or graceful_from_cli)
+        if stopped:
+            run["lines"].append("Stopped before implementation started.")
+    if not stopped:
+        returncode = _stream_tempa_command(run, "implement", [])
+    # Safety net, same as the clarify worker: the runner clears the sentinel itself
+    # when it acts on one, but it may have exited for another reason first.
+    clear_graceful_stop("implement")
+    with run["lock"]:
+        run["running"] = False
+        run["progress"] = None
+        run["process"] = None
+        run["returncode"] = returncode
+
+
 def _start_implement_run(server) -> bool:
     """Start `tempa implement` as a background subprocess, same log-streaming shape
     as _start_clarify_run. Returns False without starting anything if a run is
@@ -471,74 +519,7 @@ def _start_implement_run(server) -> bool:
     # See the same call in _start_clarify_run: a stale sentinel must not stop a fresh run.
     clear_graceful_stop("implement")
 
-    def worker() -> None:
-        tempa_py = Path(__file__).resolve().parent.parent / "tempa.py"
-
-        def run_once(args: list[str]) -> int:
-            cmd = [sys.executable, str(tempa_py), "implement", *args]
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    # implement's plain run path never calls input() (confirmed: only the
-                    # destructive --clear/--clear-plan flags do — --reset-failed only
-                    # rewrites statuses in config.json and never prompts) — DEVNULL is
-                    # defense in depth, matching the clarify runner, in case that changes.
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace",
-                )
-            except OSError as e:
-                with run["lock"]:
-                    run["lines"].append(f"[error] Could not start implement process: {e}")
-                return -1
-            # Tracked so Stop Implementation can kill whichever of the two child
-            # processes is live at the time (see _stop_implement_run).
-            with run["lock"]:
-                run["process"] = process
-            for raw_line in _read_process_stdout(process):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                with run["lock"]:
-                    if _PROGRESS_LINE_RE.match(line):
-                        run["progress"] = line
-                    else:
-                        run["lines"].append(line)
-            process.wait()
-            with run["lock"]:
-                run["process"] = None
-            return process.returncode
-
-        returncode = run_once(["--reset-failed"])
-        # `--reset-failed` rewrites statuses and exits; it never enters the poll loop, so
-        # a graceful stop pressed while it ran can only be honoured here, by not starting
-        # implement at all. Nothing is lost either way — no session has run yet.
-        graceful_from_cli = graceful_stop_requested("implement")
-        with run["lock"]:
-            if returncode != 0:
-                # Never fatal on its own: implement itself still refuses to proceed
-                # past a `failed` epic and says so in the log, which is a clearer
-                # message than anything this could add.
-                run["lines"].append(
-                    "Could not reset failed epic(s) back to pending — starting "
-                    "implementation anyway."
-                )
-            stopped = (run["stop_requested"] or run["graceful_stop_requested"]
-                       or graceful_from_cli)
-            if stopped:
-                run["lines"].append("Stopped before implementation started.")
-        if not stopped:
-            returncode = run_once([])
-        # Safety net, same as the clarify worker: the runner clears the sentinel itself
-        # when it acts on one, but it may have exited for another reason first.
-        clear_graceful_stop("implement")
-        with run["lock"]:
-            run["running"] = False
-            run["progress"] = None
-            run["process"] = None
-            run["returncode"] = returncode
-
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=_implement_run_worker, args=(run,), daemon=True).start()
     return True
 
 
