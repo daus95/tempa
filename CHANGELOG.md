@@ -10,6 +10,18 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **The three longest functions in the CLI half are now split into named steps.**
+  `run_session`'s 150-line "what does this exit code mean for the epic?" tail moved into a
+  new `tempa_session_outcome.py` (`apply_session_outcome`, plus one small function per
+  outcome: reorder the plan, repair a QA-state desync, fail and stop); `check_and_run`'s
+  four scheduling branches became `_resume_interrupted_qa` / `_resume_in_progress_epic` /
+  `_run_qa_gate` / `_start_next_epic`, called in that priority order; and
+  `run_clarify_finalize`'s loop body split into evaluate / compact / convergence-guard /
+  auto-answer steps. Behavior is unchanged — every log line, notification, and exit code is
+  byte-identical, verified by comparing the full set of runtime string literals before and
+  after — and 12 new tests now cover the extracted implementation-outcome decision tree
+  directly.
+
 - **The dashboard's front-end script is now split across `src/assets/js/` instead of one
   3,558-line `dashboard.js`.** Twenty ordered parts, one per pane/concern (markdown renderer,
   DOM refs + state, modals, home, clarification, implementation, verification, settings,

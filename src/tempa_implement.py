@@ -207,6 +207,235 @@ def _graceful_stop_is_due() -> bool:
         return thread is None or not thread.is_alive()
 
 
+def _resume_interrupted_qa(config: dict) -> bool:
+    """Highest scheduling priority: a QA session that was cut off mid-run (qa_status
+    "ongoing") is resumed before anything else. Returns True once it has started one."""
+    for i, session in enumerate(config["epic"]):
+        if session.get("qa_status") == "ongoing":
+            label = session.get("epic_name", f"epic_{i}")
+            resume_sid = get_epic_session_id(session, get_backend(config, "implement"), kind="qa")
+            log(f"QA [{label}] was interrupted (qa_status=ongoing) — resuming with session_id: {resume_sid}")
+
+            if not _validate_and_increment_qa_run(config, i, label):
+                save_config(config)
+                return True
+
+            qa_dir = get_qa_dir()
+            qa_dir.mkdir(parents=True, exist_ok=True)
+            qa_report_filename = session.get("qa_report_filename", "")
+            if qa_report_filename:
+                qa_output_file = Path(qa_report_filename)
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
+                config["epic"][i]["qa_report_filename"] = str(qa_output_file)
+
+            prompt = build_qa_prompt(config, label, qa_output_file, is_continuation=True)
+            save_config(config)
+
+            _state.running_index = i
+            _state.running_thread = threading.Thread(
+                target=run_qa_session,
+                args=(i, prompt, label, resume_sid),
+                daemon=True,
+            )
+            _state.running_thread.start()
+            return True
+
+    return False
+
+
+def _resume_in_progress_epic(config: dict, features_override: int | None) -> bool:
+    """An epic left "on_progress" by an interrupted session (process killed, machine
+    restarted): always start another session for it — resuming the previous one when
+    there's a session id to resume. Returns True once it has started one."""
+    for i, session in enumerate(config["epic"]):
+        if session["status"] == "on_progress":
+            label = session.get("epic_name", f"epic_{i}")
+
+            total = session.get("total_features", 0)
+            completed = session.get("completed_features", 0)
+            progress_str = f"{completed}/{total}" if total else "?"
+            # A stale on_progress session (the previous session was interrupted —
+            # process killed, machine restarted, etc.) still gets a resumable
+            # session_id captured on the epic if one was ever produced (see
+            # _capture_session_id / run_session) — resume it instead of starting
+            # cold and re-reading the epic spec + code again, same reasoning as the
+            # continuation case below.
+            resume_sid = (
+                get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+                if get_resume_implementation_sessions(config) else None
+            )
+            log(f"Session [{label}] progress: {progress_str} features — "
+                f"{'resuming' if resume_sid else 'starting'} a session")
+
+            prompt = build_session_prompt(
+                config, session.get("epic_name", ""),
+                is_continuation=completed > 0, features_override=features_override,
+                is_resumed=bool(resume_sid),
+            )
+
+            if not _validate_and_increment_run(config, i, label):
+                raise SystemExit(1)
+
+            config["epic"][i]["qa_passed"] = False
+            config["epic"][i]["qa_status"] = "idle"
+            config["epic"][i]["last_run"] = datetime.now().isoformat()
+            save_config(config)
+
+            _state.running_index = i
+            _state.running_thread = threading.Thread(
+                target=run_session,
+                args=(i, prompt, label, resume_sid),
+                kwargs={"features_override": features_override},
+                daemon=True,
+            )
+            _state.running_thread.start()
+            return True
+
+    return False
+
+
+def _run_qa_gate(config: dict) -> bool:
+    """The QA gate: the first "done" epic that hasn't passed QA yet gets QA'd before any
+    later epic is worked on. Returns True if this poll is spoken for — which includes the
+    cases where nothing is started: an epic routed back to implementation because its
+    feature bookkeeping contradicts its "done" status, a QA run deferred behind an earlier
+    epic's re-implementation, and a QA run limit reached."""
+    for i, session in enumerate(config["epic"]):
+        if session["status"] == "done" and not session.get("qa_passed", False):
+            label = session.get("epic_name", f"epic_{i}")
+
+            # Integrity check: don't trust the epic-level "done" status blindly — the AI
+            # agent is solely responsible for also marking each feature "done" and
+            # incrementing completed_features before setting the epic itself done (see
+            # the MANDATORY RULE in build_session_prompt), and it can skip that step. A
+            # "done" epic whose features were never actually finished must be fixed for
+            # real before QA runs on it, not QA'd (and possibly passed) against
+            # incomplete work.
+            if not _epic_features_actually_done(session):
+                completed = session.get("completed_features", 0)
+                total = session.get("total_features", len(session.get("features", [])))
+                log(f"[{label}] is marked done but only {completed}/{total} feature(s) "
+                    "are actually marked done — routing back to implementation before "
+                    "QA runs (a re-implementation round likely set the epic done without "
+                    "finishing each feature's own bookkeeping).")
+                config["epic"][i]["status"] = "require_fixing"
+                save_config(config)
+                return True
+
+            # A failed earlier epic is never going to finish that re-implementation on its
+            # own, so it must halt here rather than fall into the deferral below.
+            _halt_if_earlier_epic_failed(config, i)
+
+            # Block if any PREVIOUS epic's QA found issues and is waiting for re-implementation.
+            # qa_status="done" + qa_passed=false means QA ran and failed — that epic must be
+            # re-implemented (and re-QA'd) before we advance to this one.
+            blocked_by = next(
+                (config["epic"][j].get("epic_name", f"epic_{j}")
+                 for j in range(i)
+                 if not config["epic"][j].get("qa_passed", False)
+                 and config["epic"][j].get("qa_status") not in ("idle", None)),
+                None,
+            )
+            if blocked_by:
+                log(f"QA [{label}] deferred — waiting for [{blocked_by}] re-implementation + QA to finish first")
+                return True
+
+            log(f"QA is required for [{label}] before continuing implementation")
+
+            if not _validate_and_increment_qa_run(config, i, label):
+                save_config(config)
+                return True
+
+            qa_dir = get_qa_dir()
+            qa_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
+
+            config["epic"][i]["qa_status"] = "ongoing"
+            config["epic"][i]["qa_session_id"] = ""
+            config["epic"][i]["qa_report_filename"] = str(qa_output_file)
+            prompt = build_qa_prompt(config, label, qa_output_file)
+            save_config(config)
+
+            _state.running_index = i
+            _state.running_thread = threading.Thread(
+                target=run_qa_session,
+                args=(i, prompt, label),
+                daemon=True,
+            )
+            _state.running_thread.start()
+            return True
+
+    return False
+
+
+def _start_next_epic(config: dict, features_override: int | None) -> None:
+    """Last resort: pick the next epic to implement — any "require_fixing" one first (already
+    implemented, waiting on QA fixes), otherwise the first "pending" one — and start a session
+    for it. Stops the runner instead if there is nothing left to do."""
+    next_index = None
+    for i, session in enumerate(config["epic"]):
+        if session["status"] == "require_fixing":
+            next_index = i
+            break
+
+    # If no require_fixing, find first pending epic
+    if next_index is None:
+        for i, session in enumerate(config["epic"]):
+            if session["status"] == "pending":
+                next_index = i
+                break
+
+    if next_index is None:
+        _state.all_done = True
+        log("All epics done — agent runner stopping.")
+        _state.stop_event.set()
+        return
+
+    # All epics before next_index must not be failed
+    _halt_if_earlier_epic_failed(config, next_index)
+
+    session = config["epic"][next_index]
+    label = session.get("epic_name", f"epic_{next_index}")
+    is_require_fixing = session["status"] == "require_fixing"
+    is_continuation = is_require_fixing or session.get("completed_features", 0) > 0
+    # Resume the epic's previous implementation session when continuing it (never for
+    # a brand-new epic's first session — there's no session_id to resume yet anyway)
+    # so it doesn't re-pay to read the epic spec + code it already read. A
+    # require_fixing epic's QA report is still read fresh every time regardless (see
+    # _build_qa_report_section) — only the "re-read the spec" instruction is skipped.
+    resume_sid = (
+        get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
+        if is_continuation and get_resume_implementation_sessions(config) else None
+    )
+    prompt = build_session_prompt(
+        config, session.get("epic_name", ""),
+        is_continuation=is_continuation,
+        features_override=features_override,
+        is_resumed=bool(resume_sid),
+    )
+
+    if not _validate_and_increment_run(config, next_index, label):
+        raise SystemExit(1)
+
+    config["epic"][next_index]["qa_passed"] = False
+    config["epic"][next_index]["qa_status"] = "idle"
+    config["epic"][next_index]["status"] = "on_progress"
+    config["epic"][next_index]["last_run"] = datetime.now().isoformat()
+    save_config(config)
+
+    _state.running_index = next_index
+    _state.running_thread = threading.Thread(
+        target=run_session,
+        args=(next_index, prompt, label, resume_sid),
+        kwargs={"features_override": features_override},
+        daemon=True,
+    )
+    _state.running_thread.start()
+
+
 def check_and_run(features_override: int | None = None) -> None:
 
     with _state.lock:
@@ -223,211 +452,16 @@ def check_and_run(features_override: int | None = None) -> None:
         if reconcile_qa_passed_features_and_log(config):
             save_config(config)
 
-        # QA resumption: if any epic has qa_status="ongoing", resume that QA session first
-        for i, session in enumerate(config["epic"]):
-            if session.get("qa_status") == "ongoing":
-                label = session.get("epic_name", f"epic_{i}")
-                resume_sid = get_epic_session_id(session, get_backend(config, "implement"), kind="qa")
-                log(f"QA [{label}] was interrupted (qa_status=ongoing) — resuming with session_id: {resume_sid}")
-
-                if not _validate_and_increment_qa_run(config, i, label):
-                    save_config(config)
-                    return
-
-                qa_dir = get_qa_dir()
-                qa_dir.mkdir(parents=True, exist_ok=True)
-                qa_report_filename = session.get("qa_report_filename", "")
-                if qa_report_filename:
-                    qa_output_file = Path(qa_report_filename)
-                else:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
-                    config["epic"][i]["qa_report_filename"] = str(qa_output_file)
-
-                prompt = build_qa_prompt(config, label, qa_output_file, is_continuation=True)
-                save_config(config)
-
-                _state.running_index = i
-                _state.running_thread = threading.Thread(
-                    target=run_qa_session,
-                    args=(i, prompt, label, resume_sid),
-                    daemon=True,
-                )
-                _state.running_thread.start()
-                return
-
-        # Handle stale on_progress session — always start a new session
-        for i, session in enumerate(config["epic"]):
-            if session["status"] == "on_progress":
-                label = session.get("epic_name", f"epic_{i}")
-
-                total = session.get("total_features", 0)
-                completed = session.get("completed_features", 0)
-                progress_str = f"{completed}/{total}" if total else "?"
-                # A stale on_progress session (the previous session was interrupted —
-                # process killed, machine restarted, etc.) still gets a resumable
-                # session_id captured on the epic if one was ever produced (see
-                # _capture_session_id / run_session) — resume it instead of starting
-                # cold and re-reading the epic spec + code again, same reasoning as the
-                # continuation case below.
-                resume_sid = (
-                    get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
-                    if get_resume_implementation_sessions(config) else None
-                )
-                log(f"Session [{label}] progress: {progress_str} features — "
-                    f"{'resuming' if resume_sid else 'starting'} a session")
-
-                prompt = build_session_prompt(
-                    config, session.get("epic_name", ""),
-                    is_continuation=completed > 0, features_override=features_override,
-                    is_resumed=bool(resume_sid),
-                )
-
-                if not _validate_and_increment_run(config, i, label):
-                    raise SystemExit(1)
-
-                config["epic"][i]["qa_passed"] = False
-                config["epic"][i]["qa_status"] = "idle"
-                config["epic"][i]["last_run"] = datetime.now().isoformat()
-                save_config(config)
-
-                _state.running_index = i
-                _state.running_thread = threading.Thread(
-                    target=run_session,
-                    args=(i, prompt, label, resume_sid),
-                    kwargs={"features_override": features_override},
-                    daemon=True,
-                )
-                _state.running_thread.start()
-                return
-
-        # QA gate: check for any "done" epic that has not yet passed QA (one at a time, in order)
-        for i, session in enumerate(config["epic"]):
-            if session["status"] == "done" and not session.get("qa_passed", False):
-                label = session.get("epic_name", f"epic_{i}")
-
-                # Integrity check: don't trust the epic-level "done" status blindly — the AI
-                # agent is solely responsible for also marking each feature "done" and
-                # incrementing completed_features before setting the epic itself done (see
-                # the MANDATORY RULE in build_session_prompt), and it can skip that step. A
-                # "done" epic whose features were never actually finished must be fixed for
-                # real before QA runs on it, not QA'd (and possibly passed) against
-                # incomplete work.
-                if not _epic_features_actually_done(session):
-                    completed = session.get("completed_features", 0)
-                    total = session.get("total_features", len(session.get("features", [])))
-                    log(f"[{label}] is marked done but only {completed}/{total} feature(s) "
-                        "are actually marked done — routing back to implementation before "
-                        "QA runs (a re-implementation round likely set the epic done without "
-                        "finishing each feature's own bookkeeping).")
-                    config["epic"][i]["status"] = "require_fixing"
-                    save_config(config)
-                    return
-
-                # A failed earlier epic is never going to finish that re-implementation on its
-                # own, so it must halt here rather than fall into the deferral below.
-                _halt_if_earlier_epic_failed(config, i)
-
-                # Block if any PREVIOUS epic's QA found issues and is waiting for re-implementation.
-                # qa_status="done" + qa_passed=false means QA ran and failed — that epic must be
-                # re-implemented (and re-QA'd) before we advance to this one.
-                blocked_by = next(
-                    (config["epic"][j].get("epic_name", f"epic_{j}")
-                     for j in range(i)
-                     if not config["epic"][j].get("qa_passed", False)
-                     and config["epic"][j].get("qa_status") not in ("idle", None)),
-                    None,
-                )
-                if blocked_by:
-                    log(f"QA [{label}] deferred — waiting for [{blocked_by}] re-implementation + QA to finish first")
-                    return
-
-                log(f"QA is required for [{label}] before continuing implementation")
-
-                if not _validate_and_increment_qa_run(config, i, label):
-                    save_config(config)
-                    return
-
-                qa_dir = get_qa_dir()
-                qa_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                qa_output_file = qa_dir / f"{label}-qa-{timestamp}.md"
-
-                config["epic"][i]["qa_status"] = "ongoing"
-                config["epic"][i]["qa_session_id"] = ""
-                config["epic"][i]["qa_report_filename"] = str(qa_output_file)
-                prompt = build_qa_prompt(config, label, qa_output_file)
-                save_config(config)
-
-                _state.running_index = i
-                _state.running_thread = threading.Thread(
-                    target=run_qa_session,
-                    args=(i, prompt, label),
-                    daemon=True,
-                )
-                _state.running_thread.start()
-                return
-
-        # Find first require_fixing epic (prioritized — already implemented but needs QA fixes)
-        next_index = None
-        for i, session in enumerate(config["epic"]):
-            if session["status"] == "require_fixing":
-                next_index = i
-                break
-
-        # If no require_fixing, find first pending epic
-        if next_index is None:
-            for i, session in enumerate(config["epic"]):
-                if session["status"] == "pending":
-                    next_index = i
-                    break
-
-        if next_index is None:
-            _state.all_done = True
-            log("All epics done — agent runner stopping.")
-            _state.stop_event.set()
+        # Scheduling priority, highest first: each step returns True once this poll is
+        # spoken for. The order is the policy — resuming interrupted work always beats
+        # starting new work, and no epic is implemented past one still waiting on QA.
+        if _resume_interrupted_qa(config):
             return
-
-        # All epics before next_index must not be failed
-        _halt_if_earlier_epic_failed(config, next_index)
-
-        session = config["epic"][next_index]
-        label = session.get("epic_name", f"epic_{next_index}")
-        is_require_fixing = session["status"] == "require_fixing"
-        is_continuation = is_require_fixing or session.get("completed_features", 0) > 0
-        # Resume the epic's previous implementation session when continuing it (never for
-        # a brand-new epic's first session — there's no session_id to resume yet anyway)
-        # so it doesn't re-pay to read the epic spec + code it already read. A
-        # require_fixing epic's QA report is still read fresh every time regardless (see
-        # _build_qa_report_section) — only the "re-read the spec" instruction is skipped.
-        resume_sid = (
-            get_epic_session_id(session, get_backend(config, "implement"), kind="implement")
-            if is_continuation and get_resume_implementation_sessions(config) else None
-        )
-        prompt = build_session_prompt(
-            config, session.get("epic_name", ""),
-            is_continuation=is_continuation,
-            features_override=features_override,
-            is_resumed=bool(resume_sid),
-        )
-
-        if not _validate_and_increment_run(config, next_index, label):
-            raise SystemExit(1)
-
-        config["epic"][next_index]["qa_passed"] = False
-        config["epic"][next_index]["qa_status"] = "idle"
-        config["epic"][next_index]["status"] = "on_progress"
-        config["epic"][next_index]["last_run"] = datetime.now().isoformat()
-        save_config(config)
-
-        _state.running_index = next_index
-        _state.running_thread = threading.Thread(
-            target=run_session,
-            args=(next_index, prompt, label, resume_sid),
-            kwargs={"features_override": features_override},
-            daemon=True,
-        )
-        _state.running_thread.start()
+        if _resume_in_progress_epic(config, features_override):
+            return
+        if _run_qa_gate(config):
+            return
+        _start_next_epic(config, features_override)
 
 
 def _print_session_plan(config: dict, features_override: int | None = None) -> None:
