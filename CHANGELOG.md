@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-08-17
+
 ### Added
 
 - **`qa_loop_strikes` and `max_qa_fail_rounds` now have Settings controls.** Giving an epic
