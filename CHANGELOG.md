@@ -10,6 +10,8 @@ once the first tagged release is cut.
 
 ### Added
 
+- **Project logo**, shown in the README and as the dashboard's sidebar brand icon / browser
+  favicon (`docs/assets/logo.webp`).
 - **"Download PRD" button on the Clarification page** downloads a zip of every file in
   `.tempa/specs/prd`, reflecting the PRD content with all clarification answers applied so
   far.
