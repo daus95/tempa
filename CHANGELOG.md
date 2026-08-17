@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-08-17
+
 ### Fixed
 
 - **An epic could never pass QA because every round failed it on a different set of
