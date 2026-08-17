@@ -44,9 +44,10 @@ VERDICT_FAIL = "fail"
 DIAGNOSIS_HINT = (
     "What to check: open the last two QA reports listed above and compare what each says about "
     "the feature(s) named.\n"
-    "  - They ask for opposite things → the specification is ambiguous or contradicts itself. "
-    "This one needs your ruling: decide which reading is right and write it into the epic's spec, "
-    "or into Architecture Principles, which every later round is bound by.\n"
+    "  - They ask for opposite things, or each round turns on a question the spec never settles "
+    "→ the specification is ambiguous, contradicts itself, or has a hole where these rounds keep "
+    "landing. This one needs your ruling: decide what the right behaviour is and write it into "
+    "the epic's spec, or into Architecture Principles, which every later round is bound by.\n"
     "  - One of them reports something genuinely broken → that's an ordinary regression, not a "
     "conflict. Retrying is reasonable; the next fix session can see both reports.\n"
     "  - Each round flags different, minor items → nothing is regressing. Raise \"Features per "
@@ -153,6 +154,36 @@ def last_report_path(epic: dict, exclude: str = "") -> str:
     return ""
 
 
+def earlier_report_paths(epic: dict, exclude: str = "") -> list[str]:
+    """The report files of the rounds before `exclude`, oldest first, since the last reset.
+
+    A fix session is only ever pointed at the newest QA report (see
+    tempa_prompts._build_qa_report_section), which is why an epic can re-break a defect an
+    earlier round already closed: nothing in the session's context says that code path was ever
+    a finding. That is not hypothetical — it is how EPIC-14 got here. Round 1 found that nothing
+    in production ever wrote the reconciliation rows; rounds 2-3 passed it; the round-3 fix
+    (letting a human's button create the `Draft` first) sent the writer down a branch that
+    skipped the write, re-breaking round 1's finding exactly. The session that wrote it had
+    round 3's report and no idea round 1 existed.
+
+    Oldest first, and not truncated to the most recent few: the oldest round is the one whose
+    findings have been settled longest, are furthest from any current context, and are therefore
+    the likeliest to be undone without anyone noticing — dropping it to keep the list short
+    would discard the very report the case above turns on. `record_qa_round` already bounds this
+    at `_MAX_HISTORY`, and these are one path per line, not their contents.
+
+    Reset markers and rounds that never wrote a report are skipped, as is `exclude` — the round
+    the caller is already showing in full."""
+    paths: list[str] = []
+    for entry in _rounds_since_reset(epic):
+        report = entry.get("report") or ""
+        if entry.get("verdict") == VERDICT_RESET or not report or report == exclude:
+            continue
+        if report not in paths:
+            paths.append(report)
+    return paths
+
+
 def _regressed_features(fails: list[dict]) -> list[str]:
     """Features in the newest fail round that had already been fixed and re-verified once: they
     appear in an earlier round's failures, are absent from at least one round in between (QA
@@ -163,29 +194,37 @@ def _regressed_features(fails: list[dict]) -> list[str]:
     means a later round's work undid an earlier round's, which is the shape of a loop that does
     not terminate on its own.
 
-    A round that flagged nothing at all is not evidence of anything and is skipped when looking
-    for that absence. Its empty set makes EVERY feature look "absent, therefore re-verified", so
-    counting it would read one round of missing bookkeeping as a wholesale regression — the same
-    empty-fingerprint trap `_cycle_round` already refuses to fall into. Such rounds are still
-    counted by `detect_qa_loop`'s `max_fail_rounds` backstop, which is what bounds that case."""
+    The re-verification has to be the round IMMEDIATELY before this one. Every strike
+    `detect_qa_loop` counts is meant to be one round showing the pattern, and a gap further back
+    in the history does not stop being true just because time passes: scanning for it anywhere in
+    the past means that once a feature has regressed once, every later round it stays failing
+    re-finds that same old gap and scores another strike. The epic then trips on "N rounds in a
+    row showing it" when only the first one showed anything — turning `strikes_limit` into "one
+    regression plus N-1 ordinary consecutive failures" and spending exactly the tolerance the
+    limit exists to provide. Seen in the wild on an epic whose feature failed round 1, passed
+    rounds 2-3, and regressed in round 4: round 5 flagged the same feature for a genuinely new
+    defect (no re-break of anything) and was struck for round 4's gap all over again.
+
+    A round that flagged nothing at all is not evidence of anything: its empty set makes EVERY
+    feature look "absent, therefore re-verified", so reading one round of missing bookkeeping as
+    a re-verification would report a wholesale regression — the same empty-fingerprint trap
+    `_cycle_round` already refuses to fall into. Such rounds are still counted by
+    `detect_qa_loop`'s `max_fail_rounds` backstop, which is what bounds that case."""
     if len(fails) < 3:
         return []
     current = set(fails[-1].get("failed") or [])
-    if not current:
+    previous = set(fails[-2].get("failed") or [])
+    if not current or not previous:
+        return []
+    # Failing in both rounds is a fix still in flight, not work being undone — only what came
+    # BACK this round can be a regression, and only the previous round's own (non-empty) set is
+    # the "QA looked and was satisfied" that makes it one.
+    reappeared = current - previous
+    if not reappeared:
         return []
     regressed = set()
-    for i, entry in enumerate(fails[:-1]):
-        earlier = set(entry.get("failed") or [])
-        recovered = earlier & current
-        if not recovered:
-            continue
-        # "Absent from at least one round in between" — checked against the rounds strictly
-        # between this earlier one and the current one.
-        for between in fails[i + 1:-1]:
-            flagged = set(between.get("failed") or [])
-            if not flagged:
-                continue
-            regressed |= recovered - flagged
+    for entry in fails[:-2]:
+        regressed |= reappeared & set(entry.get("failed") or [])
     return sorted(regressed)
 
 
@@ -198,11 +237,17 @@ def _cycle_round(fails: list[dict]) -> int | None:
     per-feature bookkeeping) would otherwise match every other such round and report a cycle that
     nothing supports. That holds for the in-between rounds too — an empty one says nothing about
     what the epic looked like at that point, so it can't be the "different set in between" that
-    turns a repeat into a round trip. Rounds like that are bounded by `max_fail_rounds` instead."""
+    turns a repeat into a round trip. Rounds like that are bounded by `max_fail_rounds` instead.
+
+    A round identical to the one right before it is not a round trip either — the epic has not
+    come back around to anything, it simply hasn't moved. Counting it would re-score whatever
+    older repeat is in the history on every subsequent standstill round, the same stale-evidence
+    inflation `_regressed_features` documents at length. Standing still is what `max_fail_rounds`
+    bounds; this rule is only for an epic that keeps oscillating between states."""
     if len(fails) < 3:
         return None
     current = set(fails[-1].get("failed") or [])
-    if not current:
+    if not current or set(fails[-2].get("failed") or []) == current:
         return None
     for i, entry in enumerate(fails[:-1]):
         if set(entry.get("failed") or []) != current:

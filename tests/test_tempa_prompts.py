@@ -197,6 +197,59 @@ def test_build_qa_report_section_marks_advisory_notes_as_not_findings(tmp_path):
     assert "advisory" in tp._build_qa_report_section(config, "e1")
 
 
+def _epic_with_reports_on_disk(tmp_path, count: int) -> tuple[dict, list]:
+    """An epic whose qa_history holds `count` failed rounds, each with a report on disk."""
+    reports = []
+    for i in range(1, count + 1):
+        report = tmp_path / f"qa_round{i}.md"
+        report.write_text(f"round {i} findings", encoding="utf-8")
+        reports.append(report)
+    epic = {
+        "epic_name": "e1",
+        "qa_report_filename": str(reports[-1]),
+        "qa_history": [
+            {"round": i + 1, "verdict": "fail", "failed": ["F1"], "report": str(path)}
+            for i, path in enumerate(reports)
+        ],
+    }
+    return epic, reports
+
+
+def test_build_qa_report_section_lists_the_earlier_rounds_as_settled(tmp_path):
+    """A session only ever saw the newest report, so it could reroute control flow around a code
+    path an earlier round had already fixed and re-break that finding — how EPIC-14 started
+    cycling. The older reports now ride along, marked closed rather than to-fix."""
+    epic, reports = _epic_with_reports_on_disk(tmp_path, 3)
+    section = tp._build_qa_report_section({"epic": [epic]}, "e1")
+
+    assert "DO NOT RE-BREAK" in section
+    assert str(reports[0]) in section and str(reports[1]) in section
+    # The newest is already listed in full above as the round to fix — not twice.
+    assert section.count(str(reports[2])) == 1
+    # Oldest first: round 1's findings are the ones most likely to be undone unnoticed, so they
+    # must not be skimmed past (or dropped entirely by a "keep it short" cap).
+    assert section.index(str(reports[0])) < section.index(str(reports[1]))
+
+
+def test_build_qa_report_section_has_no_settled_block_on_the_first_round(tmp_path):
+    epic, _ = _epic_with_reports_on_disk(tmp_path, 1)
+    section = tp._build_qa_report_section({"epic": [epic]}, "e1")
+
+    assert "DO NOT RE-BREAK" not in section
+    assert "MUST BE READ" in section
+
+
+def test_build_qa_report_section_skips_earlier_reports_no_longer_on_disk(tmp_path):
+    """qa_history outlives the files it names once a workspace is cleaned. Naming a path that
+    isn't there spends a session's time on a failed read."""
+    epic, reports = _epic_with_reports_on_disk(tmp_path, 3)
+    reports[0].unlink()
+    section = tp._build_qa_report_section({"epic": [epic]}, "e1")
+
+    assert str(reports[0]) not in section
+    assert str(reports[1]) in section
+
+
 # ---------------------------------------------------------------------------
 # _build_previous_qa_findings
 # ---------------------------------------------------------------------------

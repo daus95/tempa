@@ -14,7 +14,7 @@ from pathlib import Path
 
 from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
 from tempa_logging import log
-from tempa_qa_history import last_report_path
+from tempa_qa_history import earlier_report_paths, last_report_path
 
 
 def load_prompt(name: str, fallback: str = "") -> str:
@@ -132,6 +132,39 @@ def _build_qa_report_section(config: dict, epic: str) -> str:
         f"Its 📝 advisory notes are NOT findings — QA verified that behaviour as correct and\n"
         f"chose not to fail it. Do not spend this session's feature budget on them, and never at\n"
         f"the expense of a ❌ or ⚠️ item.\n\n"
+        f"{_build_settled_findings_section(epic_entry, qa_report_filename)}"
+    )
+
+
+def _build_settled_findings_section(epic_entry: dict, current_report: str) -> str:
+    """List this epic's older QA reports as closed findings the session must not re-break.
+
+    Fixing what the newest report names, in isolation, is how an epic starts cycling: a round's
+    fix reroutes control flow past code an earlier round already had to have fixed, that earlier
+    finding comes back, and the loop guard stops the run. The session cannot avoid a defect it
+    has never been told about, so it is told — not to fix them again (they are closed), but to
+    check its own change against them and leave a test behind where one is missing.
+
+    Only reports still on disk are listed: `qa_history` outlives no file it points at, but a
+    workspace can be cleaned, and a prompt naming a path that isn't there wastes a session's time
+    on a failed read. Empty string when there is no older round, so the caller's f-string closes
+    cleanly on a first-round epic."""
+    earlier = [p for p in earlier_report_paths(epic_entry, exclude=current_report)
+               if Path(p).exists()]
+    if not earlier:
+        return ""
+    return (
+        "EARLIER QA ROUNDS — ALREADY FIXED, DO NOT RE-BREAK:\n"
+        "This epic has been through QA before. These older reports are settled — their findings\n"
+        "were fixed and a later round verified them (oldest first):\n"
+        + "".join(f"  {path}\n" for path in earlier)
+        + "Do NOT re-fix them and do not spend this session's feature budget on them. Do read\n"
+        "them for the code paths they name: a fix that reroutes control flow around one of those\n"
+        "paths brings its finding straight back, which is the single most common way an epic ends\n"
+        "up cycling through QA. The oldest report is the likeliest to be undone this way, because\n"
+        "its findings are the furthest from anything currently in view. Before you finish, check\n"
+        "your own changes against them, and where one of those findings has no test guarding it,\n"
+        "add one as part of this session's work.\n\n"
     )
 
 
