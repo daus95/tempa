@@ -515,8 +515,11 @@ def _print_session_plan(config: dict, features_override: int | None = None) -> N
     if features_per_session:
         print(f"  (Max {features_per_session} feature(s) per session)", flush=True)
 
+    # Not shown once the epic has passed QA: a report is written on every round now, a passing
+    # one included (it carries that round's non-blocking advisory notes), so its mere existence
+    # no longer means there is anything left to fix.
     qa_report_filename = target.get("qa_report_filename", "")
-    if qa_report_filename and Path(qa_report_filename).exists():
+    if qa_report_filename and not target.get("qa_passed") and Path(qa_report_filename).exists():
         print(f"  ⚠ QA FINDINGS — must be fixed: {qa_report_filename}", flush=True)
 
 

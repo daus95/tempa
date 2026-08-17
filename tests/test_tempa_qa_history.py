@@ -12,6 +12,7 @@ from tempa_qa_history import (
     append_reset_marker,
     detect_qa_loop,
     format_qa_history,
+    last_report_path,
     record_qa_round,
 )
 
@@ -62,6 +63,57 @@ def test_record_qa_round_keeps_only_the_newest_entries_but_keeps_counting_rounds
     history = epic["qa_history"]
     assert len(history) == _MAX_HISTORY
     assert [entry["round"] for entry in history] == list(range(4, _MAX_HISTORY + 4))
+
+
+def test_recording_the_same_report_twice_replaces_the_round_rather_than_adding_one():
+    """One report file is one QA round. A second record for the same report is that round being
+    written down twice, not the epic failing again."""
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"], report="r1.md")
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1", "F2"], report="r1.md")
+
+    assert len(epic["qa_history"]) == 1
+    assert epic["qa_history"][0]["round"] == 1
+    # The later call wins — it is the runner's own, authoritative record of the round.
+    assert epic["qa_history"][0]["failed"] == ["F1", "F2"]
+
+
+def test_rounds_without_a_report_still_append():
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"])
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F2"])
+
+    assert [entry["round"] for entry in epic["qa_history"]] == [1, 2]
+
+
+def test_a_reset_marker_is_never_swallowed_by_the_duplicate_check():
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"], report="r1.md")
+    append_reset_marker(epic)
+
+    assert [entry["verdict"] for entry in epic["qa_history"]] == [VERDICT_FAIL, VERDICT_RESET]
+
+
+def test_an_agent_written_entry_for_the_running_round_is_absorbed_not_duplicated():
+    """The failure seen in the wild: a QA agent appended its own qa_history entry — for the very
+    round it was still working on — straight into config.json, and the runner then recorded that
+    same round properly. The epic ended up with two identical rounds pointing at one report file,
+    which is the exact fingerprint the guard reads as an epic going in circles."""
+    epic = _epic()
+    for failed, report in [(["F1", "F2", "F3"], "r1.md"), (["F4"], "r2.md")]:
+        record_qa_round(epic, VERDICT_FAIL, failed_ids=failed, report=report)
+
+    # What the agent wrote by hand, invented timestamp and all.
+    epic["qa_history"].append({
+        "round": 3, "verdict": VERDICT_FAIL, "failed": ["F4", "F5"],
+        "report": "r3.md", "at": "2026-08-17T09:15:00",
+    })
+    # ...and then the runner records the same round, as it always does.
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F4", "F5"], report="r3.md")
+
+    assert len(epic["qa_history"]) == 3
+    assert [entry["round"] for entry in epic["qa_history"]] == [1, 2, 3]
+    assert "round 4" not in format_qa_history(epic)
 
 
 # --- the scenario this guard exists for -----------------------------------------------
@@ -139,6 +191,63 @@ def test_empty_failure_sets_never_trip_a_pattern_rule():
 
 def test_no_history_at_all_is_not_a_loop():
     assert detect_qa_loop(_epic(), STRIKES, MAX_FAILS) is None
+
+
+def test_a_round_that_flagged_nothing_is_not_evidence_a_feature_was_re_verified():
+    """Both pattern rules key off a feature being ABSENT from a round in between, read as "QA
+    looked and was satisfied". A round that flagged nothing at all didn't look at anything — its
+    empty set makes every feature appear re-verified, so one round of missing bookkeeping would
+    otherwise read as a wholesale regression. The plain fail-round backstop still bounds it."""
+    epic = _epic()
+    verdicts = _play(epic, [["F1", "F2"], [], ["F1", "F2"], [], ["F1", "F2"]])
+
+    assert verdicts == [None] * 5
+    assert epic["qa_loop_strikes"] == 0
+
+
+def test_a_real_round_in_between_is_still_evidence():
+    """The counterpart to the test above — the guard must not have been defanged: a round that
+    genuinely flagged something else in between is what a regression looks like."""
+    epic = _epic()
+    verdicts = _play(epic, [["F1", "F2"], ["F3"], ["F1", "F2"], ["F3"]])
+
+    assert verdicts[3] is not None
+    assert "cycling through QA" in verdicts[3]
+
+
+# --- last_report_path -----------------------------------------------------------------
+
+
+def test_last_report_path_returns_the_newest_round_that_wrote_one():
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"], report="r1.md")
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F2"], report="r2.md")
+
+    assert last_report_path(epic) == "r2.md"
+
+
+def test_last_report_path_skips_reset_markers_and_reportless_rounds():
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"], report="r1.md")
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F2"])
+    append_reset_marker(epic)
+
+    assert last_report_path(epic) == "r1.md"
+
+
+def test_last_report_path_can_exclude_the_round_being_started():
+    """A resumed QA session reuses the previous file name, and a round must not be pointed at its
+    own half-written report as though it were a finished earlier one."""
+    epic = _epic()
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F1"], report="r1.md")
+    record_qa_round(epic, VERDICT_FAIL, failed_ids=["F2"], report="r2.md")
+
+    assert last_report_path(epic, exclude="r2.md") == "r1.md"
+
+
+def test_last_report_path_with_no_history():
+    assert last_report_path(_epic()) == ""
+    assert last_report_path({}) == ""
 
 
 # --- the pattern-free backstop --------------------------------------------------------
