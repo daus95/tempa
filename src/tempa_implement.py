@@ -414,6 +414,11 @@ def _resume_answered_decisions(config: dict) -> bool:
         if epic.get("status") == EPIC_DEFERRED:
             epic["status"] = "require_fixing"
         epic.pop("blocked_reason", None)
+        # A fresh grace period, for the same reason _repair_qa_state_desync gives itself one: the
+        # rounds counted before the epic was parked were spent on a question that has now been
+        # answered. Carrying that count over means an epic deferred at no_progress_rounds=1 gets
+        # exactly one round to act on the decision before the stall guard fails it.
+        epic["no_progress_rounds"] = 0
         changed = True
         label = epic.get("epic_name", "?")
         ids = ", ".join(f.get("id", "?") for f in answered)

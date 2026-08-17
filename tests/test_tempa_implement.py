@@ -706,6 +706,18 @@ def test_an_answered_decision_puts_the_epic_back_in_the_queue(isolate_tempa_path
     assert epic["features"][1]["blocked_answer"] == "Descope it, per your recommendation."
 
 
+def test_an_answered_decision_gets_a_fresh_grace_period(isolate_tempa_paths):
+    """The rounds counted before the epic was parked were spent on a question that has now been
+    answered — carrying that count over gives it one round to act on the decision before the
+    stall guard fails it."""
+    config = {"epic": [_deferred_epic(answer="Descope it.")]}
+    config["epic"][0]["no_progress_rounds"] = 1
+
+    ti._resume_answered_decisions(config)
+
+    assert config["epic"][0]["no_progress_rounds"] == 0
+
+
 def test_an_answered_decision_clears_the_stale_question_off_the_epic(isolate_tempa_paths):
     config = {"epic": [_deferred_epic(answer="Descope it.")]}
     config["epic"][0]["blocked_reason"] = "Migrate, or descope?"
