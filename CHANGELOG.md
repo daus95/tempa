@@ -42,6 +42,27 @@ once the first tagged release is cut.
 
 ### Changed
 
+- **A stalled round's own conclusion is carried into the next one, as a claim to check.** A
+  session that spends its round working out why it can't finish had nowhere to put that: it went
+  into the closing message, the runner scraped six lines of it for the human, and the next round
+  started from nothing and worked it out again. One epic spent four consecutive rounds
+  re-deriving the same conclusion, each ending in a longer restatement than the last — and
+  `--reset-failed` then dropped the session id too, so the retry began with *less* than the round
+  before it. Every stalled round now records `last_round_note` (cleared as soon as a round
+  completes a feature), `--reset-failed` deliberately keeps it, and the next prompt carries it —
+  explicitly as a claim to verify rather than a finding, because on that same epic the first
+  three rounds' stated blockers were wrong, disproved by the fourth. The prompt names the two
+  acceptable outcomes: disprove it and get on with the work, or confirm it and record it through
+  the blocked-feature rule so it reaches a human.
+- **`blocked_reason` now quotes what the agent said, not what its tools printed.** It was the
+  last six non-empty lines of the session log, which cannot be made to work: a tool result is
+  written as one `[Result] ...` chunk whose own content may span lines, and those continuation
+  lines carry no marker, so a log tail is not separable into "what the agent said" and "what its
+  last command printed". One epic's stored reason — the whole of what the dashboard's Halted
+  panel displays — opened with a psql table header and `(0 rows)`; another's with an Edit tool's
+  success message. The closing prose is now captured off the event stream while the session runs,
+  with the log tail kept as the fallback for a session that produced no prose at all.
+
 - **A fix session is now told when its QA report has gone out of date.** An epic is only re-QA'd
   once it is `done` again, so one finding nobody can close keeps it in `require_fixing` and the
   *same* report is handed to every following round — verbatim, and still labelled "All ❌ and ⚠️

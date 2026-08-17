@@ -29,6 +29,7 @@ def reset_runner_state():
         tso._state.server_overloaded_hit = False
         tso._state.backend_stuck_after_done_hit = False
         tso._state.background_tasks_terminated_hit = False
+        tso._state.last_agent_message = ""
         tso._state.stop_event.clear()
     _clear()
     yield
@@ -511,3 +512,65 @@ def test_an_ordinary_out_of_order_dependency_still_reorders(tmp_path):
 
     assert tso._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-17") is None
     assert [e["epic_name"] for e in config["epic"]] == ["EPIC-17", "EPIC-04"]
+
+
+# ---------------------------------------------------------------------------
+# last_round_note — carrying a stalled round's own conclusion to the next one
+# ---------------------------------------------------------------------------
+
+def test_a_stalled_round_records_its_own_conclusion_before_the_limit(tmp_path):
+    """Recorded on EVERY stalled round, not only the one that trips the limit — otherwise the
+    round that actually worked the blocker out leaves nothing behind for the next one."""
+    tso._state.last_agent_message = "m11.workflow.levels has no per-key merge."
+    _write_config([_epic(no_progress_rounds=0)], implement_no_progress_rounds=3)
+
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    saved = _saved_epic()
+    assert saved["last_round_note"] == "m11.workflow.levels has no per-key merge."
+    assert saved["status"] == "on_progress"          # not at the limit yet
+
+
+def test_a_round_that_makes_progress_clears_the_stale_note(tmp_path):
+    """It describes a state this round just moved past — carrying it on would argue against work
+    that has already happened."""
+    tso._state.last_agent_message = "all good"
+    _write_config([_epic(completed_features=2, last_round_note="blocked on X")])
+
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    assert "last_round_note" not in _saved_epic()
+
+
+def test_the_halt_reason_quotes_what_the_agent_said_not_what_its_tools_printed(tmp_path):
+    """blocked_reason is the whole of what the dashboard's Halted panel shows. Tailing the log
+    for it put a psql table header and `(0 rows)` in one epic's reason, and an Edit tool's
+    success message in another's — a tool result is logged as one chunk whose content spans
+    lines that carry no marker, so the log tail cannot be separated back out."""
+    log_path = tmp_path / "session.txt"
+    log_path.write_text(
+        "[Result]  table_name \n------------\n(0 rows)\n"
+        "Nothing has changed since last session.\n[Done] turns=3\n",
+        encoding="utf-8",
+    )
+    tso._state.last_agent_message = "Nothing has changed since last session."
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+
+    _apply(exit_code=0, completed_before=1, log_path=log_path)
+
+    reason = _saved_epic()["blocked_reason"]
+    assert reason.startswith("Nothing has changed since last session.")
+    assert "(0 rows)" not in reason
+
+
+def test_the_halt_reason_falls_back_to_the_log_when_nothing_was_captured(tmp_path):
+    """A session that produced no prose at all still beats an empty Halted panel."""
+    log_path = tmp_path / "session.txt"
+    log_path.write_text("some closing words\n[Done] turns=1\n", encoding="utf-8")
+    tso._state.last_agent_message = ""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+
+    _apply(exit_code=0, completed_before=1, log_path=log_path)
+
+    assert "some closing words" in _saved_epic()["blocked_reason"]
+

@@ -29,6 +29,7 @@ def reset_runner_state():
         tsr._state.server_overloaded_hit = False
         tsr._state.backend_stuck_after_done_hit = False
         tsr._state.background_tasks_terminated_hit = False
+        tsr._state.last_agent_message = ""
         tsr._state.stop_event.clear()
     _clear()
     yield

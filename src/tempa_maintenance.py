@@ -405,6 +405,12 @@ def reset_failed_epics(config: dict) -> list[str]:
             append_reset_marker(session)
             session.pop("blocked_reason", None)
             session.pop("blocked_by_epic", None)
+            # `last_round_note` is deliberately NOT cleared. Everything above is a counter or a
+            # status that would re-trip its own limit on the retry; that note is the only thing
+            # the previous rounds actually learned, and dropping the session id just above
+            # already costs the retry its conversation. Clearing this too is what made a reset
+            # start with less than the round before it — the next prompt carries the note as a
+            # claim to check (see _last_round_note_block), which is exactly what a retry needs.
     return reset
 
 

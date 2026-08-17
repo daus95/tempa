@@ -64,7 +64,7 @@ from tempa_session_outcome import apply_session_outcome
 # provide, on an epic that was still moving.
 _RUNNER_OWNED_EPIC_KEYS = (
     "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
-    "no_progress_rounds", "qa_completed_features",
+    "no_progress_rounds", "qa_completed_features", "last_round_note",
 )
 
 _MISSING = object()
