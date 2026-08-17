@@ -78,6 +78,28 @@ once the first tagged release is cut.
 
 ### Fixed
 
+- **A circular epic dependency is caught as soon as it's declared, and says what to change.**
+  Epics run strictly in plan order, so two epics that depend on each other cannot be executed in
+  any order — but Tempa only noticed once it had been asked to reorder them in *both* directions,
+  which costs a round and a pointless reorder first. It now also refuses when the named epic has
+  itself recorded `blocked_by_epic` pointing back at the stuck one: the cycle stated outright in
+  config.json. Seen live: an epic whose last feature had to rewrite a second epic's code, while
+  that second epic sat with `"blocked_by_epic"` naming the first the entire time. Both cycle
+  branches now name the three things that actually resolve one (merge the epics; have the earlier
+  ship a permanent implementation the later only consumes; or move the replacement work into the
+  earlier epic) instead of leaving the reader to derive them from two epic specs and a log. The
+  plan and plan-review prompts rule cycles out at the point they're written, too — "bidirectional
+  with EPIC-02" is a cycle, not a dependency note.
+- **A principle conflict now has somewhere to go.** The Architecture Principles block told every
+  session to "report the conflict explicitly and stop" — which contradicted the autonomous system
+  prompt each session also gets ("FORBIDDEN: … stopping after analysis") and, worse, pointed
+  nowhere: a session that did exactly as told wrote the conflict into its closing prose, where the
+  runner could only read it as a round that completed no feature, and two of those failed the
+  epic. It now says to leave the conflicting work unbuilt and *record* the conflict through
+  whatever mechanism the prompt provides (in an implementation session, the blocked-feature rule),
+  and the system prompt says explicitly that recording such an outcome is not "stopping after
+  analysis".
+
 - **An epic is no longer failed a round early because the session wrote the stall counter
   itself.** `no_progress_rounds` is the runner's own tally of how many resumed sessions went by
   without a feature completing, but it was missing from the runner-owned fields that get

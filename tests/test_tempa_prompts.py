@@ -83,6 +83,22 @@ def test_principles_block_wraps_content(isolate_tempa_paths):
     assert "ARCHITECTURE PRINCIPLES" in block
 
 
+def test_principles_conflict_instruction_points_somewhere_that_reaches_a_human(isolate_tempa_paths):
+    """It used to end "report the conflict explicitly and stop" — which contradicted the
+    autonomous system prompt's "FORBIDDEN: … stopping after analysis" and, worse, pointed
+    nowhere: a session doing exactly as told wrote the conflict into its closing prose, which
+    the runner can only read as a round that completed no feature."""
+    path = tempa_config.get_principles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("Use dependency injection.", encoding="utf-8")
+
+    block = tp._principles_block()
+
+    assert "RECORD the conflict" in block
+    assert "does not reach anyone" in block
+    assert "and stop." not in block
+
+
 def test_build_prompt_no_principles_equals_substituted_template(isolate_tempa_paths):
     result = tp.build_prompt("Hello ${name}", {"name": "World"})
     assert result == "Hello World"

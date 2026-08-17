@@ -474,6 +474,46 @@ def test_a_blocked_feature_that_has_been_answered_is_not_still_waiting(tmp_path)
     assert _saved_epic()["status"] != "deferred"
 
 
+def test_reorder_catches_a_cycle_the_counterpart_already_declared(tmp_path):
+    """The cycle stated outright in config.json, before any reorder has been attempted: EPIC-02
+    records that it's blocked on EPIC-04 while EPIC-04 stalls claiming EPIC-02. Inferring this
+    from epic_reorder_history instead costs a round and a pointless reorder first."""
+    config = {"epic": [
+        {"epic_name": "EPIC-04", "status": "on_progress"},
+        {"epic_name": "EPIC-02", "status": "pending", "blocked_by_epic": "EPIC-04"},
+    ]}
+
+    result = tso._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-02")
+
+    assert result is not None and "circular dependency" in result
+    # Nothing was moved — a cycle has no safe ordering to move it into.
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-04", "EPIC-02"]
+
+
+def test_a_cycle_refusal_says_what_a_human_can_actually_change(tmp_path):
+    """No reordering satisfies "A before B" and "B before A", so this branch's answer is always a
+    plan change — and the options are short and knowable, so they belong in the message that
+    stops the run rather than in two epic specs and a log."""
+    config = {"epic": [
+        {"epic_name": "EPIC-04", "status": "on_progress"},
+        {"epic_name": "EPIC-02", "status": "pending", "blocked_by_epic": "EPIC-04"},
+    ]}
+
+    result = tso._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-02")
+
+    assert "merge them into a single epic" in result
+    assert "permanent implementation" in result
+    assert "blocked_by_epic" in result
+
+
+def test_an_ordinary_out_of_order_dependency_still_reorders(tmp_path):
+    """The cycle checks must not swallow the common case they sit in front of."""
+    config = {"epic": _epics(("EPIC-04", "on_progress"), ("EPIC-17", "pending"))}
+
+    assert tso._try_reorder_for_dependency(config, stuck_index=0, blocked_by_epic="EPIC-17") is None
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-17", "EPIC-04"]
+
+
 # ---------------------------------------------------------------------------
 # last_round_note — carrying a stalled round's own conclusion to the next one
 # ---------------------------------------------------------------------------
@@ -533,3 +573,4 @@ def test_the_halt_reason_falls_back_to_the_log_when_nothing_was_captured(tmp_pat
     _apply(exit_code=0, completed_before=1, log_path=log_path)
 
     assert "some closing words" in _saved_epic()["blocked_reason"]
+
