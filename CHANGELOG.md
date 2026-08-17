@@ -8,6 +8,23 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A halted epic never said how to get it moving again.** When a guard gives up on an epic,
+  the dashboard's ⚠ Halted panel shows that epic's `blocked_reason` and nothing else — but
+  the remediation was only ever written to the log line beside it, so the one place a user
+  actually reads about the halt didn't mention that clicking **Continue Implementation**
+  recovers it (that button has always run `--reset-failed` itself before every implementation
+  pass). Every guard now appends the way out to `blocked_reason`, dashboard route first, so
+  it appears both on the epic card and in `tempa status`.
+- **Three of the five ways an epic can fail wrote no `blocked_reason` at all.** Hitting
+  `max_session_run`, QA hitting the same limit without ever passing, and an implementation
+  session exiting non-zero all marked the epic `failed` and left it at that — on the Status
+  tab it showed up as a bare red ✗ with no cause and no next step anywhere, the explanation
+  being buried in the process log. All three now record what happened (including, for the QA
+  limit, the fact that the epic was marked failed rather than passed *because it has never
+  been verified*) alongside how to retry.
+
 ## [0.6.9] - 2026-08-17
 
 ### Fixed

@@ -279,6 +279,19 @@ def test_a_nonzero_exit_marks_the_epic_failed_and_stops_the_run(tmp_path):
     assert tso._state.stop_event.is_set()
 
 
+def test_a_nonzero_exit_says_why_and_how_to_retry_on_the_epic(tmp_path):
+    """This path used to set the status alone. The dashboard's Halted panel renders
+    blocked_reason and nothing else, so the epic showed up as a bare red ✗ with the exit code
+    and the log name buried in the process log."""
+    _write_config([_epic()])
+    _apply(exit_code=1, tmp_path=tmp_path)
+
+    reason = _saved_epic()["blocked_reason"]
+    assert "exited with code 1" in reason
+    assert "session.txt" in reason
+    assert "Continue Implementation" in reason
+
+
 @pytest.mark.parametrize("flag", [
     "usage_limit_hit", "auth_error_hit", "server_overloaded_hit", "backend_stuck_after_done_hit",
 ])
@@ -356,7 +369,10 @@ def test_hitting_the_limit_with_no_way_forward_fails_the_epic(tmp_path):
     _apply(exit_code=0, completed_before=1, log_path=log_path)
     saved = _saved_epic()
     assert saved["status"] == "failed"
-    assert saved["blocked_reason"] == "waiting on something external"
+    assert saved["blocked_reason"].startswith("waiting on something external")
+    # blocked_reason is the whole of what the dashboard's Halted panel shows, so it has to
+    # carry the way out too — not just the diagnosis.
+    assert "Continue Implementation" in saved["blocked_reason"]
     assert tso._state.stop_event.is_set()
 
 

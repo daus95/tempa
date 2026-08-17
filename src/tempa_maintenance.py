@@ -342,6 +342,32 @@ def reconcile_qa_passed_features_and_log(config: dict) -> bool:
     return bool(repaired)
 
 
+# How a human gets a halted epic moving again, appended to every `blocked_reason` a guard
+# writes. That string is the entirety of what the dashboard's Halted panel and `tempa status`
+# show for a failed epic; the remediation used to live only in the log line written beside it,
+# so the one place a user actually reads about the halt never said what to do about it. The
+# dashboard route comes first because it needs no terminal at all: Continue Implementation runs
+# `--reset-failed` itself before every implement pass (see dashboard_runs._implement_run_worker),
+# so the button a user is already looking at is the whole recovery path.
+RETRY_HINT = (
+    "To retry: resolve what's described above, then click Continue Implementation on the "
+    "dashboard — it resets failed epics for you. From a terminal, `tempa implement "
+    "--reset-failed` does the same thing."
+)
+
+
+def with_retry_hint(reason: str) -> str:
+    """`reason` with RETRY_HINT appended — the standard shape of a `blocked_reason`.
+
+    Idempotent, so a reason that is decorated and then passed through again (e.g.
+    _reason_with_counterpart_context folding one epic's stored reason into another's) doesn't
+    accumulate the hint twice."""
+    reason = (reason or "").rstrip()
+    if RETRY_HINT in reason:
+        return reason
+    return f"{reason}\n\n{RETRY_HINT}" if reason else RETRY_HINT
+
+
 def reset_failed_epics(config: dict) -> list[str]:
     """Flip every `failed` epic in `config` back to `pending` for a genuine clean-slate retry
     — dropping its stored session id (so the next attempt starts a fresh session) AND its
