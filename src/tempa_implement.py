@@ -35,6 +35,7 @@ from tempa_maintenance import (
     _epic_features_actually_done,
     reconcile_qa_passed_features_and_log,
     reset_failed_epics,
+    with_retry_hint,
 )
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
@@ -68,6 +69,11 @@ def _validate_and_increment_run(config: dict, index: int, label: str) -> bool:
             "Marking it failed — run `tempa implement --reset-failed` (or just click Continue "
             "Implementation again, which does this automatically) to reset it and retry.")
         config["epic"][index]["status"] = "failed"
+        config["epic"][index]["blocked_reason"] = with_retry_hint(
+            f"Reached the max_session_run limit ({max_run}): that many implementation sessions "
+            "have run for this epic without it finishing. Raise max_session_run if the epic is "
+            "simply large, or look at why its sessions aren't completing it."
+        )
         save_config(config)
         notify_attention(
             AttentionEventType.SESSION_LIMIT_REACHED, "Implementation",
@@ -105,6 +111,11 @@ def _validate_and_increment_qa_run(config: dict, index: int, label: str) -> bool
         config["epic"][index]["status"] = "failed"
         config["epic"][index]["qa_status"] = "idle"
         config["epic"][index]["qa_passed"] = False
+        config["epic"][index]["blocked_reason"] = with_retry_hint(
+            f"QA reached the max_session_run limit ({max_run}) without ever passing. Marked "
+            "failed rather than passed unverified — this epic has never been QA-verified. "
+            "Review its QA reports for what keeps failing."
+        )
         notify_attention(
             AttentionEventType.QA_LIMIT_REACHED, "QA",
             f"{label} QA reached its session limit",

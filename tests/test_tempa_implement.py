@@ -335,6 +335,17 @@ def test_validate_and_increment_run_marks_epic_failed_and_persists_when_limit_re
     assert tempa_config.load_config()["epic"][0]["status"] == "failed"
 
 
+def test_hitting_the_session_limit_explains_itself_on_the_epic(isolate_tempa_paths):
+    """The dashboard's Halted panel renders blocked_reason and nothing else, so failing without
+    one left the epic a bare red ✗ — no cause, no next step, anywhere on the Status tab."""
+    config = {"max_session_run": 30, "epic": [{"epic_name": "e1", "status": "on_progress", "total_run": 30}]}
+    ti._validate_and_increment_run(config, 0, "e1")
+
+    reason = config["epic"][0]["blocked_reason"]
+    assert "max_session_run" in reason
+    assert "Continue Implementation" in reason
+
+
 # ---------------------------------------------------------------------------
 # _validate_and_increment_qa_run
 # ---------------------------------------------------------------------------
@@ -354,6 +365,11 @@ def test_validate_and_increment_qa_run_marks_epic_failed_instead_of_passing_it_a
     assert ti._validate_and_increment_qa_run(config, 0, "e1") is False
     assert config["epic"][0]["status"] == "failed"
     assert config["epic"][0]["qa_passed"] is False
+    # And it says so on the epic, where the dashboard will show it: "never verified" is the
+    # part a human must not miss, since a failed-at-the-limit epic looks a lot like a passed one.
+    reason = config["epic"][0]["blocked_reason"]
+    assert "never been QA-verified" in reason
+    assert "Continue Implementation" in reason
 
 
 def test_validate_and_increment_qa_run_clears_qa_status_and_stops_the_runner_at_the_limit():

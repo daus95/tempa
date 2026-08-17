@@ -338,6 +338,14 @@ never stop the next run before it does any work.
 
 ## Recovery (if something goes wrong)
 
+**From the dashboard, there is nothing to type.** Every epic that a guard halts carries a
+`blocked_reason` — what stopped it and how to get it moving again — and the Status tab renders
+that as the red **⚠ Halted** panel on the epic's card. The way out is always the same:
+resolve what the panel describes, then click **Continue Implementation**, which runs
+`tempa implement --reset-failed` for you before every implementation pass (see
+`dashboard_runs._implement_run_worker`). The CLI below is the same recovery for people who
+prefer a terminal, not a second thing that has to happen.
+
 ```bash
 tempa implement --reset          # epic on_progress → pending (clears session_id)
 tempa implement --reset-failed   # all failed epics → pending (run this after fixing a real failure;

@@ -20,7 +20,7 @@ from pathlib import Path
 from tempa_backend import Backend
 from tempa_config import load_config, save_config
 from tempa_logging import _state, log
-from tempa_maintenance import _epic_features_actually_done
+from tempa_maintenance import _epic_features_actually_done, with_retry_hint
 from tempa_notifications import AttentionEventType, notify_attention
 
 
@@ -211,7 +211,7 @@ def _fail_blocked_epic(config: dict, epic: dict, session_label: str, reason: str
     """Nothing could be fixed automatically: the epic is very likely blocked on something
     outside itself, so fail it and stop the runner for a human to look at."""
     reason = _reason_with_counterpart_context(reason, config["epic"], blocked_by_epic)
-    epic["blocked_reason"] = reason
+    epic["blocked_reason"] = with_retry_hint(reason)
     epic["status"] = "failed"
     save_config(config)
     log(
@@ -300,6 +300,13 @@ def apply_session_outcome(
         # Only mark failed — "done"/"pending" is set by the AI session itself
         config = load_config()
         config["epic"][index]["status"] = "failed"
+        # A reason as well as the status: blocked_reason is the whole of what the dashboard's
+        # Halted panel shows, so failing without one left the epic as a bare red ✗ with no
+        # explanation and no next step anywhere on the Status tab.
+        config["epic"][index]["blocked_reason"] = with_retry_hint(
+            f"The implementation session exited with code {exit_code}. Its log has what went "
+            f"wrong: {log_path.name}"
+        )
         save_config(config)
         log(f"Session [{session_label}] marked as failed")
         notify_attention(

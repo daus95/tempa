@@ -33,7 +33,7 @@ from tempa_config import (
 )
 from tempa_git import commit_workspace_changes
 from tempa_logging import _print_log_tail, _state, log
-from tempa_maintenance import reconcile_qa_passed_features_and_log
+from tempa_maintenance import reconcile_qa_passed_features_and_log, with_retry_hint
 from tempa_notifications import AttentionEventType, notify_attention
 from tempa_qa_history import VERDICT_FAIL, VERDICT_PASS, detect_qa_loop, record_qa_round
 from tempa_session import _run_backend_session, _session_feature_lines
@@ -272,7 +272,7 @@ def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, l
         return
 
     epic["status"] = "failed"
-    epic["blocked_reason"] = reason
+    epic["blocked_reason"] = with_retry_hint(reason)
     save_config(config)
     log(f"QA [{session_label}] — {reason}\n"
         "Review the QA reports listed above, fix the underlying conflict between them, then run "

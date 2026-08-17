@@ -243,6 +243,9 @@ def test_record_qa_verdict_fails_the_epic_and_stops_the_runner_on_a_detected_loo
 
     assert epic["status"] == "failed"
     assert "cycling through QA" in epic["blocked_reason"]
+    # blocked_reason is all the dashboard's Halted panel shows, so the way out rides along with
+    # the diagnosis — it used to be only in the log line written beside it.
+    assert "Continue Implementation" in epic["blocked_reason"]
     assert tsr._state.stop_event.is_set()
     notify.assert_called_once()
 

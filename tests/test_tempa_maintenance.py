@@ -298,6 +298,30 @@ def test_reconcile_qa_passed_features_and_log_reports_change(capsys):
 
 
 # ---------------------------------------------------------------------------
+# with_retry_hint
+# ---------------------------------------------------------------------------
+
+def test_with_retry_hint_appends_the_way_out():
+    reason = tm.with_retry_hint("Something went wrong.")
+    assert reason.startswith("Something went wrong.")
+    # The dashboard route is the one that matters: a general user shouldn't need a terminal.
+    assert "Continue Implementation" in reason
+    assert "--reset-failed" in reason
+
+
+def test_with_retry_hint_is_idempotent():
+    """Reasons get folded into one another (see _reason_with_counterpart_context), so the hint
+    must not stack up each time one passes through."""
+    once = tm.with_retry_hint("Blocked.")
+    assert tm.with_retry_hint(once) == once
+
+
+def test_with_retry_hint_on_an_empty_reason_is_just_the_hint():
+    assert tm.with_retry_hint("") == tm.RETRY_HINT
+    assert tm.with_retry_hint(None) == tm.RETRY_HINT
+
+
+# ---------------------------------------------------------------------------
 # _reset_failed_epics / _reset_qa_state / _reset_on_progress_epics
 # ---------------------------------------------------------------------------
 
