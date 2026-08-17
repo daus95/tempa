@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-18
+
 ### Added
 
 - **Project logo**, shown in the README and as the dashboard's sidebar brand icon / browser
