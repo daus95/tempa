@@ -384,3 +384,90 @@ def test_a_done_epic_is_left_alone(tmp_path):
     saved = _saved_epic()
     assert saved["status"] == "done"
     assert saved["no_progress_rounds"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Deferral — a feature that needs a decision only the user can make
+# ---------------------------------------------------------------------------
+
+def _blocked_feature(fid="F2", **overrides):
+    feature = {"id": fid, "name": "Workflow engine migration", "status": "blocked",
+               "blocked_question": "Migrate onto the shared engine, or descope it?",
+               "blocked_recommendation": "Descope — the merge semantics need fixing first.",
+               "blocked_answer": ""}
+    feature.update(overrides)
+    return feature
+
+
+def test_a_blocked_feature_that_is_all_thats_left_defers_instead_of_failing(tmp_path):
+    """The case this whole path exists for: the session did its job and the honest answer is
+    "someone has to choose". Failing that is what stopped a whole run overnight."""
+    _write_config(
+        [_epic(completed_features=1, total_features=2,
+               features=[{"id": "F1", "status": "done"}, _blocked_feature()])],
+        implement_no_progress_rounds=2,
+    )
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    saved = _saved_epic()
+    assert saved["status"] == "deferred"
+    assert "Migrate onto the shared engine" in saved["blocked_reason"]
+    # The recommendation travels with the question — "yes, do that" is the common answer, and
+    # having to open a log to find out what was suggested is what defers a decision for days.
+    assert "Descope" in saved["blocked_reason"]
+    assert "blocked_answer" in saved["blocked_reason"]
+
+
+def test_deferring_never_stops_the_runner(tmp_path):
+    """The point of deferring rather than failing: later epics that have nothing to do with the
+    question keep getting built while it waits."""
+    _write_config(
+        [_epic(completed_features=1, total_features=2,
+               features=[{"id": "F1", "status": "done"}, _blocked_feature()])],
+    )
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    assert not tso._state.stop_event.is_set()
+
+
+def test_deferral_does_not_wait_for_the_stall_limit(tmp_path):
+    """Resuming twice more to re-confirm a question already sitting with the user is pure waste
+    — and each of those rounds completes no feature, so it would end in `failed`, not `deferred`."""
+    _write_config(
+        [_epic(completed_features=1, total_features=2, no_progress_rounds=0,
+               features=[{"id": "F1", "status": "done"}, _blocked_feature()])],
+        implement_no_progress_rounds=3,
+    )
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    assert _saved_epic()["status"] == "deferred"
+
+
+def test_an_epic_with_other_work_left_is_not_deferred_by_one_blocked_feature(tmp_path):
+    """Features 3+ don't stop being buildable because feature 2 needs a decision — and the stall
+    counter keeps running, so this can't be used to park an epic that still has work in it."""
+    _write_config(
+        [_epic(completed_features=1, total_features=3, no_progress_rounds=0,
+               features=[{"id": "F1", "status": "done"}, _blocked_feature(),
+                         {"id": "F3", "status": "pending"}])],
+        implement_no_progress_rounds=2,
+    )
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    saved = _saved_epic()
+    assert saved["status"] == "on_progress"
+    assert saved["no_progress_rounds"] == 1
+
+
+def test_a_blocked_feature_that_has_been_answered_is_not_still_waiting(tmp_path):
+    """An answered feature is work, not a question — it must not re-defer the epic on the round
+    that was about to act on it."""
+    _write_config(
+        [_epic(completed_features=1, total_features=2, no_progress_rounds=1,
+               features=[{"id": "F1", "status": "done"},
+                         _blocked_feature(blocked_answer="Descope it, per your recommendation.")])],
+        implement_no_progress_rounds=2,
+    )
+    _apply(exit_code=0, completed_before=1, tmp_path=tmp_path)
+
+    assert _saved_epic()["status"] != "deferred"

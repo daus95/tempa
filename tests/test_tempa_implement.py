@@ -637,3 +637,109 @@ def test_main_reports_a_real_failure_even_with_a_graceful_stop_pending(
         ti.main()
 
     assert exc.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Deferred epics — the runner moves past a question instead of stopping on it
+# ---------------------------------------------------------------------------
+
+def _deferred_epic(name="EPIC-04", answer=""):
+    return {
+        "epic_name": name, "status": "deferred", "qa_passed": False, "qa_status": "done",
+        "completed_features": 1, "total_features": 2,
+        "features": [
+            {"id": "F1", "status": "done"},
+            {"id": "F2", "name": "Engine migration", "status": "blocked",
+             "blocked_question": "Migrate, or descope?",
+             "blocked_recommendation": "Descope for now.",
+             "blocked_answer": answer},
+        ],
+    }
+
+
+def test_qa_gate_does_not_park_a_later_epic_behind_a_deferred_one(isolate_tempa_paths, monkeypatch):
+    """A deferred epic has QA's own fingerprint (qa_status=done + qa_passed=false) but will never
+    re-implement on its own — it is waiting on a human, which is exactly why the runner was let
+    past it. Deferring every later epic behind it would spin forever and undo the deferral."""
+    tempa_config.save_config({"epic": [
+        _deferred_epic(),
+        {"epic_name": "EPIC-05", "status": "done", "qa_passed": False,
+         "completed_features": 1, "total_features": 1,
+         "features": [{"id": "F1", "status": "done"}]},
+    ]})
+    started = []
+    monkeypatch.setattr(ti, "run_qa_session", lambda *a, **k: started.append(a))
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    assert started, "EPIC-05's QA must run even though EPIC-04 is deferred"
+
+
+def test_a_deferred_epic_is_not_picked_up_as_work(isolate_tempa_paths, monkeypatch):
+    """`deferred` is not a status _start_next_epic selects, so the epic sits out until answered
+    — and with nothing else in the plan the runner stops cleanly rather than spinning on it."""
+    tempa_config.save_config({"epic": [_deferred_epic()]})
+    monkeypatch.setattr(ti, "run_session",
+                        lambda *a, **k: pytest.fail("a deferred epic was started"))
+    monkeypatch.setattr(ti, "run_qa_session",
+                        lambda *a, **k: pytest.fail("a deferred epic was sent to QA"))
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    assert tempa_config.load_config()["epic"][0]["status"] == "deferred"
+
+
+def test_an_answered_decision_puts_the_epic_back_in_the_queue(isolate_tempa_paths):
+    config = {"epic": [_deferred_epic(answer="Descope it, per your recommendation.")]}
+
+    assert ti._resume_answered_decisions(config) is True
+
+    epic = config["epic"][0]
+    assert epic["status"] == "require_fixing"
+    assert epic["features"][1]["status"] == "require_fixing"
+    # The answer stays put: the session that picks the epic up is handed it, and it remains the
+    # record of what was decided long after the round that acted on it.
+    assert epic["features"][1]["blocked_answer"] == "Descope it, per your recommendation."
+
+
+def test_an_answered_decision_clears_the_stale_question_off_the_epic(isolate_tempa_paths):
+    config = {"epic": [_deferred_epic(answer="Descope it.")]}
+    config["epic"][0]["blocked_reason"] = "Migrate, or descope?"
+
+    ti._resume_answered_decisions(config)
+
+    assert "blocked_reason" not in config["epic"][0]
+
+
+def test_an_unanswered_decision_is_left_deferred(isolate_tempa_paths):
+    config = {"epic": [_deferred_epic()]}
+
+    assert ti._resume_answered_decisions(config) is False
+    assert config["epic"][0]["status"] == "deferred"
+
+
+def test_a_deferred_epic_still_counts_as_unfinished_plan(isolate_tempa_paths):
+    """_has_pending_work drives main()'s "no task left, draft a new plan" branch. Reporting a
+    deferred epic as nothing-left would re-plan the whole project out from under a question."""
+    assert ti._has_pending_work({"epic": [_deferred_epic()]}) is True
+
+
+def test_running_out_of_work_with_a_question_open_does_not_claim_everything_is_done(
+    isolate_tempa_paths, capsys,
+):
+    config = {"epic": [_deferred_epic()]}
+    assert ti._log_deferred_epics_on_stop(config) is True
+
+    out = capsys.readouterr().out
+    assert "Migrate, or descope?" in out
+    assert "blocked_answer" in out
+
+
+def test_running_out_of_work_with_nothing_deferred_says_nothing(isolate_tempa_paths):
+    assert ti._log_deferred_epics_on_stop({"epic": [
+        {"epic_name": "EPIC-01", "status": "done", "qa_passed": True},
+    ]}) is False
