@@ -109,6 +109,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/spec-guide": "_serve_spec_guide",
         "/api/tree": "_handle_tree",
         "/api/spec/file": "_handle_spec_file",
+        "/api/epic/spec": "_handle_epic_spec_file",
         "/api/clarify/file": "_handle_clarify_file",
         "/api/clarify/run": "_handle_clarify_run_status",
         "/api/implement/run": "_handle_implement_run_status",
@@ -160,6 +161,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def _handle_spec_file(self) -> None:
         self._send_json(*dashboard_api_spec.read_file(
             self.server.prd_dir, self.query.get("path", [""])[0]))
+
+    def _handle_epic_spec_file(self) -> None:
+        self._send_json(*dashboard_api_spec.read_epic_spec(
+            self.server.epics_dir, self.query.get("epic", [""])[0]))
 
     def _handle_clarify_file(self) -> None:
         self._send_json(*dashboard_api_clarify.read_file(
@@ -216,6 +221,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/config/save": "_handle_config_save",
         "/api/notifications/test-email": "_handle_test_email",
         "/api/principles/save": "_handle_principles_save",
+        "/api/epic/spec/save": "_handle_epic_spec_save",
         "/api/update/run": "_handle_update_run",
         "/api/server/restart": "_handle_server_restart",
         "/api/verify/run": "_handle_verify_run_start",
@@ -443,6 +449,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_principles_save(self) -> None:
         self._send_json(*dashboard_api_settings.save_principles(self._read_json_body()))
+
+    def _handle_epic_spec_save(self) -> None:
+        self._send_json(*dashboard_api_spec.save_epic_spec(
+            self.server.epics_dir, self._read_json_body()))
 
     def _handle_update_run(self) -> None:
         self._send_json(*dashboard_api_workspace.run_update(self.server.clarify_run["running"], self.server.implement_run["running"]))

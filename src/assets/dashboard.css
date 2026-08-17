@@ -215,9 +215,11 @@
     font-size: 0.85rem; line-height: 1.5; }
   .impl-feature-list { margin-top: 8px; padding-left: 4px; }
   .impl-feature-row { display: flex; gap: 8px; font-size: 0.85rem; padding: 2px 0; color: var(--text); }
-  .impl-epic-verify-btn { margin-left: auto; padding: 4px 12px; font-size: 0.8rem; border-radius: 6px;
+  .impl-epic-spec-btn, .impl-epic-verify-btn { padding: 4px 12px; font-size: 0.8rem; border-radius: 6px;
     border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); cursor: pointer; }
-  .impl-epic-verify-btn:hover { opacity: 0.9; border-color: var(--accent); }
+  .impl-epic-spec-btn { margin-left: auto; }
+  .impl-epic-spec-btn + .impl-epic-verify-btn { margin-left: 6px; }
+  .impl-epic-spec-btn:hover, .impl-epic-verify-btn:hover { opacity: 0.9; border-color: var(--accent); }
 
   /* ---- per-epic QA round history (tempa_qa_history.py) ---- */
   .qa-history { margin-top: 10px; }

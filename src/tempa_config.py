@@ -503,6 +503,16 @@ def resolve_clar_dir(config: dict) -> Path:
     return Path(get_sources(config)["clarifications"])
 
 
+def resolve_epics_dir(config: dict) -> Path:
+    """Return the absolute path of the epic-spec folder (sources.epics).
+
+    This is what QA reads an epic's requirements from, and it is a SIBLING of the PRD folder the
+    dashboard's Specification tree is rooted at — so nothing under it is reachable from that
+    tree. The dashboard reaches an epic's own spec through here instead, linked straight off the
+    epic's card (see dashboard_api_spec.read_epic_spec)."""
+    return Path(get_sources(config)["epics"])
+
+
 def _resolve_model_alias(value: str) -> str:
     """Map a friendly alias (e.g. "opus-5") to its full model id. If `value` is not
     a known alias, return it unchanged (assumed to already be a valid model id)."""

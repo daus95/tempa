@@ -266,7 +266,10 @@ function renderSpecNode(node, depth) {
   const row = document.createElement("div");
   row.className = "row";
   row.style.paddingLeft = (6 + depth * 15) + "px";
-  if (!isDir && !state.specShowingOverview && node.path === state.selectedSpecPath) row.classList.add("selected");
+  // ...and not while an epic spec is open: it isn't a row in this tree, so a PRD file that
+  // happens to share its name would otherwise light up as though it were the open one.
+  if (!isDir && !state.specShowingOverview && !state.selectedEpicSpec
+      && node.path === state.selectedSpecPath) row.classList.add("selected");
 
   const twist = document.createElement("span");
   twist.className = "twist" + (isDir ? "" : " hidden");

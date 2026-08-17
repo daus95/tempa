@@ -131,6 +131,11 @@ const state = {
   activeTop: INITIAL_VIEW,
   currentKind: null,          // null | "spec" | "clarify" — which file/toolbar is currently loaded
   selectedSpecPath: null,
+  // Set when the open file is an epic's own spec (reached from its card on the
+  // Implementation status list) rather than a file in the PRD tree. Those live in
+  // sources.epics, a sibling of the PRD folder the Specification tree is rooted at, so
+  // they are addressed by epic label and saved through their own endpoint.
+  selectedEpicSpec: null,
   isMarkdown: false,
   isText: false,
   specMode: "view",

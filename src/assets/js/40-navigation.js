@@ -19,7 +19,8 @@ function updateToolbar() {
     saveBtn.disabled = !state.specDirty || !state.isText;
     viewBtn.disabled = editBtn.disabled = !state.isText;
     filepathEl.textContent = "";
-    filepathEl.appendChild(document.createTextNode(PRD_NAME + "/" + state.selectedSpecPath));
+    filepathEl.appendChild(document.createTextNode(
+      (state.selectedEpicSpec ? "Epics" : PRD_NAME) + "/" + state.selectedSpecPath));
     if (state.specDirty) {
       const dot = document.createElement("span");
       dot.className = "dirty"; dot.innerHTML = iconSvg("circle", "filled") + " unsaved";
