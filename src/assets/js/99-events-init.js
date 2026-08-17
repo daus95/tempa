@@ -72,6 +72,30 @@ function toast(msg, isErr) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
 }
 
+async function downloadZip(url, filename, successMsg) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      let msg = "Could not download.";
+      try { const data = await res.json(); if (data && data.error) msg = data.error; } catch (e) {}
+      toast(msg, true);
+      return;
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    toast(successMsg);
+  } catch (e) {
+    toast("Network error while downloading.", true);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Initial paint
 // ---------------------------------------------------------------------------

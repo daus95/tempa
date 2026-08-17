@@ -20,6 +20,7 @@ import dashboard_api_settings
 import dashboard_api_spec
 import dashboard_api_status
 import dashboard_api_workspace
+import dashboard_zip
 import tempa_config
 from dashboard_assets import principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
@@ -84,11 +85,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:  # silence per-request logging
         pass
 
-    def _send(self, status: int, content_type: str, body: bytes) -> None:
+    def _send(self, status: int, content_type: str, body: bytes, *, filename: str | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
         with contextlib.suppress(BrokenPipeError, ConnectionAbortedError):
             self.wfile.write(body)
@@ -109,7 +112,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/spec-guide": "_serve_spec_guide",
         "/api/tree": "_handle_tree",
         "/api/spec/file": "_handle_spec_file",
+        "/api/spec/download-zip": "_handle_spec_download_zip",
         "/api/epic/spec": "_handle_epic_spec_file",
+        "/api/epic/download-zip": "_handle_epic_download_zip",
         "/api/clarify/file": "_handle_clarify_file",
         "/api/clarify/run": "_handle_clarify_run_status",
         "/api/implement/run": "_handle_implement_run_status",
@@ -165,6 +170,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def _handle_epic_spec_file(self) -> None:
         self._send_json(*dashboard_api_spec.read_epic_spec(
             self.server.epics_dir, self.query.get("epic", [""])[0]))
+
+    def _handle_spec_download_zip(self) -> None:
+        self._send(200, "application/zip",
+                   dashboard_zip.build_zip(self.server.prd_dir), filename="prd-specs.zip")
+
+    def _handle_epic_download_zip(self) -> None:
+        self._send(200, "application/zip",
+                   dashboard_zip.build_zip(self.server.epics_dir), filename="pbi-epics.zip")
 
     def _handle_clarify_file(self) -> None:
         self._send_json(*dashboard_api_clarify.read_file(

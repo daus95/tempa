@@ -196,6 +196,10 @@ clarifyStartImplementBtn.addEventListener("click", async () => {
   startImplementRun();
 });
 
+downloadPrdZipBtn.addEventListener("click", () =>
+  downloadZip("/api/spec/download-zip", "prd-specs.zip",
+    "Downloaded the full set of PRDs that have had answers applied."));
+
 skipMinorFindingsToggle.addEventListener("change", async () => {
   const checked = skipMinorFindingsToggle.checked;
   state.skipMinorFindings = checked;
