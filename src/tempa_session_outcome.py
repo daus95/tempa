@@ -91,12 +91,43 @@ def _try_reorder_for_dependency(config: dict, stuck_index: int, blocked_by_epic:
         return f"'{blocked_by_epic}' is already done, so it's likely not the real blocker"
     if target_index < stuck_index:
         return f"'{blocked_by_epic}' is already scheduled before this epic — reordering already happened but the block persists"
+    # The counterpart has already recorded that it is blocked on US. That is the cycle stated
+    # outright, in config.json, before any reorder has been attempted — so catch it here rather
+    # than waiting for the reverse reorder to be requested a round or two later and inferring it
+    # from the history. Seen live: EPIC-02 sat with "blocked_by_epic": "EPIC-04" the whole time
+    # EPIC-04's last feature was the one that had to rewrite EPIC-02's code.
+    if epics[target_index].get("blocked_by_epic") == stuck_name:
+        return _circular_dependency_reason(stuck_name, blocked_by_epic, mutual_declaration=True)
     history = config.setdefault("epic_reorder_history", [])
     if [stuck_name, blocked_by_epic] in history:
-        return f"moving '{stuck_name}' before '{blocked_by_epic}' already happened previously — this looks like a circular dependency between the two"
+        return _circular_dependency_reason(stuck_name, blocked_by_epic, mutual_declaration=False)
     history.append([blocked_by_epic, stuck_name])
     epics.insert(stuck_index, epics.pop(target_index))
     return None
+
+
+def _circular_dependency_reason(stuck_name: str, blocked_by_epic: str, *, mutual_declaration: bool) -> str:
+    """Why a cycle is refused, and what a human can actually do about it.
+
+    No reordering scheme satisfies "A before B" and "B before A" at once, so this is the one
+    triage branch whose answer is always a plan change. Saying only "this looks like a circular
+    dependency" left the reader to work out what kind of change from two epic specs and a log —
+    the options are short and knowable, so they belong in the message that stops the run."""
+    how = (
+        f"'{blocked_by_epic}' has itself recorded that it is blocked on '{stuck_name}'"
+        if mutual_declaration else
+        f"moving '{stuck_name}' before '{blocked_by_epic}' already happened previously"
+    )
+    return (
+        f"{how} — a circular dependency: the two epics depend on each other, and no ordering "
+        f"satisfies both. This is a "
+        f"plan design problem, not a bug in either epic's code, so it needs a plan change rather "
+        f"than another round. Pick one: (a) merge them into a single epic; (b) have the earlier "
+        f"one ship a real, permanent implementation the later one only consumes, instead of a "
+        f"temporary one the later epic has to replace; or (c) move the replacement work into the "
+        f"earlier epic as its own feature. Then reorder the \"epic\" array so every dependency "
+        f"comes before what needs it, and clear \"blocked_by_epic\" on both."
+    )
 
 
 def _epic_genuinely_complete(epic: dict) -> bool:

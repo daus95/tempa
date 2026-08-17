@@ -42,7 +42,14 @@ def _substitute(template: str, parameters: dict) -> str:
 
 
 def _principles_block() -> str:
-    """The workspace's architecture principles, framed as binding rules — or "" if unset."""
+    """The workspace's architecture principles, framed as binding rules — or "" if unset.
+
+    The conflict instruction used to end "report the conflict explicitly and stop", which
+    contradicted the autonomous system prompt every session also gets ("FORBIDDEN: … stopping
+    after analysis") and, worse, pointed nowhere: a session that did exactly as told wrote its
+    conflict into its closing prose, where the runner could only read it as a round that
+    completed no feature. Two of those and the epic was failed. It now names the channels that
+    actually reach a human — which is what "report it" was always supposed to mean."""
     principles = read_principles()
     if not principles:
         return ""
@@ -53,7 +60,10 @@ def _principles_block() -> str:
         "code you write, and the QA you perform. They outrank convention, convenience, and your\n"
         "own defaults.\n"
         "If a principle conflicts with anything else in this prompt or in the specification, do\n"
-        "NOT silently pick a side — report the conflict explicitly and stop.\n"
+        "NOT silently pick a side. Leave the conflicting work unbuilt, and RECORD the conflict\n"
+        "using whatever this prompt gives you for work that cannot proceed (in an implementation\n"
+        "session, the blocked-feature rule further down). A closing message is not a record and\n"
+        "does not reach anyone — it is read as a round that simply achieved nothing.\n"
         "\n"
         f"{principles}\n"
         "=== END ARCHITECTURE PRINCIPLES ===\n"

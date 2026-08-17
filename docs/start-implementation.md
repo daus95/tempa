@@ -297,9 +297,21 @@ isn't safe:
 - it's already marked `done` (so it's probably not the real blocker anymore),
 - it's already scheduled before the stuck epic (the reorder already happened, but the block
   persists regardless),
-- an epic names itself, or
-- it would reverse an earlier move in the opposite direction — a likely **circular
-  dependency** between the two epics, which reordering alone can never resolve.
+- an epic names itself,
+- the named epic has **itself** recorded that it's blocked on the stuck one (`blocked_by_epic`
+  pointing back) — the cycle stated outright in config.json, caught before a pointless reorder
+  rather than inferred a round or two later, or
+- it would reverse an earlier move in the opposite direction — the same **circular
+  dependency** between the two epics, reached the slower way, which reordering alone can never
+  resolve.
+
+Both cycle branches say what can actually be changed, since no ordering satisfies "A before B"
+and "B before A" at once and the options are short and knowable: merge the two epics; have the
+earlier one ship a real, permanent implementation the later one only *consumes*, instead of a
+temporary one the later epic has to replace; or move the replacement work into the earlier epic
+as its own feature. The plan and plan-review prompts also rule cycles out at the point they're
+written — "bidirectional with EPIC-02", or "EPIC-04 later replaces EPIC-02's temporary
+implementation", is a cycle rather than a dependency note, and cannot be executed in any order.
 
 A successful reorder resets the epic back to `pending` (dropping out of the "resume any
 `on_progress` epic first" priority — see Epic Status Lifecycle above — so the promoted

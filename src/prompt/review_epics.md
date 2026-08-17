@@ -10,6 +10,7 @@ a. COVERAGE — is there ANY new specification in the PRD (${sources.prd}) that 
 b. FEATURE SIZE — is any feature too LARGE for a single agent session (< 300K tokens)? If so, SPLIT it into multiple features and adjust the numbering + config.json accordingly.
 c. TESTABILITY — does every feature have a clear way to test it (CURL/CLI/Playwright)? If not, ADD one.
 d. PARALLELISM — are the task ordering & parallelism notes sensible and consistent with their dependencies?
+d2. EPIC DEPENDENCY CYCLES — walk EVERY epic's "Dependencies" section and every "Depends on" line. Does any epic depend on one that comes AFTER it in the config.json "epic" array? Do any two depend on each other, in any wording — "bidirectional with", "X later replaces Y's temporary implementation", "re-run Y's tests once X lands"? Epics run strictly in array order, so a forward or mutual dependency cannot be executed in ANY order and deadlocks the run. Fix it by reordering the array, or by merging/moving the work per the three options in the plan prompt (one epic; earlier epic ships the permanent thing; or the replacement work moves into the earlier epic). Do NOT leave it noted as a known wrinkle.
 e. CONSISTENCY — epic/feature/task numbering doesn't clash with existing ones; file format follows the existing epic template.
 
 STEP 3 — FIX:
