@@ -117,6 +117,7 @@ function renderImplementStatus() {
         `<span class="impl-epic-progress">${epic.completed_features || 0}/${epic.total_features || 0} features</span>` +
         `<span class="impl-epic-lastrun">last run: ${lastRun}</span>` +
         qaTag +
+        `<button type="button" class="impl-epic-spec-btn" data-epic="${escapeHtml(epic.epic_name || "")}" title="Open this epic's specification — the file QA grades it against">Spec</button>` +
         `<button type="button" class="impl-epic-verify-btn" data-epic="${escapeHtml(epic.epic_name || "")}">Verify</button>` +
       `</div>` +
       blockedReason +
@@ -143,6 +144,11 @@ implStatusBody.addEventListener("click", async (e) => {
   if (reportLink) {
     e.preventDefault();
     openQaReportModal(reportLink.dataset.qaReport);
+    return;
+  }
+  const specBtn = e.target.closest(".impl-epic-spec-btn");
+  if (specBtn) {
+    if (specBtn.dataset.epic) await openEpicSpec(specBtn.dataset.epic);
     return;
   }
   const btn = e.target.closest(".impl-epic-verify-btn");

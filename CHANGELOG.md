@@ -8,6 +8,27 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Each epic's card now has a "Spec" button** that opens that epic's own specification — the
+  file QA grades it against — in the same editor the Specification section uses. It was
+  previously unreachable from the dashboard entirely: `sources.epics` is a *sibling* of the PRD
+  folder that section's tree is rooted at, so nothing under it could be browsed to. That made
+  the one file you need when QA rounds contradict each other the one file you had to leave the
+  dashboard to read.
+
+### Changed
+
+- **The QA convergence guard no longer tells you to "fix the underlying conflict".** That
+  wording named one cause as though it were the only one, sending a reader hunting for a
+  contradiction that often isn't there — the guard trips on a *pattern* (a feature fixed,
+  re-verified, then failing again), and that pattern has several causes needing opposite
+  responses. The halt now describes how to tell them apart: compare the last two QA reports for
+  the features named, and treat opposite demands as a spec contradiction needing your ruling,
+  something genuinely broken as an ordinary regression worth retrying, and shifting minor items
+  as churn to be handled by raising Features per Session / QA Loop Strikes. It points at the
+  epic's spec and Architecture Principles as the two places a ruling can be written down.
+
 ## [0.6.10] - 2026-08-17
 
 ### Added

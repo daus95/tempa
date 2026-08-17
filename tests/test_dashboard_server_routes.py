@@ -92,8 +92,10 @@ def dash(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     prd_dir = workspace / "specs" / "prd"
     clar_dir = workspace / "specs" / "clarifications"
+    epics_dir = workspace / "specs" / "pbi" / "epics"
     prd_dir.mkdir(parents=True)
     clar_dir.mkdir(parents=True)
+    epics_dir.mkdir(parents=True)
     tempa_config.set_active_workspace_root(workspace)
 
     # Backend readiness shells out to `which`/`--version` probes; pin it so responses
@@ -103,6 +105,7 @@ def dash(tmp_path, monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), dashboard_server._DashboardHandler)
     server.prd_dir = prd_dir
     server.clar_dir = clar_dir
+    server.epics_dir = epics_dir
     server.page_html = "<html><body>dashboard</body></html>"
     server.any_saved = False
     server.clarify_run = dashboard_runs._new_clarify_run_state()
@@ -116,6 +119,7 @@ def dash(tmp_path, monkeypatch):
     client = _Client(server)
     client.prd_dir = prd_dir
     client.clar_dir = clar_dir
+    client.epics_dir = epics_dir
     client.workspace = workspace
     try:
         yield client
@@ -179,6 +183,77 @@ def test_spec_file_returns_markdown_content(dash):
 
 def test_spec_file_missing_is_404(dash):
     assert dash.get("/api/spec/file?path=nope.md") == (404, {"ok": False, "error": "File not found."})
+
+
+# ---------------------------------------------------------------------------
+# GET /api/epic/spec + POST /api/epic/spec/save
+#
+# The epic spec folder is a SIBLING of the PRD folder the Specification tree is rooted at,
+# so none of it is reachable through /api/spec/file — yet it is the file QA grades an epic
+# against, and the one to correct when QA rounds keep contradicting each other.
+# ---------------------------------------------------------------------------
+def test_epic_spec_is_found_by_label_alone(dash):
+    """The epic's card only knows it as "EPIC-13"; the file carries a slug too."""
+    (dash.epics_dir / "EPIC-13-nav-and-unitisation.md").write_text("# E13\n", encoding="utf-8")
+    status, body = dash.get("/api/epic/spec?epic=EPIC-13")
+    assert status == 200
+    assert body["path"] == "EPIC-13-nav-and-unitisation.md"
+    assert body["content"] == "# E13\n"
+    assert body["epic"] == "EPIC-13" and body["markdown"] is True
+
+
+def test_epic_spec_prefers_an_exact_name(dash):
+    (dash.epics_dir / "EPIC-13.md").write_text("exact\n", encoding="utf-8")
+    (dash.epics_dir / "EPIC-13-with-a-slug.md").write_text("slug\n", encoding="utf-8")
+    assert dash.get("/api/epic/spec?epic=EPIC-13")[1]["content"] == "exact\n"
+
+
+def test_epic_spec_does_not_match_a_longer_epic_number(dash):
+    """Without requiring the separator, EPIC-1 would happily open EPIC-13's spec."""
+    (dash.epics_dir / "EPIC-13-nav.md").write_text("# E13\n", encoding="utf-8")
+    status, body = dash.get("/api/epic/spec?epic=EPIC-1")
+    assert status == 404
+    assert "No spec file for EPIC-1" in body["error"]
+
+
+def test_epic_spec_refuses_to_guess_between_two_candidates(dash):
+    (dash.epics_dir / "EPIC-13-first.md").write_text("one\n", encoding="utf-8")
+    (dash.epics_dir / "EPIC-13-second.md").write_text("two\n", encoding="utf-8")
+    assert dash.get("/api/epic/spec?epic=EPIC-13")[0] == 404
+
+
+def test_epic_spec_missing_says_where_specs_come_from(dash):
+    status, body = dash.get("/api/epic/spec?epic=EPIC-99")
+    assert status == 404
+    assert "tempa plan-epics" in body["error"]
+
+
+@pytest.mark.parametrize("label", ["../secret", "a/b", ""])
+def test_epic_spec_rejects_a_label_that_is_not_an_epic_id(dash, label):
+    assert dash.get("/api/epic/spec?epic=" + label)[0] == 404
+
+
+def test_epic_spec_save_writes_the_resolved_file(dash):
+    target = dash.epics_dir / "EPIC-13-nav.md"
+    target.write_text("# old\n", encoding="utf-8")
+
+    status, body = dash.post("/api/epic/spec/save", {"epic": "EPIC-13", "content": "# new\n"})
+
+    assert status == 200 and body["epic"] == "EPIC-13"
+    assert target.read_text(encoding="utf-8") == "# new\n"
+
+
+def test_epic_spec_save_takes_a_label_not_a_path(dash):
+    """Save re-resolves the file from the epic id, so a path from the client addresses
+    nothing — the only writable target is a spec that already exists for a real epic."""
+    outside = dash.epics_dir.parent / "outside.md"
+    outside.write_text("untouched\n", encoding="utf-8")
+
+    status, _ = dash.post(
+        "/api/epic/spec/save", {"epic": "../outside", "path": "../outside.md", "content": "hacked"})
+
+    assert status == 404
+    assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 
 def test_spec_file_rejects_traversal(dash):

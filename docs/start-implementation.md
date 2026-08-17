@@ -346,6 +346,24 @@ resolve what the panel describes, then click **Continue Implementation**, which 
 `dashboard_runs._implement_run_worker`). The CLI below is the same recovery for people who
 prefer a terminal, not a second thing that has to happen.
 
+**What "resolve what the panel describes" means for a QA loop.** The convergence guard trips on
+a *pattern* — a feature that failed QA, was fixed, was re-verified, and is failing again — and
+that pattern has several causes needing opposite responses. The panel's own text says what to
+compare; the short version:
+
+| What the last two QA reports show | What it is | What to do |
+|---|---|---|
+| They ask for opposite things on the same feature | The spec is ambiguous or contradicts itself | Your ruling. Write the decision into the epic's spec (**Spec** button on its card) or into Architecture Principles, which every later round is bound by |
+| One reports something genuinely broken | An ordinary regression, not a conflict | Retry — the next fix session can see both reports |
+| Each round flags different, minor items | Nothing is regressing | Raise **Features per Session** so one session closes everything a round flags, and **QA Loop Strikes** for more rope (Settings → Runs) |
+
+The **Spec** button on each epic's card opens that epic's own specification — the file QA grades
+it against — in the same editor the Specification section uses. It needs its own route because
+`sources.epics` is a *sibling* of the PRD folder that section's tree is rooted at, so nothing
+under it can be browsed to. Architecture Principles (sidebar) is the other lever worth knowing:
+its text is prepended to **every** prompt, QA included, as non-negotiable — which makes it the
+right place for a ruling that must bind every future round rather than just this epic.
+
 ```bash
 tempa implement --reset          # epic on_progress → pending (clears session_id)
 tempa implement --reset-failed   # all failed epics → pending (run this after fixing a real failure;

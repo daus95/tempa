@@ -9,6 +9,7 @@ async function openSpecFile(node) {
     if (!data.ok) { toast(data.error || "Could not open file.", true); return; }
     state.activeTop = "specification";
     state.currentKind = "spec";
+    state.selectedEpicSpec = null;
     state.selectedSpecPath = data.path;
     state.isMarkdown = data.markdown;
     state.isText = data.text;
@@ -57,14 +58,43 @@ function setSpecMode(mode) {
   }
 }
 
+// Opens one epic's own spec file in the same pane the Specification tree uses. Reached from
+// the epic's card, because sources.epics is a sibling of the PRD folder that tree is rooted at
+// — nothing under it can be browsed to. This is the file QA grades the epic against, so it is
+// the one to read (and to correct) when QA rounds keep contradicting each other.
+async function openEpicSpec(epicName) {
+  if (!(await confirmDiscardIfDirty())) return;
+  try {
+    const res = await fetch("/api/epic/spec?epic=" + encodeURIComponent(epicName));
+    const data = await res.json();
+    if (!data.ok) { toast(data.error || "Could not open the epic spec.", true); return; }
+    state.currentKind = "spec";
+    state.selectedEpicSpec = data.epic;
+    state.selectedSpecPath = data.path;
+    state.isMarkdown = data.markdown;
+    state.isText = data.text;
+    state.specDirty = false;
+    state.specShowingOverview = false;
+    specEditor.value = data.content || "";
+    setSpecMode("view");
+    showPane("spec");
+    renderSidebar();
+  } catch (e) {
+    toast("Network error opening the epic spec.", true);
+  }
+}
+
 async function saveSpecFile() {
   if (!state.selectedSpecPath || !state.specDirty || !state.isText) return;
   saveBtn.disabled = true;
   try {
-    const res = await fetch("/api/spec/save", {
+    const epic = state.selectedEpicSpec;
+    const res = await fetch(epic ? "/api/epic/spec/save" : "/api/spec/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: state.selectedSpecPath, content: specEditor.value }),
+      body: JSON.stringify(epic
+        ? { epic, content: specEditor.value }
+        : { path: state.selectedSpecPath, content: specEditor.value }),
     });
     const data = await res.json();
     if (!data.ok) { toast(data.error || "Save failed.", true); updateToolbar(); return; }

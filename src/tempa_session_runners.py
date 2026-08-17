@@ -274,15 +274,14 @@ def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, l
     epic["status"] = "failed"
     epic["blocked_reason"] = with_retry_hint(reason)
     save_config(config)
-    log(f"QA [{session_label}] — {reason}\n"
-        "Review the QA reports listed above, fix the underlying conflict between them, then run "
-        "`tempa implement --reset-failed` (or click Continue Implementation) to retry.")
+    log(f"QA [{session_label}] — {reason}")
     notify_attention(
         AttentionEventType.QA_OSCILLATION_DETECTED,
         "QA",
         f"{session_label} keeps failing QA in circles",
-        "Review the QA reports for the rounds listed below — each round's fix is undoing an "
-        "earlier one. Resolve that, then run `tempa implement --reset-failed`.",
+        "This epic keeps failing QA on features it had already fixed. The reason below says what "
+        "to compare in its QA reports to tell a real conflict from an ordinary regression, and "
+        "how to get it moving again.",
         epic=session_label,
         log_path=log_path,
         details={"reason": reason, "qa_fail_rounds": sum(

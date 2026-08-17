@@ -8,12 +8,73 @@ and is refused, so neither `..` nor an absolute path can reach anything else on 
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
 from dashboard_spec import MARKDOWN_EXTENSIONS, _is_text_file, _resolve_within
 
 Response = tuple[int, dict]
+
+# An epic label as it appears in config.json ("EPIC-13"). Constrained before it is ever used to
+# match a file name, so a label from a hand-edited config can't smuggle a separator or a `..`
+# into the lookup below.
+_EPIC_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def resolve_epic_spec(epics_dir: Path, epic: str) -> str | None:
+    """The file name of `epic`'s spec inside `epics_dir`, or None if there isn't exactly one
+    obvious candidate.
+
+    Epic spec files are named after the epic plus a slug — `EPIC-13-nav-unit-value.md` — while an
+    epic's card only knows it as `EPIC-13`, so the name has to be recovered by matching. An exact
+    stem wins outright; otherwise the epic label followed by a separator is the prefix to look
+    for, which is what stops `EPIC-1` from matching `EPIC-13-...`. Ambiguity (two files claiming
+    one epic) returns None rather than a guess — silently opening the wrong spec is worse than
+    saying it couldn't be found."""
+    if not epic or not _EPIC_LABEL.match(epic):
+        return None
+    try:
+        entries = [p for p in epics_dir.iterdir() if p.is_file()]
+    except OSError:
+        return None
+    exact = [p for p in entries if p.stem.lower() == epic.lower()]
+    if exact:
+        return exact[0].name
+    prefixed = [p for p in entries if p.stem.lower().startswith(f"{epic.lower()}-")]
+    return prefixed[0].name if len(prefixed) == 1 else None
+
+
+def read_epic_spec(epics_dir: Path, epic: str) -> Response:
+    """One epic's spec file, in the same shape as `read_file` so the Specification pane can show
+    it with no special casing — plus the `epic` it was resolved for, which the editor keeps so a
+    later save goes back through the same lookup instead of trusting a path from the client."""
+    name = resolve_epic_spec(epics_dir, epic)
+    if name is None:
+        return 404, {"ok": False, "error": (
+            f"No spec file for {epic} in {epics_dir}. Epic specs are written by "
+            "`tempa plan-epics`; if you renamed one, its name must still start with the epic id."
+        )}
+    status, payload = read_file(epics_dir, name)
+    if status == 200:
+        payload["epic"] = epic
+    return status, payload
+
+
+def save_epic_spec(epics_dir: Path, payload: dict | list | None) -> Response:
+    """Overwrite one epic's spec with edited text. Takes the epic label, not a path: the file is
+    re-resolved here, so the only thing a client can address is a spec that already exists for a
+    real epic."""
+    if payload is None or not isinstance(payload, dict):
+        return 400, {"ok": False, "error": "Malformed request."}
+    epic = payload.get("epic", "")
+    name = resolve_epic_spec(epics_dir, epic) if isinstance(epic, str) else None
+    if name is None:
+        return 404, {"ok": False, "error": f"No spec file for {epic}."}
+    status, result = save_file(epics_dir, {"path": name, "content": payload.get("content", "")})
+    if status == 200:
+        result["epic"] = epic
+    return status, result
 
 
 def read_file(prd_dir: Path, rel: str) -> Response:

@@ -81,6 +81,7 @@ def init_workspace(server, pick_folder_dialog) -> Response:
     # reflects the new location immediately instead of requiring a restart.
     server.prd_dir = _resolve_source_dir("prd", "prd")
     server.clar_dir = _resolve_source_dir("clarifications", "clarifications")
+    server.epics_dir = _resolve_source_dir("epics", "pbi/epics")
     print(f"[workspace] root set to {root}")
     return 200, {"ok": True, "root": root, "output": output}
 
@@ -121,6 +122,7 @@ def close_workspace(server) -> Response:
         return 500, {"ok": False, "error": output.strip() or f"Close failed (exit code {result.returncode})."}
     server.prd_dir = _resolve_source_dir("prd", "prd")
     server.clar_dir = _resolve_source_dir("clarifications", "clarifications")
+    server.epics_dir = _resolve_source_dir("epics", "pbi/epics")
     print("[workspace] root cleared")
     return 200, {"ok": True}
 

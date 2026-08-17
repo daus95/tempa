@@ -32,6 +32,27 @@ _MAX_RENDERED = 6
 
 VERDICT_PASS = "pass"
 VERDICT_FAIL = "fail"
+
+# What a human should actually look at, carried in the `blocked_reason` both trip messages
+# write. This used to read "fix the underlying conflict between them", which names ONE cause as
+# though it were the only one — sending a reader hunting for a contradiction that often isn't
+# there. The guard trips on a PATTERN (a feature fixed, re-verified, then failing again), and
+# that pattern has several causes needing opposite responses: a contradiction really does need a
+# human ruling, a plain regression just needs another attempt, and rounds flagging different
+# small things aren't regressing at all. Telling them apart takes one comparison, so the message
+# describes how to make it instead of asserting the answer.
+DIAGNOSIS_HINT = (
+    "What to check: open the last two QA reports listed above and compare what each says about "
+    "the feature(s) named.\n"
+    "  - They ask for opposite things → the specification is ambiguous or contradicts itself. "
+    "This one needs your ruling: decide which reading is right and write it into the epic's spec, "
+    "or into Architecture Principles, which every later round is bound by.\n"
+    "  - One of them reports something genuinely broken → that's an ordinary regression, not a "
+    "conflict. Retrying is reasonable; the next fix session can see both reports.\n"
+    "  - Each round flags different, minor items → nothing is regressing. Raise \"Features per "
+    "Session\" so one session can close everything a round flags, and \"QA Loop Strikes\" if you "
+    "want more rope before stopping (both on Settings → Runs)."
+)
 # Written by the reset commands rather than by a QA session: it marks where a human
 # intervened, and `detect_qa_loop` ignores everything before the newest one. See
 # tempa_maintenance.reset_failed_epics / reset_qa_state.
@@ -242,9 +263,9 @@ def detect_qa_loop(epic: dict, strikes_limit: int, max_fail_rounds: int) -> str 
             )
         return (
             f"{label} is cycling through QA rather than converging: {what}. That is {strikes} "
-            f"round(s) in a row showing it, so fixing what QA reports is undoing earlier work "
+            f"round(s) in a row showing it, so fixing what QA reports may be undoing earlier work "
             "instead of finishing the epic. Stopping here rather than re-running QA "
-            f"indefinitely.\n\n{format_qa_history(epic)}"
+            f"indefinitely.\n\n{format_qa_history(epic)}\n\n{DIAGNOSIS_HINT}"
         )
 
     if len(fails) >= max_fail_rounds:
@@ -252,6 +273,7 @@ def detect_qa_loop(epic: dict, strikes_limit: int, max_fail_rounds: int) -> str 
             f"{label} has now failed QA {len(fails)} time(s) without ever passing. Whatever each "
             "round fixes, the next round finds more — this is not converging on its own. Stopping "
             f"here rather than re-running QA indefinitely.\n\n{format_qa_history(epic)}"
+            f"\n\n{DIAGNOSIS_HINT}"
         )
 
     return None
