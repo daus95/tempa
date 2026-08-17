@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-08-17
+
 ### Fixed
 
 - **The QA convergence guard no longer halts an epic on regression evidence it already
