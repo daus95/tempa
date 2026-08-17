@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
+from tempa_decisions import answered_features, blocked_features
 from tempa_logging import log
 from tempa_qa_history import earlier_report_paths, last_report_path
 
@@ -97,6 +98,11 @@ def _build_features_block(config: dict, epic: str) -> str:
     done = [f for f in session_features if f["status"] == "done"]
     require_fixing = [f for f in session_features if f["status"] == "require_fixing"]
     pending = [f for f in session_features if f["status"] == "pending"]
+    # An epic reaches a session with a blocked feature only while it still has OTHER work (a
+    # blocked feature that's all that's left defers the epic instead) — so this bucket exists to
+    # stop the round being spent re-litigating a question that is already with the user.
+    waiting = blocked_features(next(
+        (s for s in (config.get("epic") or []) if s.get("epic_name") == epic), {}))
 
     lines = ["FEATURES FOR THIS EPIC:"]
     if done:
@@ -108,6 +114,10 @@ def _build_features_block(config: dict, epic: str) -> str:
     if pending:
         lines.append("Needs implementing (never built):")
         lines.extend(f"  ⬜ {f['id']} — {f['name']}" for f in pending)
+    if waiting:
+        lines.append("Waiting on a decision from the user — DO NOT work on these, and do not "
+                     "re-open the question:")
+        lines.extend(f"  ⛔ {f['id']} — {f['name']}" for f in waiting)
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -295,10 +305,79 @@ def build_session_prompt(
     qa_report_section = _build_qa_report_section(config, epic)
     prompt = (
         build_prompt(template, params) + "\n\n" + features_block + qa_report_section
-        + config_rule + "\n" + dependency_block + "\n" + config_path_note
+        + config_rule + "\n" + dependency_block + "\n" + _blocked_feature_block(config, epic)
+        + "\n" + config_path_note
     )
 
     return prompt
+
+
+def _blocked_feature_block(config: dict, epic: str) -> str:
+    """The rule for the one honest outcome the runner had no state for: a feature that cannot be
+    finished without a decision only the user can make.
+
+    Two things have to be true of this text at once, and they pull against each other. It has to
+    be *reachable* — before it existed, a session that had correctly concluded "a human must
+    choose" could only leave the feature `require_fixing` and argue in prose, which the stall
+    guard reads as an epic that achieved nothing and eventually fails the whole run. And it has to
+    be *hard to reach for the wrong reason* — "this is large", "I'm out of budget" and "this looks
+    risky" are the three excuses an agent under pressure reaches for, and every one of them
+    describes work, not a decision. Hence the entry conditions below: attempted first, evidence
+    stated, a real fork with named options, and an explicit recommendation — which is also what
+    makes the answer cheap, since "yes, do that" is the common reply.
+
+    The distinction from `blocked_by_epic` above is deliberate and stated in the text: that one
+    means another epic owns the missing work and Tempa can fix it by reordering the plan, with no
+    human involved. This one means no amount of reordering helps.
+
+    Also carries the answer back in. A decision written into `blocked_answer` stays on the feature
+    (see `_resume_answered_decisions`), so the session that picks the epic up is handed both the
+    question it asked and what came back, instead of re-deriving the whole thing from a log."""
+    epic_entry = next(
+        (s for s in (config.get("epic") or []) if s.get("epic_name") == epic), {})
+    answered = answered_features(epic_entry)
+    answered_block = ""
+    if answered:
+        decisions = "\n".join(
+            f"  {f.get('id', '?')} — you asked: {str(f.get('blocked_question') or '').strip()}\n"
+            f"     THE USER'S DECISION: {str(f.get('blocked_answer') or '').strip()}"
+            for f in answered
+        )
+        answered_block = (
+            f"A DECISION YOU WERE WAITING ON HAS BEEN ANSWERED:\n"
+            f"{decisions}\n"
+            f"Implement that decision as given. It outranks your own earlier recommendation and\n"
+            f"the specification where they disagree — the user has seen both. Do not re-argue it.\n"
+            f"When the feature is finished (or the decision was to drop it), mark it \"done\" per\n"
+            f"the rule above and leave \"blocked_answer\" in place as the record of why.\n\n"
+        )
+
+    return (
+        f"{answered_block}"
+        f"MANDATORY RULE — IF A FEATURE NEEDS A DECISION ONLY THE USER CAN MAKE:\n"
+        f"Different from the rule above: that one is for work another epic owns, which Tempa can\n"
+        f"fix by reordering the plan. This one is for a fork no reordering resolves — the code is\n"
+        f"reachable, you know how to build it, and what's missing is a choice: drop the feature,\n"
+        f"change the spec, accept a risk, or pick between two designs with different consequences.\n"
+        f"A QA report that says \"do X OR explicitly descope it\" is the clearest example.\n"
+        f"You may use this ONLY when ALL of these hold:\n"
+        f"  - You actually attempted the feature this session and can state what you found.\n"
+        f"  - What blocks you is a decision, not work. \"It is large\", \"I am running out of\n"
+        f"    budget\" and \"it looks risky\" are NOT decisions — they describe work, and work is\n"
+        f"    what the next session is for. Leave the feature as it is and say so instead.\n"
+        f"  - You can name the options and say which one you recommend and why.\n"
+        f"Then READ {get_config_path()} and EDIT the feature's object under \"epic_name\":\n"
+        f"\"{epic}\":\n"
+        f"  a. Set its \"status\" to \"blocked\"\n"
+        f"  b. Set \"blocked_question\" to the decision, in one or two sentences, phrased so it\n"
+        f"     can be answered without reading your session log\n"
+        f"  c. Set \"blocked_recommendation\" to the option you would take and the reason\n"
+        f"  d. Leave \"blocked_answer\" as \"\" — that field is the user's to fill in\n"
+        f"Do NOT increment \"completed_features\" and do NOT mark the epic \"done\".\n"
+        f"Tempa will keep building this epic's other features, and will carry on with the rest of\n"
+        f"the plan while the question waits — so a blocked feature costs the run nothing, and\n"
+        f"guessing to avoid one costs it a great deal.\n"
+    )
 
 
 def _build_previous_qa_findings(config: dict, epic: str, qa_output_file: Path) -> str:

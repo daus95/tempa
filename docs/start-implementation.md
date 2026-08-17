@@ -57,7 +57,9 @@ Work-selection priority each time the runner polls (this implements the 1–4 se
 3. **QA gate** — an epic that's `done` but hasn't passed QA (`qa_passed == false`) → run QA.
 4. An epic marked **`require_fixing`** (already implemented but hit QA findings) → fix it.
 5. An epic marked **`pending`** → implement from scratch.
-6. Nothing left → **everything is done**, the runner stops (exit 0).
+6. Nothing left → **everything is done**, the runner stops (exit 0). An epic left `deferred`
+   is skipped by 4 and 5 but is *not* "done" — the stop message names the open question
+   instead of claiming the plan is finished.
 
 The runner stops automatically when: every epic is done (exit 0), an epic is `failed` (exit 1),
 the `max_session_run` limit is reached, or the configured backend's **authentication fails**
@@ -154,7 +156,10 @@ pending ──► on_progress ──► done ──►[QA]──► qa_passed=tr
                                       └─(QA finds a problem)─► require_fixing ──► on_progress ──► ...
 ```
 
-- **Epic status** (`status`): `pending` · `on_progress` · `done` · `require_fixing` · `failed`.
+- **Epic status** (`status`): `pending` · `on_progress` · `done` · `require_fixing` · `failed` ·
+  `deferred` (waiting on a decision from you — see
+  [Decisions only you can make](#decisions-only-you-can-make) below).
+- **Feature status**: `pending` · `require_fixing` · `done` · `blocked` (same section).
 - **QA status** (`qa_status`): `idle` · `ongoing` · `done`.
 - **`qa_passed`**: `false` until QA passes, then `true`.
 
@@ -314,6 +319,54 @@ between two epics is a plan design problem — no reordering scheme can satisfy 
 and "B before A" at the same time — so it's deliberately left for a human decision (adjust the
 epics/features in the plan) rather than an automatic restructuring attempt; see
 [Recovery](#recovery-if-something-goes-wrong) below once it's resolved.
+
+## Decisions Only You Can Make
+
+The guard above answers "is this epic still working?". Some features need a different answer:
+the epic *is* working, the session understood the task, and the honest outcome is still that
+someone has to choose. A spec naming a feature the product no longer wants, a QA report whose
+own recommended fix is "implement this **or** explicitly descope it", a migration whose blast
+radius needs signing off — none of those are bugs, and none of them get better by running the
+same session again.
+
+Tempa used to have no state for that answer. Feature statuses were `done`/`pending`/
+`require_fixing`, and the only sanctioned "I'm stuck" channel was `blocked_by_epic`, which by
+construction can only point at *another epic in the same plan*. A session that had correctly
+worked out that a human must decide could only leave the feature `require_fixing` and argue its
+case in prose — which reads to the no-forward-progress guard exactly like a session that
+achieved nothing. Two of those in a row and the epic was `failed` and the whole runner stopped.
+Seen live: one unanswerable feature in an otherwise finished epic halted a run with 49 features
+in later epics, none of which had anything to do with the question, left unbuilt overnight.
+
+**How a session raises one.** The implementation prompt carries a rule alongside the
+`blocked_by_epic` one, and draws the distinction explicitly: that rule is for work another epic
+owns, which Tempa can fix by reordering; this one is for a fork no reordering resolves. It may
+only be used when the session actually attempted the feature and can say what it found, when
+what blocks it is a *decision* rather than work, and when it can name the options and
+recommend one. "It is large", "I am running out of budget" and "it looks risky" are explicitly
+ruled out — they describe work, and work is what the next session is for. It then sets the
+feature's `status` to `blocked` and fills in `blocked_question` and `blocked_recommendation`.
+
+**What Tempa does with it.** The epic keeps building its *other* features — one open question
+doesn't idle an epic that still has work in it. Only once the blocked features are all that's
+left does the epic go `deferred`, which happens immediately rather than after the stall limit
+(resuming twice more to re-confirm a question already sitting with you is pure waste, and each
+of those rounds would count as a stall and end in `failed`). Deferring **never stops the
+runner**: `deferred` isn't a status the scheduler picks up, the QA gate doesn't park later
+epics behind it, and the rest of the plan carries on. An
+`implementation_decision_required` email alert fires with the question and the recommendation
+in it, and `tempa status` and the dashboard card show both.
+
+**How you answer.** Write your decision into that feature's `blocked_answer` field in
+`config.json`. There is no command to remember — the next poll picks it up, puts the feature
+back to `require_fixing` and the epic back in the queue, and hands your answer to the session
+that takes it, which is told to implement it as given and not re-argue it. To drop the feature
+instead, set its `status` to `done` and say why in `blocked_answer`. Either way the answer stays
+on the feature afterwards, as the record of what was decided and why.
+
+If a run ends while a question is still open, the stop message says so and prints it rather
+than reporting the plan as finished — and a deferred epic still counts as unfinished plan, so
+`tempa implement` will never mistake it for "nothing left to do" and draft a new plan over it.
 
 ## Monitor
 

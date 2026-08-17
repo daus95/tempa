@@ -18,7 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from tempa_backend import Backend
-from tempa_config import load_config, save_config
+from tempa_config import get_config_path, load_config, save_config
+from tempa_decisions import EPIC_DEFERRED, answer_hint, blocked_features, describe, has_other_work
 from tempa_logging import _state, log
 from tempa_maintenance import _epic_features_actually_done, with_retry_hint
 from tempa_notifications import AttentionEventType, notify_attention
@@ -236,6 +237,37 @@ def _fail_blocked_epic(config: dict, epic: dict, session_label: str, reason: str
     _state.stop_event.set()
 
 
+def _defer_for_human_decision(config: dict, index: int, session_label: str,
+                              waiting: list[dict], log_path: Path) -> None:
+    """`waiting`'s features are all this epic has left, and each needs an answer only a human can
+    give — so park the epic and let the runner carry on with the rest of the plan.
+
+    Deliberately NOT a failure and deliberately not `_state.stop_event`: nothing is wrong, and the
+    later epics that don't touch this question have no reason to wait for it. `deferred` is not a
+    status `_start_next_epic` picks up, so the epic simply sits out until an answer is written
+    (`_resume_answered_decisions` in tempa_implement puts it straight back)."""
+    epic = config["epic"][index]
+    epic["status"] = EPIC_DEFERRED
+    questions = "\n".join(describe(feature) for feature in waiting)
+    hint = answer_hint(str(get_config_path()), epic.get("epic_name", session_label))
+    epic["blocked_reason"] = f"{questions}\n\n{hint}"
+    save_config(config)
+    plural = "feature" if len(waiting) == 1 else "features"
+    log(f"Session [{session_label}] has nothing left it can finish on its own — its last "
+        f"{len(waiting)} {plural} need a decision only you can make. Deferring this epic and "
+        f"continuing with the rest of the plan instead of stopping the run.\n{questions}\n{hint}")
+    notify_attention(
+        AttentionEventType.IMPLEMENTATION_DECISION_REQUIRED,
+        "Implementation",
+        f"{session_label} needs a decision on {len(waiting)} {plural}",
+        hint,
+        epic=session_label,
+        log_path=log_path,
+        details={"blocked_features": ", ".join(f.get("id", "?") for f in waiting),
+                 "questions": questions},
+    )
+
+
 def _handle_stalled_round(config: dict, index: int, session_label: str, completed_before: int,
                           log_path: Path) -> None:
     """An implementation session that exited 0 — which says nothing on its own about whether
@@ -246,6 +278,16 @@ def _handle_stalled_round(config: dict, index: int, session_label: str, complete
     epic = config["epic"][index]
     if epic["status"] not in ("on_progress", "require_fixing"):
         return
+
+    # Checked before the stall counter, not after it: once the only work left is a question for a
+    # human, resuming the epic twice more to confirm that is pure waste — and the round that
+    # declares the block completes no feature, so it would otherwise be counted as a stall and
+    # eventually reported as an epic that failed rather than one that is waiting on you.
+    waiting = blocked_features(epic)
+    if waiting and not has_other_work(epic):
+        _defer_for_human_decision(config, index, session_label, waiting, log_path)
+        return
+
     limit = config.get("implement_no_progress_rounds", 2)
     if not _update_no_progress_tracking(epic, completed_before, limit):
         save_config(config)

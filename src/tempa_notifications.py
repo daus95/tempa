@@ -27,6 +27,7 @@ class AttentionEventType(StrEnum):
     AUTHENTICATION_REQUIRED = "authentication_required"
     IMPLEMENTATION_FAILED = "implementation_failed"
     IMPLEMENTATION_AUTO_REORDERED = "implementation_auto_reordered"
+    IMPLEMENTATION_DECISION_REQUIRED = "implementation_decision_required"
     IMPLEMENTATION_QA_STATE_REPAIRED = "implementation_qa_state_repaired"
     PLAN_FAILED = "plan_failed"
     SESSION_LIMIT_REACHED = "session_limit_reached"

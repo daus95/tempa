@@ -147,6 +147,7 @@ const EMAIL_ALERT_EVENTS = [
   ["authentication_required", "Authentication required", "The configured AI CLI login or API key must be renewed."],
   ["implementation_failed", "Implementation failed", "An epic stopped on a non-retryable implementation failure."],
   ["implementation_auto_reordered", "Implementation auto-reordered", "An epic was stuck waiting on a not-yet-implemented epic and Tempa reordered the plan automatically — informational, no action needed unless it recurs."],
+  ["implementation_decision_required", "Implementation decision required", "A feature cannot be finished without a decision only you can make (e.g. drop it, change the spec, accept a risk). The rest of the plan keeps running while it waits."],
   ["plan_failed", "Planning failed", "Tempa could not generate or review the implementation plan."],
   ["session_limit_reached", "Implementation run limit reached", "An epic reached the configured anti-loop session limit."],
   ["qa_limit_reached", "QA run limit reached", "An epic reached its configured QA run limit without ever passing and was marked failed; review is required."],

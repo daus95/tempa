@@ -210,6 +210,11 @@
   .impl-epic-blocked-reason { margin-top: 10px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--danger); background: var(--accent-soft); color: var(--danger);
     font-size: 0.85rem; line-height: 1.5; }
+  /* Deliberately NOT the danger red of .impl-epic-blocked-reason above: a deferred epic is a
+     question waiting for an answer, not a failure, and the run carried on past it. */
+  .impl-epic-decision-needed { margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+    border: 1px solid var(--major); background: var(--accent-soft); color: var(--text);
+    font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
   .clarify-locked-banner { margin-bottom: 12px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
     font-size: 0.85rem; line-height: 1.5; }

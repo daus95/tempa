@@ -18,6 +18,27 @@ once the first tagged release is cut.
 - **"Download Plan" button on the Implementation page**, shown once a plan/epics exist,
   downloads a zip of every file in `.tempa/specs/pbi/epics` (all epics and features at
   their current state).
+- **A feature can now be parked on a decision only you can make, without stopping the run.**
+  Some features can't be finished because someone has to *choose* — a spec naming a feature the
+  product no longer wants, a QA report whose own recommended fix is "implement this **or**
+  explicitly descope it", a migration whose blast radius needs signing off. None of those are
+  bugs, and none get better by running the same session again, but Tempa had no state for that
+  answer: feature statuses were `done`/`pending`/`require_fixing`, and the only sanctioned "I'm
+  stuck" channel was `blocked_by_epic`, which can only point at another epic in the same plan.
+  A session that had correctly worked out that a human must decide could only leave the feature
+  `require_fixing` and argue in prose — which reads to the no-forward-progress guard exactly
+  like a session that achieved nothing, so two rounds later the epic was `failed` and the whole
+  runner stopped. Seen live: one unanswerable feature in an otherwise finished epic halted a run
+  with 49 features in later epics, none of them related to the question, left unbuilt overnight.
+  A session may now set a feature's `status` to `blocked` with a `blocked_question` and a
+  `blocked_recommendation` (the prompt's rule explicitly rules out "it is large", "I am running
+  out of budget" and "it looks risky" — those describe work, not a decision, and require having
+  actually attempted the feature first). The epic keeps building its other features; only once
+  the blocked ones are all that's left does it go `deferred` — which never stops the runner, is
+  skipped by the scheduler and the QA gate, and lets the rest of the plan carry on. Answer by
+  writing into the feature's `blocked_answer` field and the next poll requeues the epic and
+  hands the session your decision; a new `implementation_decision_required` email alert, the
+  `tempa status` output and the dashboard card all carry the question and the recommendation.
 
 ### Changed
 

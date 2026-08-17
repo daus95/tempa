@@ -12,11 +12,11 @@ implTabStatusBtn.addEventListener("click", () => setImplTab("status"));
 implTabLogBtn.addEventListener("click", () => setImplTab("log"));
 
 function epicStatusIcon(status) {
-  const name = { done: "circle-check", on_progress: "refresh-cw", pending: "square", failed: "circle-x", require_fixing: "wrench" }[status] || "circle-help";
+  const name = { done: "circle-check", on_progress: "refresh-cw", pending: "square", failed: "circle-x", require_fixing: "wrench", deferred: "circle-pause" }[status] || "circle-help";
   return iconSvg(name, status === "on_progress" ? "icon-spin" : "");
 }
 function featureStatusIcon(status) {
-  const name = { done: "circle-check", failed: "circle-x", require_fixing: "wrench" }[status] || "square";
+  const name = { done: "circle-check", failed: "circle-x", require_fixing: "wrench", blocked: "circle-pause" }[status] || "square";
   return iconSvg(name);
 }
 
@@ -109,6 +109,13 @@ function renderImplementStatus() {
     const blockedReason = epic.status === "failed" && epic.blocked_reason
       ? `<div class="impl-epic-blocked-reason">⚠ Halted:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
       : "";
+    // A "deferred" epic is the opposite of a halted one: nothing went wrong, the runner carried
+    // on with the rest of the plan, and this card is the question itself waiting to be answered.
+    // Same field, deliberately different styling and label — reading it as a failure is what the
+    // whole deferral mechanism exists to avoid.
+    const decisionNeeded = epic.status === "deferred" && epic.blocked_reason
+      ? `<div class="impl-epic-decision-needed">⛔ Waiting on your decision:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
+      : "";
     card.innerHTML =
       `<div class="impl-epic-header">` +
         `<span class="impl-epic-icon">${epicStatusIcon(epic.status)}</span>` +
@@ -121,6 +128,7 @@ function renderImplementStatus() {
         `<button type="button" class="impl-epic-verify-btn" data-epic="${escapeHtml(epic.epic_name || "")}">Verify</button>` +
       `</div>` +
       blockedReason +
+      decisionNeeded +
       qaHistoryHtml(epic) +
       `<div class="impl-feature-list">${features}</div>`;
     implStatusBody.appendChild(card);

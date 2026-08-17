@@ -23,6 +23,7 @@ from tempa_config import (
     clear_active_workspace_root,
     get_backend,
     get_backends,
+    get_config_path,
     get_logs_dir,
     get_model,
     get_models,
@@ -42,6 +43,13 @@ from tempa_config import (
 )
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
+from tempa_decisions import (
+    EPIC_DEFERRED,
+    FEATURE_BLOCKED,
+    answer_hint,
+    blocked_features,
+    describe,
+)
 from tempa_logging import _banner, _print_log_tail, _state, log
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
@@ -560,7 +568,8 @@ def print_status() -> None:
         completed_f = s.get("completed_features", 0)
         last_run = s.get("last_run", "")[:16].replace("T", " ") if s.get("last_run") else "-"
 
-        status_icons = {"done": "✅", "on_progress": "🔄", "pending": "⬜", "failed": "❌", "require_fixing": "🔧"}
+        status_icons = {"done": "✅", "on_progress": "🔄", "pending": "⬜", "failed": "❌",
+                        "require_fixing": "🔧", EPIC_DEFERRED: "⛔"}
         icon = status_icons.get(status, "?")
         qa_tag = ""
         if status == "done":
@@ -572,8 +581,17 @@ def print_status() -> None:
         if status == "failed" and s.get("blocked_reason"):
             reason = s["blocked_reason"].replace("\n", "\n      ")
             print(f"   ⚠ Halted:\n      {reason}")
+        # A deferred epic is the opposite of halted — nothing is wrong and the run carried on
+        # without it — so it gets its own label, and the question itself rather than a pointer to
+        # a log file: this is the one status whose whole purpose is to be read and acted on.
+        elif status == EPIC_DEFERRED:
+            waiting = blocked_features(s)
+            print("   ⛔ Waiting on your decision:")
+            for feature in waiting:
+                print("      " + describe(feature).replace("\n", "\n      "))
+            print("      " + answer_hint(str(get_config_path()), epic).replace("\n", "\n      "))
 
-        feat_icons = {"done": "✅", "failed": "❌", "require_fixing": "🔧"}
+        feat_icons = {"done": "✅", "failed": "❌", "require_fixing": "🔧", FEATURE_BLOCKED: "⛔"}
         for feat in s.get("features", []):
             feat_icon = feat_icons.get(feat["status"], "⬜")
             print(f"   {feat_icon} {feat['id']} — {feat['name']}")

@@ -30,6 +30,7 @@ from tempa_config import (
     load_config,
     save_config,
 )
+from tempa_decisions import EPIC_DEFERRED, answered_features, blocked_features, describe
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
 from tempa_maintenance import (
     _epic_features_actually_done,
@@ -340,11 +341,19 @@ def _run_qa_gate(config: dict) -> bool:
             # Block if any PREVIOUS epic's QA found issues and is waiting for re-implementation.
             # qa_status="done" + qa_passed=false means QA ran and failed — that epic must be
             # re-implemented (and re-QA'd) before we advance to this one.
+            #
+            # A `deferred` epic matches that same shape (QA ran, found the finding nobody can
+            # close without a decision) but will NOT re-implement on its own — it is waiting on a
+            # human, which is precisely why the runner was allowed to move past it. Deferring
+            # every later epic's QA behind it would spin "QA [x] deferred" on every poll forever
+            # and undo the point of deferring at all, the same trap _halt_if_earlier_epic_failed
+            # exists to catch for `failed`.
             blocked_by = next(
                 (config["epic"][j].get("epic_name", f"epic_{j}")
                  for j in range(i)
                  if not config["epic"][j].get("qa_passed", False)
-                 and config["epic"][j].get("qa_status") not in ("idle", None)),
+                 and config["epic"][j].get("qa_status") not in ("idle", None)
+                 and config["epic"][j].get("status") != EPIC_DEFERRED),
                 None,
             )
             if blocked_by:
@@ -380,6 +389,64 @@ def _run_qa_gate(config: dict) -> bool:
     return False
 
 
+def _resume_answered_decisions(config: dict) -> bool:
+    """Put every epic whose deferred question has been answered back into the implementation
+    queue, and return whether anything changed (the caller saves).
+
+    This is the whole "recovery" story for a deferred epic: write the decision into the feature's
+    `blocked_answer` and the next poll picks it up — no command to remember, no status to reset by
+    hand. The answer itself is not consumed here; it stays on the feature so the session that
+    picks the epic up is handed it (see `_blocked_feature_block` in tempa_prompts), and so the
+    record of what was decided, and why, outlives the round that acted on it.
+
+    Runs before any scheduling decision reads a status, so an answer written while the runner was
+    idle takes effect on the very next poll rather than the one after."""
+    changed = False
+    for epic in (config.get("epic") or []):
+        answered = answered_features(epic)
+        if not answered:
+            continue
+        for feature in answered:
+            feature["status"] = "require_fixing"
+        # Back to require_fixing rather than the status it held when it was deferred: the epic has
+        # a feature that is implemented-but-not-finished and a decision to apply, which is exactly
+        # what require_fixing means, and it's the status _start_next_epic prioritises.
+        if epic.get("status") == EPIC_DEFERRED:
+            epic["status"] = "require_fixing"
+        epic.pop("blocked_reason", None)
+        # A fresh grace period, for the same reason _repair_qa_state_desync gives itself one: the
+        # rounds counted before the epic was parked were spent on a question that has now been
+        # answered. Carrying that count over means an epic deferred at no_progress_rounds=1 gets
+        # exactly one round to act on the decision before the stall guard fails it.
+        epic["no_progress_rounds"] = 0
+        changed = True
+        label = epic.get("epic_name", "?")
+        ids = ", ".join(f.get("id", "?") for f in answered)
+        log(f"[{label}] the decision it was waiting on has been answered ({ids}) — back in the "
+            "implementation queue; the answer is handed to the session that picks it up.")
+    return changed
+
+
+def _log_deferred_epics_on_stop(config: dict) -> bool:
+    """Report every epic parked on an unanswered decision when the runner runs out of work.
+
+    Returns whether there were any — the caller uses it to keep "All epics done" honest. A run
+    that ends with questions outstanding has NOT finished the plan, and saying so at the point the
+    process exits is the difference between a decision that gets made and one that is discovered
+    weeks later."""
+    deferred = [e for e in (config.get("epic") or []) if e.get("status") == EPIC_DEFERRED]
+    if not deferred:
+        return False
+    for epic in deferred:
+        label = epic.get("epic_name", "?")
+        questions = "\n".join(describe(f) for f in blocked_features(epic))
+        log(f"[{label}] is still waiting on a decision from you:\n{questions}")
+    log(f"{len(deferred)} epic(s) are deferred pending your decision — everything else in the "
+        f"plan is done. Answer in {get_config_path()} (each blocked feature's \"blocked_answer\" "
+        "field), then run `tempa implement` again to pick them back up.")
+    return True
+
+
 def _start_next_epic(config: dict, features_override: int | None) -> None:
     """Last resort: pick the next epic to implement — any "require_fixing" one first (already
     implemented, waiting on QA fixes), otherwise the first "pending" one — and start a session
@@ -399,7 +466,8 @@ def _start_next_epic(config: dict, features_override: int | None) -> None:
 
     if next_index is None:
         _state.all_done = True
-        log("All epics done — agent runner stopping.")
+        if not _log_deferred_epics_on_stop(config):
+            log("All epics done — agent runner stopping.")
         _state.stop_event.set()
         return
 
@@ -458,7 +526,12 @@ def check_and_run(features_override: int | None = None) -> None:
         # QA verdict (see reconcile_qa_passed_features) before anything reads that state to
         # make a scheduling decision. Also repairs configs written by older versions, which
         # had no such reconciliation at all.
-        if reconcile_qa_passed_features_and_log(config):
+        repaired = reconcile_qa_passed_features_and_log(config)
+        # Answers written into a deferred epic's blocked feature put it back in the queue before
+        # anything below reads a status to schedule on. Evaluated separately from `repaired`
+        # rather than in one `or`, which would skip it whenever a repair had already happened.
+        resumed = _resume_answered_decisions(config)
+        if repaired or resumed:
             save_config(config)
 
         # Scheduling priority, highest first: each step returns True once this poll is
@@ -547,6 +620,12 @@ def _has_pending_work(config: dict) -> bool:
         if e.get("status") in ("on_progress", "require_fixing", "pending"):
             return True
         if e.get("status") == "done" and not e.get("qa_passed", False):
+            return True
+        # A deferred epic has no work the runner can hand to a session right now, but it is very
+        # much unfinished plan. Reporting it as "nothing left" is what main() reads as "this plan
+        # is spent, draft a new one" — so an epic parked on one unanswered question would get the
+        # whole project re-planned out from under it.
+        if e.get("status") == EPIC_DEFERRED:
             return True
     return False
 

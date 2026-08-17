@@ -609,3 +609,79 @@ def test_real_qa_templates_forbid_writing_runner_owned_fields(name):
     assert "NEVER WRITE" in template
     for field in ("qa_history", "qa_loop_strikes", "blocked_reason"):
         assert field in template
+
+
+# ---------------------------------------------------------------------------
+# _blocked_feature_block / the ⛔ bucket — the "a human must decide" path
+# ---------------------------------------------------------------------------
+
+def _blocked_epic(answer=""):
+    return {
+        "epic_name": "e1", "status": "on_progress",
+        "features": [
+            {"id": "F1", "name": "one", "status": "done"},
+            {"id": "F2", "name": "engine migration", "status": "blocked",
+             "blocked_question": "Migrate, or descope?",
+             "blocked_recommendation": "Descope for now.",
+             "blocked_answer": answer},
+            {"id": "F3", "name": "three", "status": "pending"},
+        ],
+    }
+
+
+def test_every_session_is_told_how_to_flag_a_decision_it_cannot_make(tmp_path, isolate_tempa_paths):
+    """Before this rule existed the only sanctioned "I'm stuck" channel was blocked_by_epic,
+    which can only ever point at another epic — so a session facing a genuine fork had nowhere
+    to put it and the stall guard eventually failed the whole run."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    prompt = tp.build_session_prompt(_sample_config(tmp_path), "e1")
+    assert "A DECISION ONLY THE USER CAN MAKE" in prompt
+    assert '"blocked_question"' in prompt
+
+
+def test_the_decision_rule_rules_out_the_excuses_it_would_otherwise_invite(tmp_path, isolate_tempa_paths):
+    """"It is large" / "I am out of budget" / "it looks risky" all describe work, not a fork —
+    and an escape hatch that accepts them is one that gets used to avoid implementing."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    prompt = tp.build_session_prompt(_sample_config(tmp_path), "e1")
+    assert "It is large" in prompt
+    assert "running out of" in prompt
+    assert "actually attempted the feature this session" in prompt
+
+
+def test_a_blocked_feature_is_listed_as_off_limits_not_as_work(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[_blocked_epic()])
+
+    block = tp._build_features_block(config, "e1")
+
+    assert "⛔ F2 — engine migration" in block
+    assert "DO NOT work on these" in block
+    # The rest of the epic is still ordinary work — one open question doesn't idle the epic.
+    assert "⬜ F3 — three" in block
+
+
+def test_an_answered_feature_is_not_listed_as_off_limits(tmp_path, isolate_tempa_paths):
+    config = _sample_config(tmp_path, epic=[_blocked_epic(answer="Descope it.")])
+    assert "⛔" not in tp._build_features_block(config, "e1")
+
+
+def test_the_users_decision_is_handed_to_the_session_that_acts_on_it(tmp_path, isolate_tempa_paths):
+    """The answer stays on the feature after the epic is requeued, so the session picking it up
+    gets both the question it asked and what came back — instead of re-deriving it from a log."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[_blocked_epic(answer="Descope it, as you suggested.")])
+
+    prompt = tp.build_session_prompt(config, "e1")
+
+    assert "HAS BEEN ANSWERED" in prompt
+    assert "Descope it, as you suggested." in prompt
+    assert "Migrate, or descope?" in prompt
+    # A decision the user has already weighed against the spec must not be re-litigated.
+    assert "Do not re-argue it." in prompt
+
+
+def test_no_answered_decision_block_when_nothing_has_been_answered(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[_blocked_epic()])
+    assert "HAS BEEN ANSWERED" not in tp.build_session_prompt(config, "e1")
