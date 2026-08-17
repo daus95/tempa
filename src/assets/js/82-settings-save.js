@@ -201,6 +201,8 @@ function buildSettingsPayload() {
     max_session_run: settingsMaxSessionRun.value,
     max_clarification_run: settingsMaxClarificationRun.value,
     finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
+    qa_loop_strikes: settingsQaLoopStrikes.value,
+    max_qa_fail_rounds: settingsMaxQaFailRounds.value,
     commit_after_qa_pass: settingsCommitAfterQaPass.checked,
     terminate_leftover_processes: settingsTerminateLeftoverProcesses.checked,
     allow_finalize_with_critical: settingsAllowFinalizeWithCritical.checked,

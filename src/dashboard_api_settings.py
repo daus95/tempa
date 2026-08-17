@@ -30,6 +30,8 @@ LIMIT_FIELDS = (
     ("max_session_run", False, "Max Session Runs must be empty or a positive whole number."),
     ("max_clarification_run", True, "Max Finalize Clarification Round must be a positive whole number."),
     ("finalize_no_progress_rounds", True, "Max Finalize No-Progress Round must be a positive whole number."),
+    ("qa_loop_strikes", True, "QA Loop Strikes must be a positive whole number."),
+    ("max_qa_fail_rounds", True, "Max QA Fail Rounds must be a positive whole number."),
     ("usage_limit_retry_wait_sec", True, "Usage Limit Retry Wait must be a positive whole number."),
     ("usage_limit_heartbeat_sec", True, "Usage Limit Heartbeat Interval must be a positive whole number."),
     ("server_overloaded_retry_wait_sec", True, "Server Overload Retry Wait must be a positive whole number."),
@@ -52,6 +54,8 @@ def read_config(backend_status: dict) -> Response:
             "max_session_run": config.get("max_session_run"),
             "max_clarification_run": config.get("max_clarification_run"),
             "finalize_no_progress_rounds": tempa_config.get_finalize_no_progress_rounds(config),
+            "qa_loop_strikes": tempa_config.get_qa_loop_strikes(config),
+            "max_qa_fail_rounds": tempa_config.get_max_qa_fail_rounds(config),
             "allow_finalize_with_critical": bool(config.get("allow_finalize_with_critical")),
             "commit_after_qa_pass": tempa_config.get_commit_after_qa_pass(config),
             "terminate_leftover_processes": tempa_config.get_terminate_leftover_processes(config),
@@ -106,9 +110,19 @@ def _validate_stage_settings(payload: dict) -> tuple[str | None, dict]:
 
 
 def _validate_limits(payload: dict) -> tuple[str | None, dict]:
-    """The numeric run limits. A blank/absent optional field becomes None ("no limit")."""
+    """The numeric run limits. A blank optional field becomes None ("no limit").
+
+    A field the payload doesn't mention at all is left exactly as it is on disk, for the same
+    reason terminate_leftover_processes is defaulted rather than bool()'d below: a dashboard tab
+    left open from before an upgrade won't know about a field added since, and it must not be
+    able to reset that field to its default — nor, when the field is a required one, be refused
+    the whole save with a message about a control it isn't even rendering. Blank is still a
+    deliberate answer from a client that does render the field, and required ones still reject
+    it."""
     limits = {}
     for name, required, message in LIMIT_FIELDS:
+        if name not in payload:
+            continue
         raw = payload.get(name)
         if raw is None or raw == "":
             if required:

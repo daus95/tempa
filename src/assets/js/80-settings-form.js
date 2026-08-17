@@ -306,6 +306,8 @@ function fillSettingsForm(config) {
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
   settingsFinalizeNoProgressRounds.value = config.finalize_no_progress_rounds ?? 5;
+  settingsQaLoopStrikes.value = config.qa_loop_strikes ?? 2;
+  settingsMaxQaFailRounds.value = config.max_qa_fail_rounds ?? 6;
   settingsCommitAfterQaPass.checked = config.commit_after_qa_pass !== false;
   settingsTerminateLeftoverProcesses.checked = config.terminate_leftover_processes !== false;
   settingsAllowFinalizeWithCritical.checked = !!config.allow_finalize_with_critical;

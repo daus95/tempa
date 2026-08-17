@@ -307,6 +307,7 @@ def test_config_get_returns_every_settings_field(dash):
         "implementation_start_requirement", "notifications",
         "usage_limit_retry_wait_sec", "usage_limit_heartbeat_sec",
         "server_overloaded_retry_wait_sec", "poll_interval_sec", "backends_status",
+        "qa_loop_strikes", "max_qa_fail_rounds",
     }
     assert body["config"]["backends_status"] == FAKE_BACKEND_STATUS
 
@@ -600,6 +601,8 @@ def _config_payload(**overrides) -> dict:
         "max_session_run": 30,
         "max_clarification_run": 20,
         "finalize_no_progress_rounds": 5,
+        "qa_loop_strikes": 2,
+        "max_qa_fail_rounds": 6,
         "usage_limit_retry_wait_sec": 1800,
         "usage_limit_heartbeat_sec": 300,
         "server_overloaded_retry_wait_sec": 300,
@@ -716,6 +719,44 @@ def test_config_save_allows_blank_optional_limits(dash):
     assert status == 200
     assert body["config"]["features_per_session"] is None
     assert body["config"]["max_session_run"] is None
+
+
+def test_config_save_persists_the_qa_loop_guard_limits(dash):
+    """These used to be config.json-only, so giving an epic more rope before the QA loop guard
+    halts the run meant hand-editing JSON."""
+    status, body = dash.post(
+        "/api/config/save", _config_payload(qa_loop_strikes=4, max_qa_fail_rounds=10))
+    assert status == 200
+    assert body["config"]["qa_loop_strikes"] == 4
+    assert body["config"]["max_qa_fail_rounds"] == 10
+    saved = tempa_config.load_config()
+    assert (saved["qa_loop_strikes"], saved["max_qa_fail_rounds"]) == (4, 10)
+
+
+@pytest.mark.parametrize("field", ["qa_loop_strikes", "max_qa_fail_rounds"])
+def test_config_save_rejects_a_non_positive_qa_loop_limit(dash, field):
+    status, body = dash.post("/api/config/save", _config_payload(**{field: 0}))
+    assert status == 400
+    assert "positive whole number" in body["error"]
+
+
+def test_config_save_leaves_a_field_the_payload_never_mentions_alone(dash):
+    """A dashboard tab left open from before an upgrade doesn't know about a field added
+    since. Omitting it must not reset it to its default — nor, for a required field, cost the
+    client the entire save over a control it isn't even rendering."""
+    dash.post("/api/config/save", _config_payload(qa_loop_strikes=4, max_session_run=17))
+    payload = _config_payload()
+    del payload["qa_loop_strikes"]
+    del payload["max_session_run"]
+
+    status, _ = dash.post("/api/config/save", payload)
+
+    assert status == 200
+    # Checked on disk, not in the echoed response: an omitted field isn't part of what this
+    # save validated, so it isn't echoed — the contract is that it survives untouched.
+    saved = tempa_config.load_config()
+    assert saved["qa_loop_strikes"] == 4
+    assert saved["max_session_run"] == 17
 
 
 def test_config_save_rejects_an_unknown_start_requirement(dash):
