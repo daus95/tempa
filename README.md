@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/logo.svg" width="96" height="96" alt="Tempa logo"></p>
+
 # Tempa — Agentic Coding Automation Harness
 
 [![CI](https://github.com/daus95/tempa/actions/workflows/tests.yml/badge.svg)](https://github.com/daus95/tempa/actions/workflows/tests.yml)
