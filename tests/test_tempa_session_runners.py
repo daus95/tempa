@@ -268,6 +268,45 @@ def test_record_qa_verdict_leaves_a_converging_epic_alone(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# _stamp_qa_completed_features — dates the QA report against the epic's own progress
+# ---------------------------------------------------------------------------
+
+def test_stamp_qa_completed_features_records_the_count_the_verdict_was_formed_against(monkeypatch):
+    saved = []
+    monkeypatch.setattr(tsr, "save_config", saved.append)
+    config = {"epic": [{"epic_name": "EPIC-04", "qa_status": "done", "completed_features": 5}]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    assert config["epic"][0]["qa_completed_features"] == 5
+    assert saved == [config]
+
+
+def test_stamp_qa_completed_features_skips_a_round_that_never_reached_a_verdict(monkeypatch):
+    """An interrupted QA session is resumed as the SAME round — stamping here would date the
+    report to a verdict it hadn't formed yet."""
+    monkeypatch.setattr(tsr, "save_config", Mock())
+    config = {"epic": [{"epic_name": "EPIC-04", "qa_status": "ongoing", "completed_features": 5}]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    assert "qa_completed_features" not in config["epic"][0]
+
+
+def test_stamp_qa_completed_features_does_not_save_when_the_stamp_is_unchanged(monkeypatch):
+    save = Mock()
+    monkeypatch.setattr(tsr, "save_config", save)
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "qa_status": "done",
+        "completed_features": 5, "qa_completed_features": 5,
+    }]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    save.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # _snapshot_runner_owned / _restore_runner_owned — config.json is shared with the agent
 # ---------------------------------------------------------------------------
 
