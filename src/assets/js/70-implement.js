@@ -247,6 +247,7 @@ function updateImplementControls() {
   clarifyStartImplementBtn.disabled = blocked;
   // The wrapper, not the button: Stop Now and its chevron have to appear together.
   stopImplementSplit.classList.toggle("hidden", !state.implementRun.running);
+  downloadPlanZipBtn.classList.toggle("hidden", state.epics.length === 0);
   implHeaderStatus.textContent = !state.implementRun.running ? ""
     : state.implementRun.gracefulStopRequested
       ? GRACEFUL_STOP_TARGETS.implement.pendingStatus
@@ -365,4 +366,7 @@ async function stopImplementRun() {
 
 startImplementBtn.addEventListener("click", startImplementRun);
 stopImplementBtn.addEventListener("click", stopImplementRun);
+downloadPlanZipBtn.addEventListener("click", () =>
+  downloadZip("/api/epic/download-zip", "pbi-epics.zip",
+    "Downloaded the full set of PBIs (epics and features) at their current state."));
 

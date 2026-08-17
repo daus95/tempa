@@ -32,6 +32,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   clarifyTabOverviewBtn = $("clarifyTabOverviewBtn"), clarifyTabLogBtn = $("clarifyTabLogBtn"),
   clarifyOverviewTabPanel = $("clarifyOverviewTabPanel"), clarifyLogTabPanel = $("clarifyLogTabPanel"),
   clarifyRunStatus = $("clarifyRunStatus"),
+  downloadPrdZipBtn = $("downloadPrdZipBtn"), downloadPlanZipBtn = $("downloadPlanZipBtn"),
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
   homeSelectFolderBtn = $("homeSelectFolderBtn"), homeWorkspacePath = $("homeWorkspacePath"),
   homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),

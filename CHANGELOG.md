@@ -8,6 +8,15 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **"Download PRD" button on the Clarification page** downloads a zip of every file in
+  `.tempa/specs/prd`, reflecting the PRD content with all clarification answers applied so
+  far.
+- **"Download Plan" button on the Implementation page**, shown once a plan/epics exist,
+  downloads a zip of every file in `.tempa/specs/pbi/epics` (all epics and features at
+  their current state).
+
 ## [0.6.12] - 2026-08-17
 
 ### Fixed
