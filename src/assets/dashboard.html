@@ -430,6 +430,16 @@
               <p class="settings-field-desc">How many rounds in a row may fail to reduce the critical + major finding count before Finalized Clarification gives up early. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Stopping there is deliberate — the remaining findings likely need a human decision rather than more automated apply passes. Raise it to let the automation keep trying for longer. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
               <input type="number" id="settingsFinalizeNoProgressRounds" min="1" step="1">
             </div>
+            <div class="settings-field">
+              <label for="settingsQaLoopStrikes">QA Loop Strikes</label>
+              <p class="settings-field-desc">How many QA rounds in a row must show the same epic failing on features it had already fixed before Tempa stops and asks you to look. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Each such round is one "strike"; a passing round clears the count. More than one is required on purpose — the QA agent is an LLM, so a single repeat can just be a round that tested more thoroughly than the one before it. Raise this to give an epic more rope before the run halts. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
+              <input type="number" id="settingsQaLoopStrikes" min="1" step="1">
+            </div>
+            <div class="settings-field">
+              <label for="settingsMaxQaFailRounds">Max QA Fail Rounds</label>
+              <p class="settings-field-desc">How many times one epic may fail QA without ever passing before Tempa stops, whatever the pattern. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> QA Loop Strikes above recognises a round by the per-feature statuses the QA agent writes, and nothing forces it to write them — when it doesn't, that rule correctly refuses to guess. This is the backstop that guarantees the loop ends anyway. Only failures since the last reset are counted. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
+              <input type="number" id="settingsMaxQaFailRounds" min="1" step="1">
+            </div>
           </div>
           <div class="settings-group">
             <h3>Version Control</h3>

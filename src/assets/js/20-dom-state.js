@@ -79,6 +79,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   settingsModelNoteImplement = $("settingsModelNoteImplement"), settingsFeaturesPerSession = $("settingsFeaturesPerSession"),
   settingsMaxSessionRun = $("settingsMaxSessionRun"), settingsMaxClarificationRun = $("settingsMaxClarificationRun"),
   settingsFinalizeNoProgressRounds = $("settingsFinalizeNoProgressRounds"),
+  settingsQaLoopStrikes = $("settingsQaLoopStrikes"), settingsMaxQaFailRounds = $("settingsMaxQaFailRounds"),
   settingsCommitAfterQaPass = $("settingsCommitAfterQaPass"),
   settingsTerminateLeftoverProcesses = $("settingsTerminateLeftoverProcesses"),
   settingsAllowFinalizeWithCritical = $("settingsAllowFinalizeWithCritical"),

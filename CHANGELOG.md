@@ -8,8 +8,21 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`qa_loop_strikes` and `max_qa_fail_rounds` now have Settings controls.** Giving an epic
+  more rope before the QA convergence guard halts the run used to mean hand-editing
+  `config.json` — the two knobs that decide when Tempa gives up on an epic were the ones a
+  user was most likely to want to change after being stopped by them. Both are now on
+  Settings → Runs → Run Limits, as "QA Loop Strikes" and "Max QA Fail Rounds".
+
 ### Fixed
 
+- **Saving Settings from a dashboard tab left open across an upgrade no longer fails or
+  silently resets a field.** A run-limit field the payload doesn't mention at all is now left
+  exactly as it is on disk, instead of being reset to its default (optional fields) or
+  rejecting the entire save with a message about a control the client isn't even rendering
+  (required ones). A blank value is still a deliberate answer and behaves as before.
 - **A halted epic never said how to get it moving again.** When a guard gives up on an epic,
   the dashboard's ⚠ Halted panel shows that epic's `blocked_reason` and nothing else — but
   the remediation was only ever written to the log line beside it, so the one place a user
