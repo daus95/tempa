@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-08-17
+
 ### Added
 
 - **Each epic's card now has a "Spec" button** that opens that epic's own specification — the
