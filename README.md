@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/logo.svg" width="96" height="96" alt="Tempa logo"></p>
+<p align="center"><img src="docs/assets/logo.webp" width="96" height="96" alt="Tempa logo"></p>
 
 # Tempa — Agentic Coding Automation Harness
 
