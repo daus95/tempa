@@ -53,8 +53,18 @@ from tempa_session_outcome import apply_session_outcome
 #
 # Deliberately NOT here: "blocked_by_epic" (build_session_prompt asks the agent to set it) and
 # "response_message" (part of the epic skeleton plan_epics writes).
+#
+# "no_progress_rounds" belongs here for the same reason as the rest, and its absence was a real
+# bug: an epic re-writing its own config entry carried the counter along with the fields it was
+# actually asked to maintain, and _update_no_progress_tracking then incremented whatever the
+# agent had written rather than the runner's own count. Observed on a 7-feature epic whose
+# counter the runner had just reset to 0 on a completed feature: the next session wrote back 1,
+# the runner incremented to 2, and the epic was marked failed a full round before its stall
+# limit was actually reached — spending the grace period implement_no_progress_rounds exists to
+# provide, on an epic that was still moving.
 _RUNNER_OWNED_EPIC_KEYS = (
     "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
+    "no_progress_rounds",
 )
 
 _MISSING = object()
