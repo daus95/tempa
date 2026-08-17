@@ -53,8 +53,18 @@ from tempa_session_outcome import apply_session_outcome
 #
 # Deliberately NOT here: "blocked_by_epic" (build_session_prompt asks the agent to set it) and
 # "response_message" (part of the epic skeleton plan_epics writes).
+#
+# "no_progress_rounds" belongs here for the same reason as the rest, and its absence was a real
+# bug: an epic re-writing its own config entry carried the counter along with the fields it was
+# actually asked to maintain, and _update_no_progress_tracking then incremented whatever the
+# agent had written rather than the runner's own count. Observed on a 7-feature epic whose
+# counter the runner had just reset to 0 on a completed feature: the next session wrote back 1,
+# the runner incremented to 2, and the epic was marked failed a full round before its stall
+# limit was actually reached — spending the grace period implement_no_progress_rounds exists to
+# provide, on an epic that was still moving.
 _RUNNER_OWNED_EPIC_KEYS = (
     "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
+    "no_progress_rounds", "qa_completed_features",
 )
 
 _MISSING = object()
@@ -291,6 +301,29 @@ def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, l
     _state.stop_event.set()
 
 
+def _stamp_qa_completed_features(config: dict, index: int) -> None:
+    """Record how many features this epic had completed when the QA round that just finished
+    formed its verdict, so a later implementation session can be told when its report has since
+    gone out of date (see `_qa_report_staleness_note` in tempa_prompts).
+
+    The QA prompt recalculates `completed_features` from its own verdict — the features it left
+    `done` — so reading it here, right after the verdict landed, is exactly "what the report
+    describes". Anything the epic completes afterwards is work that report never saw.
+
+    Only stamped once the round actually reached a verdict, for the same reason
+    `_record_qa_verdict_and_guard` above only records then: a session cut short leaves
+    `qa_status` "ongoing" and gets resumed as the same round, and stamping mid-round would date
+    the report to a verdict it hadn't reached yet."""
+    epic = config["epic"][index]
+    if epic.get("qa_status") != "done":
+        return
+    stamped = epic.get("completed_features", 0)
+    if epic.get("qa_completed_features") == stamped:
+        return
+    epic["qa_completed_features"] = stamped
+    save_config(config)
+
+
 def run_qa_session(
     index: int,
     prompt: str,
@@ -340,6 +373,7 @@ def run_qa_session(
         _record_qa_verdict_and_guard(config, index, session_label, log_path)
 
         epic = config["epic"][index]
+        _stamp_qa_completed_features(config, index)
         if (epic.get("status") == "done" and epic.get("qa_passed")
                 and epic.get("qa_status") == "done" and get_commit_after_qa_pass(config)):
             workspace_root = get_workspace(config).get("root", "")

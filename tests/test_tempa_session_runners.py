@@ -268,6 +268,45 @@ def test_record_qa_verdict_leaves_a_converging_epic_alone(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# _stamp_qa_completed_features — dates the QA report against the epic's own progress
+# ---------------------------------------------------------------------------
+
+def test_stamp_qa_completed_features_records_the_count_the_verdict_was_formed_against(monkeypatch):
+    saved = []
+    monkeypatch.setattr(tsr, "save_config", saved.append)
+    config = {"epic": [{"epic_name": "EPIC-04", "qa_status": "done", "completed_features": 5}]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    assert config["epic"][0]["qa_completed_features"] == 5
+    assert saved == [config]
+
+
+def test_stamp_qa_completed_features_skips_a_round_that_never_reached_a_verdict(monkeypatch):
+    """An interrupted QA session is resumed as the SAME round — stamping here would date the
+    report to a verdict it hadn't formed yet."""
+    monkeypatch.setattr(tsr, "save_config", Mock())
+    config = {"epic": [{"epic_name": "EPIC-04", "qa_status": "ongoing", "completed_features": 5}]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    assert "qa_completed_features" not in config["epic"][0]
+
+
+def test_stamp_qa_completed_features_does_not_save_when_the_stamp_is_unchanged(monkeypatch):
+    save = Mock()
+    monkeypatch.setattr(tsr, "save_config", save)
+    config = {"epic": [{
+        "epic_name": "EPIC-04", "qa_status": "done",
+        "completed_features": 5, "qa_completed_features": 5,
+    }]}
+
+    tsr._stamp_qa_completed_features(config, 0)
+
+    save.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # _snapshot_runner_owned / _restore_runner_owned — config.json is shared with the agent
 # ---------------------------------------------------------------------------
 
@@ -303,6 +342,17 @@ def test_restore_runner_owned_leaves_agent_owned_fields_alone():
     assert tsr._restore_runner_owned({"epic": [epic]}, 0, {}, "EPIC-03") is False
     assert epic["blocked_by_epic"] == "EPIC-17"
     assert epic["completed_features"] == 3
+
+
+def test_restore_runner_owned_puts_back_a_no_progress_count_the_session_wrote():
+    """The stall counter is the runner's own tally of how many rounds went by without a feature
+    completing. A session that rewrites its config entry can carry it along with the fields it
+    WAS asked to maintain; _update_no_progress_tracking would then increment the agent's number
+    instead of the runner's and trip the limit early."""
+    epic = {"epic_name": "EPIC-04", "no_progress_rounds": 1}
+
+    assert tsr._restore_runner_owned({"epic": [epic]}, 0, {"no_progress_rounds": 0}, "EPIC-04") is True
+    assert epic["no_progress_rounds"] == 0
 
 
 def test_restore_runner_owned_is_a_no_op_when_nothing_was_touched():

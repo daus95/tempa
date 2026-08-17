@@ -190,6 +190,25 @@ things. That shifting subset is precisely what the loop guard below reads as an 
 through QA: a feature absent from one round and back in the next looks like work being undone. The
 carry-over is what makes "absent from that round" mean it was actually re-checked and passed.
 
+**A fix session is told when its QA report has gone out of date.** An epic is only re-QA'd once
+it's `done` again (priority 3 above), so a single finding nobody can close keeps it in
+`require_fixing` and the *same* report is handed to every following round — verbatim, and still
+labelled "All ❌ and ⚠️ findings MUST be fixed". Meanwhile the features around it do get fixed and
+other epics ship, so findings the report states as fact quietly stop being true while the prompt
+keeps presenting them with the same authority as the ones that still hold. Seen live: a report
+three days and one shipped dependency epic out of date, whose top finding ("no import applier
+exists yet") had been false since the day before, re-fed as mandatory for four consecutive rounds
+— the session had to work out that the world had moved by reading config.json itself.
+
+Every QA round now stamps `qa_completed_features` (the feature count as that round's own verdict
+left it) onto the epic. When a later session's `completed_features` is higher, the prompt says so
+— how many features the report never saw, that some findings may already be closed and any
+dependency it calls missing may now exist, and to re-verify each ❌/⚠️ against the current code
+before spending the round on it. Findings that still hold are still mandatory; only the
+assumption that all of them still apply is dropped. It's a count rather than a timestamp on
+purpose: it moves only on real progress, so a clock, a re-run or a round that changed nothing
+can't throw it off.
+
 **`qa_history` belongs to the runner, not to the agent.** config.json is a shared surface — the
 spawned agent is told to maintain feature statuses, `completed_features`, `qa_status`, `qa_passed`
 and `blocked_by_epic` there — and nothing stops it from writing fields it was never asked to. A QA
@@ -197,8 +216,12 @@ agent has been observed appending its own `qa_history` entry, invented timestamp
 round it was still working on; the runner then recorded that same round properly, and the epic
 ended up with two identical rounds pointing at one report file. An identical failing set two
 rounds running is exactly the fingerprint the loop guard reads as an epic going in circles, so a
-well-meaning agent edit could halt a run that was converging. `qa_history`, `qa_loop_strikes`,
-`blocked_reason`, `total_run` and `qa_total_run` are now snapshotted before every implementation
+well-meaning agent edit could halt a run that was converging. The same applies to
+`no_progress_rounds`: an epic rewriting its own entry carried the stall counter along with the
+fields it was actually asked to maintain, and the runner then incremented the agent's number
+rather than its own — marking one epic `failed` a full round before its stall limit was really
+reached. `qa_history`, `qa_loop_strikes`, `blocked_reason`, `total_run`, `qa_total_run` and
+`no_progress_rounds` are now snapshotted before every implementation
 and QA session and restored afterwards (logged when it happens), before that session's own outcome
 is recorded. `record_qa_round` independently treats one report file as one round, so a round
 written down twice overwrites rather than duplicates.

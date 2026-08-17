@@ -40,6 +40,34 @@ once the first tagged release is cut.
   hands the session your decision; a new `implementation_decision_required` email alert, the
   `tempa status` output and the dashboard card all carry the question and the recommendation.
 
+### Changed
+
+- **A fix session is now told when its QA report has gone out of date.** An epic is only re-QA'd
+  once it is `done` again, so one finding nobody can close keeps it in `require_fixing` and the
+  *same* report is handed to every following round — verbatim, and still labelled "All ❌ and ⚠️
+  findings MUST be fixed". The features around it do get fixed and other epics do ship in the
+  meantime, so findings the report states as fact quietly stop being true while the prompt keeps
+  presenting them with the same authority as the ones that still hold. Seen on an epic re-fed a
+  report three days and one shipped dependency epic out of date, whose top finding ("no import
+  applier exists yet") had been false since the day before — for four consecutive rounds, each of
+  which spent itself re-deriving that the world had moved. Each QA round now stamps the feature
+  count its own verdict was formed against (`qa_completed_features`), and when a later session's
+  count is higher the prompt says how many features the report never saw and asks it to re-verify
+  each ❌/⚠️ against the current code first. Findings that still hold are still mandatory.
+
+### Fixed
+
+- **An epic is no longer failed a round early because the session wrote the stall counter
+  itself.** `no_progress_rounds` is the runner's own tally of how many resumed sessions went by
+  without a feature completing, but it was missing from the runner-owned fields that get
+  snapshotted and restored around each session — so an agent rewriting its own `config.json`
+  entry could carry the counter along with the feature statuses it *was* asked to maintain, and
+  the runner would then increment the agent's number instead of its own. Seen on a 7-feature epic
+  whose counter the runner had just reset to `0` on a completed feature: the next session wrote
+  back `1`, the runner made it `2`, and the epic hit `implement_no_progress_rounds` and was marked
+  `failed` one full round before it actually stalled — spending the grace period that limit exists
+  to provide on an epic that was still moving.
+
 ## [0.6.12] - 2026-08-17
 
 ### Fixed

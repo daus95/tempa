@@ -141,8 +141,46 @@ def _build_qa_report_section(config: dict, epic: str) -> str:
         f"All ❌ and ⚠️ findings in that report MUST be fixed in this implementation session.\n"
         f"Its 📝 advisory notes are NOT findings — QA verified that behaviour as correct and\n"
         f"chose not to fail it. Do not spend this session's feature budget on them, and never at\n"
-        f"the expense of a ❌ or ⚠️ item.\n\n"
+        f"the expense of a ❌ or ⚠️ item.\n"
+        f"{_qa_report_staleness_note(epic_entry)}\n"
         f"{_build_settled_findings_section(epic_entry, qa_report_filename)}"
+    )
+
+
+def _qa_report_staleness_note(epic_entry: dict) -> str:
+    """Tell the session when the QA report it is being handed predates work this epic has since
+    completed — or "" when the report is still current.
+
+    An epic only gets re-QA'd once it is `done` again, so a single finding nobody can close keeps
+    the epic in `require_fixing` and the SAME report is re-fed, verbatim and still labelled "MUST
+    be fixed", for as many rounds as the epic lasts. Meanwhile the features around it do get
+    fixed, and other epics ship — so findings the report states as fact ("no import applier
+    exists yet") quietly stop being true, while the prompt keeps presenting them with the same
+    authority as the ones that still hold.
+
+    Seen live: a report three days and one shipped dependency epic out of date, whose top finding
+    had been false since the day before, re-fed as mandatory for four consecutive rounds. The
+    session had to discover the world had moved by grepping config.json itself, and spent the
+    round re-deriving what the report should have said.
+
+    `qa_completed_features` is the count as the QA round that wrote this report left it (see
+    `_stamp_qa_completed_features`); anything completed since is work that report never saw. It's
+    a count rather than a timestamp on purpose — it moves only on real progress, so it can't be
+    thrown off by a clock, a re-run, or a round that changed nothing."""
+    at_qa = epic_entry.get("qa_completed_features")
+    if at_qa is None:
+        return ""
+    now = epic_entry.get("completed_features", 0)
+    if now <= at_qa:
+        return ""
+    feature_s = "feature" if now - at_qa == 1 else "features"
+    return (
+        f"\n⚠ THAT REPORT IS OUT OF DATE: it was written when {at_qa} of this epic's features\n"
+        f"were done; {now} are done now, so it never saw the {now - at_qa} {feature_s} completed\n"
+        f"since. Some of its findings may already be closed, and any that name a dependency as\n"
+        f"missing may now have it. Re-verify each ❌/⚠️ against the CURRENT code before spending\n"
+        f"the session on it, and say which ones you found already satisfied in your final\n"
+        f"response. This does not downgrade the ones that still hold — those must still be fixed.\n"
     )
 
 
