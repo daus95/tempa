@@ -8,6 +8,36 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The QA convergence guard no longer halts an epic on regression evidence it already
+  counted.** A strike is meant to be one round showing the pattern, but the rules scanned the
+  whole history for it — so once a feature had regressed once, every later round it stayed
+  failing re-found that same old gap and scored another strike. An epic then tripped on "2
+  rounds in a row showing it" when only the first round showed anything, turning
+  `qa_loop_strikes` into "one regression plus N-1 ordinary consecutive failures" and spending
+  exactly the tolerance that limit exists to provide. Seen on an epic whose feature failed round
+  1, passed rounds 2-3, regressed in round 4, and was struck a second time in round 5 for
+  round 4's gap all over again — while round 5's actual finding was a new defect that re-broke
+  nothing. A regression now counts only when the re-verification is the round immediately
+  before, and a round identical to the one before it is no longer read as the epic "coming back
+  around" to an earlier state. Genuine oscillation still trips on the second strike as before,
+  and standing still is still bounded by `max_qa_fail_rounds`.
+
+### Changed
+
+- **Fix sessions now see the epic's earlier QA reports, not just the newest one.** A session
+  told only what the latest round found can reroute control flow around a code path an earlier
+  round already had to fix, bringing that finding straight back — the single most common way an
+  epic starts cycling through QA. The older reports are now listed (oldest first) as settled
+  findings to check the session's own changes against and to leave a guarding test behind for,
+  explicitly not as work to redo.
+- **The QA halt's diagnosis hint now names a missing spec, not only a contradictory one.** Its
+  first branch asked whether the two reports "ask for opposite things", which doesn't fit the
+  common case where each round is internally consistent and simply turns on a question the spec
+  never settles. It now covers a hole in the spec as well as a contradiction in it, since both
+  need the same response: a ruling written into the epic's spec or Architecture Principles.
+
 ## [0.6.11] - 2026-08-17
 
 ### Added

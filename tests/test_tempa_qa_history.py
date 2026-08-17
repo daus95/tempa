@@ -170,6 +170,59 @@ def test_the_same_feature_failing_repeatedly_is_not_a_regression():
     assert epic["qa_loop_strikes"] == 0
 
 
+def test_a_regression_is_not_re_struck_while_the_feature_simply_keeps_failing():
+    """The stale-evidence bug: F1 regresses in round 3, and round 4 finds it still failing. Round
+    4 shows no new regression — the guard's own rule is that consecutive failures are a fix that
+    hasn't landed — but scanning the whole history re-found round 3's gap and struck a second
+    time, tripping on "2 rounds in a row showing it" when only one round showed anything."""
+    epic = _epic()
+    verdicts = _play(epic, [["F1"], ["F2"], ["F1"], ["F1"]])
+
+    assert verdicts == [None, None, None, None]
+    assert epic["qa_loop_strikes"] == 0  # round 3's strike, cleared by round 4 showing nothing
+
+
+def test_the_real_world_epic_that_tripped_on_stale_evidence_keeps_running():
+    """EPIC-14 as it actually ran: FEAT-14-04 failed round 1, passed rounds 2-3, regressed in
+    round 4 (a fix to another feature re-broke it — a true strike), then round 5 flagged it again
+    for a genuinely NEW defect. Round 5 re-broke nothing, so it must not be the second strike."""
+    epic = _epic("EPIC-14")
+    verdicts = _play(epic, [
+        ["FEAT-14-01", "FEAT-14-03", "FEAT-14-04", "FEAT-14-05", "FEAT-14-06", "FEAT-14-07"],
+        ["FEAT-14-01", "FEAT-14-06"],
+        ["FEAT-14-01", "FEAT-14-06"],
+        ["FEAT-14-01", "FEAT-14-04", "FEAT-14-06"],
+        ["FEAT-14-01", "FEAT-14-04"],
+    ])
+
+    assert verdicts[3] is None and epic["qa_loop_strikes"] == 0
+    assert verdicts == [None] * 5
+
+
+def test_a_round_identical_to_the_one_before_it_is_not_a_round_trip():
+    """The same standstill, reached through the cycle rule instead: rounds 1 and 3 share a set
+    with a different one in between (a real repeat), and round 4 merely stands still. Re-scoring
+    rounds 1/3's repeat on that standstill is the same stale evidence counted twice."""
+    epic = _epic()
+    verdicts = _play(epic, [["F1", "F2"], ["F3"], ["F1", "F2"], ["F1", "F2"]])
+
+    assert verdicts == [None] * 4
+    assert epic["qa_loop_strikes"] == 0
+
+
+def test_a_second_independent_regression_still_strikes_twice():
+    """The counterpart — the guard must not have been defanged. F1 comes back in round 3 and F2
+    in round 4: two different features, each absent from the round right before it came back, so
+    both rounds genuinely show the pattern and the epic stops."""
+    epic = _epic()
+    verdicts = _play(epic, [["F1", "F2"], ["F3"], ["F1"], ["F2"]])
+
+    assert verdicts[:3] == [None] * 3
+    assert verdicts[3] is not None
+    assert "F2" in verdicts[3]
+    assert "cycling through QA" in verdicts[3]
+
+
 def test_a_pass_clears_the_strike_count():
     epic = _epic()
     _play(epic, [["F1", "F2"], ["F3", "F4"], ["F1", "F2"]])
