@@ -8,6 +8,49 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An epic could never pass QA because every round failed it on a different set of
+  nitpicks.** The QA prompt treated ⚠️ exactly like ❌, so anything a reviewer would like
+  improved marked its feature `require_fixing` — and against a spec with dozens of literal
+  "How to test" bullets, an LLM reviewer will always find one whose exact phrasing no test
+  is named after. Each round therefore failed a different subset of features while the code
+  itself was fine, and because the loop guard reads a feature that's absent from one round
+  and back in the next as work being undone, that shifting subset eventually halted the run
+  as "cycling through QA". Observed on a 7-feature epic that spent 5 rounds and ~2.5 hours
+  never converging, its final report carrying zero ❌ items. QA now grades at three levels
+  and only two of them block: ❌ (not implemented, or fails when run), ⚠️ (implemented, but
+  its observable behaviour or contract differs from the spec — the agent must be able to
+  state what goes wrong at run time and for whom), and 📝 advisory (correct and verified,
+  but more coverage or a better-named test would be nice). Advisory notes get their own
+  report section and never mark a feature `require_fixing`.
+- **Every QA round re-derived its own opinion of the epic from scratch.** Nothing carried
+  the previous round's findings forward, so consecutive rounds examined different things and
+  flagged different features — the shifting subset above. From round 2 on, the QA prompt now
+  carries the previous round's report and requires the agent to re-verify its ❌/⚠️ items
+  first (stating which findings are repeats and whether an earlier fix was undone), treat
+  its 📝 notes as settled, and only then look for genuinely new defects. A report is now
+  written on every round, a passing one included, so its advisory notes survive for the
+  next round.
+- **A QA agent could halt the run by editing the runner's own bookkeeping.** config.json is
+  shared with the spawned agent, and one QA session appended its own `qa_history` entry —
+  invented timestamp and all — for the round it was still working on. The runner then
+  recorded that same round properly, leaving two identical rounds pointing at one report
+  file, which is exactly the fingerprint the loop guard reads as an epic going in circles.
+  `qa_history`, `qa_loop_strikes`, `blocked_reason`, `total_run` and `qa_total_run` are now
+  snapshotted before every implementation and QA session and restored afterwards (logged
+  when it happens), before that session's own outcome is recorded; the QA prompts also name
+  those fields as off-limits. Independently, `record_qa_round` now treats one report file as
+  one round, so a round written down twice overwrites rather than duplicates.
+- **A QA round that flagged no features at all was read as proof that every feature had been
+  re-verified.** Both loop-guard pattern rules key off a feature being *absent* from a round
+  in between, taken to mean QA looked and was satisfied. A round whose per-feature
+  bookkeeping was skipped fingerprints as an empty set, which made every feature look
+  absent — so a single round of missing bookkeeping could read as a wholesale regression, or
+  supply the "different set in between" that turns a repeat into a false cycle. Empty rounds
+  are no longer accepted as that evidence; the `max_qa_fail_rounds` backstop still bounds
+  them, which is what it exists for.
+
 ### Changed
 
 - **Settings field descriptions: "More…" now sits inline instead of on its own line.**

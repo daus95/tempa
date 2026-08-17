@@ -14,6 +14,7 @@ step further out again, in tempa_session_outcome.
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 
 from tempa_backend import Backend, get_backend_def
@@ -37,6 +38,66 @@ from tempa_notifications import AttentionEventType, notify_attention
 from tempa_qa_history import VERDICT_FAIL, VERDICT_PASS, detect_qa_loop, record_qa_round
 from tempa_session import _run_backend_session, _session_feature_lines
 from tempa_session_outcome import apply_session_outcome
+
+# Fields on an epic entry that the runner alone maintains — its own record of how many rounds
+# this epic has had and why it was stopped. config.json is a shared surface (the spawned agent is
+# told to edit its own bookkeeping there: feature statuses, completed_features, qa_status,
+# qa_passed, blocked_by_epic), and nothing stops an agent from writing these too. They are never
+# mentioned in any prompt except to forbid them, yet agents have written them anyway: an
+# interrupted QA session once appended its own "qa_history" entry — with an invented timestamp —
+# for the round it was still working on, so the runner's own record of that round landed as a
+# second, identical entry. Two rounds with the same failing set is exactly the fingerprint
+# detect_qa_loop reads as an epic going in circles, so a well-meaning agent edit can halt a run
+# that was converging. Snapshotted before each session and put back after; see
+# _snapshot_runner_owned / _restore_runner_owned.
+#
+# Deliberately NOT here: "blocked_by_epic" (build_session_prompt asks the agent to set it) and
+# "response_message" (part of the epic skeleton plan_epics writes).
+_RUNNER_OWNED_EPIC_KEYS = (
+    "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
+)
+
+_MISSING = object()
+
+
+def _snapshot_runner_owned(index: int) -> dict:
+    """The runner-owned fields of epic `index` as they stand before a session starts.
+
+    A key that isn't set yet is left out of the snapshot, which is what tells `_restore_runner_owned`
+    to delete it again rather than restore a value that never existed."""
+    try:
+        epic = load_config()["epic"][index]
+    except (KeyError, IndexError, TypeError):
+        return {}
+    return {key: deepcopy(epic[key]) for key in _RUNNER_OWNED_EPIC_KEYS if key in epic}
+
+
+def _restore_runner_owned(config: dict, index: int, snapshot: dict, label: str) -> bool:
+    """Put `snapshot` back onto epic `index`, undoing anything the finished session wrote to a
+    runner-owned field. Returns True if it had to change something (the caller saves).
+
+    Runs before the runner writes this session's own outcome, so a legitimate post-session write
+    (apply_session_outcome's blocked_reason, record_qa_round's new entry) still lands on top."""
+    try:
+        epic = config["epic"][index]
+    except (KeyError, IndexError, TypeError):
+        return False
+    reverted = []
+    for key in _RUNNER_OWNED_EPIC_KEYS:
+        before = snapshot.get(key, _MISSING)
+        if before is _MISSING:
+            if key in epic:
+                del epic[key]
+                reverted.append(key)
+        elif epic.get(key) != before:
+            epic[key] = deepcopy(before)
+            reverted.append(key)
+    if reverted:
+        log(f"[{label}] the session edited runner-owned field(s) in config.json "
+            f"({', '.join(reverted)}) — restored the runner's own values. These track how many "
+            "rounds this epic has had; an agent-written entry there can look like the epic "
+            "cycling through QA and stop the run.")
+    return bool(reverted)
 
 
 def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_note: str = "") -> bool:
@@ -142,6 +203,7 @@ def run_session(
         return ""
 
     on_json_event, _ = _capture_session_id(index, backend, "implement", resume_session_id, f"Session [{session_label}]")
+    runner_owned = _snapshot_runner_owned(index)
 
     exit_code, log_path = _run_backend_session(
         backend,
@@ -162,6 +224,9 @@ def run_session(
     )
 
     with _state.lock:
+        config = load_config()
+        if _restore_runner_owned(config, index, runner_owned, session_label):
+            save_config(config)
         apply_session_outcome(
             index, session_label, exit_code, log_path, completed_before, backend,
         )
@@ -239,6 +304,7 @@ def run_qa_session(
     backend = get_backend_def(get_backend(load_config(), "implement"))
 
     on_json_event, _ = _capture_session_id(index, backend, "qa", resume_session_id, f"QA [{session_label}]")
+    runner_owned = _snapshot_runner_owned(index)
 
     exit_code, log_path = _run_backend_session(
         backend,
@@ -263,7 +329,11 @@ def run_qa_session(
         # show this epic as QA-passed with 🔧 features. check_and_run does the same on every
         # poll as the catch-all; this call is what makes the repair immediate.
         config = load_config()
-        if reconcile_qa_passed_features_and_log(config):
+        # Undo any runner-owned bookkeeping the QA agent wrote BEFORE the round it just finished
+        # is recorded — an agent-written qa_history entry for this same round would otherwise sit
+        # in the history that _record_qa_verdict_and_guard is about to append to and judge.
+        repaired = _restore_runner_owned(config, index, runner_owned, session_label)
+        if reconcile_qa_passed_features_and_log(config) or repaired:
             save_config(config)
 
         # Record this round's verdict and check the epic's QA history for a loop before anything

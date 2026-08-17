@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import tempa_config
 import tempa_prompts as tp
 
@@ -177,6 +179,67 @@ def test_build_qa_report_section_file_exists(tmp_path):
     section = tp._build_qa_report_section(config, "e1")
     assert str(report) in section
     assert "MUST BE READ" in section
+
+
+def test_build_qa_report_section_skipped_once_qa_has_passed(tmp_path):
+    """A report is written on every round now, a passing one included — so its existence alone
+    no longer means there are findings, and a later session must not be sent chasing them."""
+    report = tmp_path / "qa_report.md"
+    report.write_text("All clear, two advisory notes", encoding="utf-8")
+    config = {"epic": [{"epic_name": "e1", "qa_report_filename": str(report), "qa_passed": True}]}
+    assert tp._build_qa_report_section(config, "e1") == ""
+
+
+def test_build_qa_report_section_marks_advisory_notes_as_not_findings(tmp_path):
+    report = tmp_path / "qa_report.md"
+    report.write_text("QA findings", encoding="utf-8")
+    config = {"epic": [{"epic_name": "e1", "qa_report_filename": str(report)}]}
+    assert "advisory" in tp._build_qa_report_section(config, "e1")
+
+
+# ---------------------------------------------------------------------------
+# _build_previous_qa_findings
+# ---------------------------------------------------------------------------
+
+def _epic_with_rounds(reports: list[str], name: str = "e1", **extra) -> dict:
+    history = [
+        {"round": i, "verdict": "fail", "failed": ["F1"], "report": report}
+        for i, report in enumerate(reports, 1)
+    ]
+    return {"epic": [{"epic_name": name, "qa_history": history, **extra}]}
+
+
+def test_previous_qa_findings_says_first_round_when_there_is_no_history(tmp_path):
+    block = tp._build_previous_qa_findings({"epic": []}, "e1", tmp_path / "round1.md")
+    assert "first QA round" in block
+
+
+def test_previous_qa_findings_points_at_the_previous_report(tmp_path):
+    previous = tmp_path / "round1.md"
+    previous.write_text("findings", encoding="utf-8")
+    config = _epic_with_rounds([str(previous)])
+
+    block = tp._build_previous_qa_findings(config, "e1", tmp_path / "round2.md")
+
+    assert str(previous) in block
+    assert "Re-verify every" in block
+    # Advisory notes from that round are settled — re-raising them is the loop this prevents.
+    assert "Do NOT re-raise" in block
+
+
+def test_previous_qa_findings_ignores_a_report_that_is_gone_from_disk(tmp_path):
+    config = _epic_with_rounds([str(tmp_path / "deleted.md")])
+    assert "first QA round" in tp._build_previous_qa_findings(config, "e1", tmp_path / "r2.md")
+
+
+def test_previous_qa_findings_never_points_a_round_at_its_own_report(tmp_path):
+    """A resumed QA session reuses the previous round's file name — pointing it at that file
+    would have it grade its own work in progress as though a finished round had produced it."""
+    current = tmp_path / "round1.md"
+    current.write_text("half written", encoding="utf-8")
+    config = _epic_with_rounds([str(current)])
+
+    assert "first QA round" in tp._build_previous_qa_findings(config, "e1", current)
 
 
 # ---------------------------------------------------------------------------
@@ -417,3 +480,33 @@ def test_real_clarification_template_carries_the_overlay_placeholder():
     template = (Path(__file__).resolve().parent.parent / "src" / "prompt" / "clarification.md").read_text(
         encoding="utf-8")
     assert template.count("${pending_resolutions}") == 1
+
+
+def _real_template(name: str) -> str:
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / "src" / "prompt" / f"{name}.md").read_text(
+        encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["qa", "qa_continuation"])
+def test_real_qa_templates_carry_the_previous_findings_placeholder(name):
+    # Without it each QA round forms a fresh opinion of the epic, flags a different subset of
+    # features, and the loop guard reads that shifting subset as an epic cycling through QA.
+    assert _real_template(name).count("${previous_qa_findings}") == 1
+
+
+@pytest.mark.parametrize("name", ["qa", "qa_continuation"])
+def test_real_qa_templates_keep_advisory_findings_non_blocking(name):
+    # The gate has to distinguish "the behaviour is wrong" from "I'd have written another test".
+    # Collapsing the two is what makes a detailed epic impossible to ever pass.
+    template = _real_template(name)
+    assert "📝" in template
+    assert "NOT A QA FAILURE" in template
+
+
+@pytest.mark.parametrize("name", ["qa", "qa_continuation"])
+def test_real_qa_templates_forbid_writing_runner_owned_fields(name):
+    template = _real_template(name)
+    assert "NEVER WRITE" in template
+    for field in ("qa_history", "qa_loop_strikes", "blocked_reason"):
+        assert field in template

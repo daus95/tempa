@@ -164,6 +164,40 @@ config.json during the session; the harness only marks it `failed` when a sessio
 behind by an overload that *wasn't* recognized is reset back to `pending` before the
 automatic retry, see the 529 note above).
 
+**Not every QA remark fails a feature.** The QA prompt grades each feature at three levels, and
+only two of them block: ❌ (not implemented, or it fails when actually run), ⚠️ (implemented, but
+its observable behaviour or contract differs from the spec — the agent has to be able to say what
+goes wrong at run time and for whom), and 📝 **advisory** (the behaviour is correct and verified,
+but a passing test's name doesn't literally match a "How to test" bullet, or more coverage would
+be nice, or a guarantee holds structurally without a test named after it). Advisory notes go into
+their own section of the report and never mark a feature `require_fixing`. Collapsing the two —
+which is what the prompt used to do — makes a detailed epic impossible to ever pass: given a spec
+with dozens of literal Definition-of-Done bullets, an LLM reviewer will always find some bullet
+whose exact phrasing no test is named after, so every round fails on a fresh set of nitpicks while
+the code itself is fine.
+
+**Each QA round builds on the last one.** From round 2 on, the QA prompt carries the previous
+round's report and tells the agent to re-verify its ❌/⚠️ items first (calling out repeats and
+whether an earlier fix was undone), treat its 📝 notes as settled, and only then look for
+genuinely new defects. Without that, every round formed a fresh opinion of the epic and flagged a
+different subset of features — not because anything regressed, but because it looked at different
+things. That shifting subset is precisely what the loop guard below reads as an epic cycling
+through QA: a feature absent from one round and back in the next looks like work being undone. The
+carry-over is what makes "absent from that round" mean it was actually re-checked and passed.
+
+**`qa_history` belongs to the runner, not to the agent.** config.json is a shared surface — the
+spawned agent is told to maintain feature statuses, `completed_features`, `qa_status`, `qa_passed`
+and `blocked_by_epic` there — and nothing stops it from writing fields it was never asked to. A QA
+agent has been observed appending its own `qa_history` entry, invented timestamp and all, for the
+round it was still working on; the runner then recorded that same round properly, and the epic
+ended up with two identical rounds pointing at one report file. An identical failing set two
+rounds running is exactly the fingerprint the loop guard reads as an epic going in circles, so a
+well-meaning agent edit could halt a run that was converging. `qa_history`, `qa_loop_strikes`,
+`blocked_reason`, `total_run` and `qa_total_run` are now snapshotted before every implementation
+and QA session and restored afterwards (logged when it happens), before that session's own outcome
+is recorded. `record_qa_round` independently treats one report file as one round, so a round
+written down twice overwrites rather than duplicates.
+
 **The QA gate doesn't trust a "done" epic blindly.** Marking each feature `done` and
 incrementing `completed_features`, then only *after* every feature is done marking the epic
 itself `done`, is all on the agent's own bookkeeping (see the MANDATORY RULE the

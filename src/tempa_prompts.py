@@ -14,6 +14,7 @@ from pathlib import Path
 
 from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
 from tempa_logging import log
+from tempa_qa_history import last_report_path
 
 
 def load_prompt(name: str, fallback: str = "") -> str:
@@ -112,9 +113,13 @@ def _build_features_block(config: dict, epic: str) -> str:
 
 
 def _build_qa_report_section(config: dict, epic: str) -> str:
-    """Return a prompt section pointing to previous QA findings if a report file exists."""
+    """Return a prompt section pointing to previous QA findings if a report file exists.
+
+    Skipped once the epic has passed QA: a report is written on every round now, including a
+    passing one (its advisory notes are the point), and telling a later session that a clean
+    report holds findings it "MUST fix" would send it chasing items QA deliberately cleared."""
     epic_entry = next((s for s in (config.get("epic") or []) if s.get("epic_name") == epic), None)
-    if not epic_entry:
+    if not epic_entry or epic_entry.get("qa_passed"):
         return ""
     qa_report_filename = epic_entry.get("qa_report_filename", "")
     if not qa_report_filename or not Path(qa_report_filename).exists():
@@ -123,7 +128,10 @@ def _build_qa_report_section(config: dict, epic: str) -> str:
         f"PREVIOUS QA FINDINGS — MUST BE READ BEFORE IMPLEMENTATION:\n"
         f"Read the following QA report to understand the findings that must be fixed:\n"
         f"  {qa_report_filename}\n"
-        f"All ❌ and ⚠️ findings in that report MUST be fixed in this implementation session.\n\n"
+        f"All ❌ and ⚠️ findings in that report MUST be fixed in this implementation session.\n"
+        f"Its 📝 advisory notes are NOT findings — QA verified that behaviour as correct and\n"
+        f"chose not to fail it. Do not spend this session's feature budget on them, and never at\n"
+        f"the expense of a ❌ or ⚠️ item.\n\n"
     )
 
 
@@ -222,9 +230,48 @@ def build_session_prompt(
     return prompt
 
 
+def _build_previous_qa_findings(config: dict, epic: str, qa_output_file: Path) -> str:
+    """The ${previous_qa_findings} block: point this QA round at the previous round's report and
+    make it build on that round instead of forming a fresh opinion of the epic.
+
+    Without it every round re-derives its own view from scratch and flags a different subset of
+    features — not because anything regressed, but because it looked at different things. That
+    shifting subset is read by the loop guard as an epic cycling through QA (a feature absent
+    from one round and back in the next looks like work being undone), so it halts a run that
+    was actually converging. Making each round verify the last one's findings first is what
+    turns "absent from that round" into evidence that it was genuinely re-checked and passed.
+
+    Returns the first-round line when there is no earlier report — the placeholder must always
+    resolve to something, or the template is left with a dangling section header."""
+    epic_entry = next((s for s in (config.get("epic") or []) if s.get("epic_name") == epic), None)
+    previous = last_report_path(epic_entry or {}, exclude=str(qa_output_file))
+    if not previous or not Path(previous).exists():
+        return (
+            "PREVIOUS QA ROUNDS:\n"
+            "None — this is the first QA round for this epic. Review it in full.\n"
+        )
+    return (
+        "PREVIOUS QA ROUND — VERIFY IT FIRST, THEN LOOK FOR WHAT IS NEW:\n"
+        "This epic has already been through QA. The previous round's report is at:\n"
+        f"  {previous}\n"
+        "Before you look for anything new:\n"
+        "  1. Read that report in full.\n"
+        "  2. Re-verify every ❌ and ⚠️ item in it. One that is still broken, or that was fixed\n"
+        "     and has broken again, is blocking and must be reported again — say explicitly that\n"
+        "     it is a repeat, and whether the earlier fix was undone.\n"
+        "  3. Its 📝 advisory notes are settled. Do NOT re-raise them as ⚠️, and do NOT raise\n"
+        "     new advisory-grade observations about the same code — that round already looked\n"
+        "     there and deliberately did not treat them as failures.\n"
+        "Then review the rest of the epic for genuinely NEW defects. Do not re-open a question a\n"
+        "previous round examined and accepted unless you have concrete evidence the behaviour is\n"
+        "wrong. State in the report which findings are repeats and which are new.\n"
+    )
+
+
 def build_qa_prompt(config: dict, epic_name: str, qa_output_file: Path, is_continuation: bool = False) -> str:
     params = _resolve_template_params(config, epic_name)
     params["qa_output_file"] = str(qa_output_file)
+    params["previous_qa_findings"] = _build_previous_qa_findings(config, epic_name, qa_output_file)
     if is_continuation:
         template = load_prompt("qa_continuation") or load_prompt("qa")
     else:

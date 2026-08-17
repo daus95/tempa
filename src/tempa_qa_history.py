@@ -77,6 +77,20 @@ def record_qa_round(
         "report": report,
         "at": datetime.now().isoformat(timespec="seconds"),
     }
+    # One report file is one QA round. If the newest entry already points at the same report,
+    # this is that same round being recorded a second time rather than a new one — overwrite it
+    # in place (this call is the authoritative one) instead of appending a duplicate. Two rounds
+    # with an identical failing set is exactly the shape `_cycle_round` and `_regressed_features`
+    # read as an epic going in circles, so a double-record doesn't just pad the history: it
+    # manufactures the very signal this module exists to detect. Seen in the wild when a QA agent
+    # wrote a `qa_history` entry into config.json itself (nothing in any prompt asks it to) and
+    # the runner then recorded the same round properly; also covers any future path that records
+    # one round twice. Rounds with no report path can't be told apart this way, so they always
+    # append.
+    if report and history and history[-1].get("report") == report:
+        entry["round"] = history[-1].get("round", entry["round"])
+        history[-1] = entry
+        return entry
     history.append(entry)
     del history[:-_MAX_HISTORY]
     return entry
@@ -96,6 +110,28 @@ def append_reset_marker(epic: dict) -> None:
     record_qa_round(epic, VERDICT_RESET)
 
 
+def last_report_path(epic: dict, exclude: str = "") -> str:
+    """The report file of the most recent QA round that produced one, or "" if there is none.
+
+    This is what makes a QA round cumulative rather than a fresh opinion every time: the next
+    round's prompt points the agent at it and asks it to re-verify those findings before looking
+    for anything new (see tempa_prompts._build_previous_qa_findings). Without it each round
+    re-derives its own view of the epic from scratch, flags a different subset, and the absence
+    the loop guard reads as "QA checked this and was satisfied" means nothing.
+
+    Reset markers and rounds that never wrote a report are skipped. `exclude` drops a path the
+    caller knows is the round being started right now — a resumed QA session reuses the previous
+    file name (see tempa_implement._resume_interrupted_qa), and pointing a round at its own
+    half-written report would have it grade its own work in progress."""
+    for entry in reversed(epic.get("qa_history") or []):
+        if entry.get("verdict") == VERDICT_RESET:
+            continue
+        report = entry.get("report") or ""
+        if report and report != exclude:
+            return report
+    return ""
+
+
 def _regressed_features(fails: list[dict]) -> list[str]:
     """Features in the newest fail round that had already been fixed and re-verified once: they
     appear in an earlier round's failures, are absent from at least one round in between (QA
@@ -104,7 +140,13 @@ def _regressed_features(fails: list[dict]) -> list[str]:
     That absence is the whole signal. A feature failing in consecutive rounds is just a fix that
     hasn't landed yet — normal, and no reason to stop. A feature that passed and then broke again
     means a later round's work undid an earlier round's, which is the shape of a loop that does
-    not terminate on its own."""
+    not terminate on its own.
+
+    A round that flagged nothing at all is not evidence of anything and is skipped when looking
+    for that absence. Its empty set makes EVERY feature look "absent, therefore re-verified", so
+    counting it would read one round of missing bookkeeping as a wholesale regression — the same
+    empty-fingerprint trap `_cycle_round` already refuses to fall into. Such rounds are still
+    counted by `detect_qa_loop`'s `max_fail_rounds` backstop, which is what bounds that case."""
     if len(fails) < 3:
         return []
     current = set(fails[-1].get("failed") or [])
@@ -119,7 +161,10 @@ def _regressed_features(fails: list[dict]) -> list[str]:
         # "Absent from at least one round in between" — checked against the rounds strictly
         # between this earlier one and the current one.
         for between in fails[i + 1:-1]:
-            regressed |= recovered - set(between.get("failed") or [])
+            flagged = set(between.get("failed") or [])
+            if not flagged:
+                continue
+            regressed |= recovered - flagged
     return sorted(regressed)
 
 
@@ -130,7 +175,9 @@ def _cycle_round(fails: list[dict]) -> int | None:
 
     Empty sets are never compared: a fail verdict that named no features (the agent skipped the
     per-feature bookkeeping) would otherwise match every other such round and report a cycle that
-    nothing supports."""
+    nothing supports. That holds for the in-between rounds too — an empty one says nothing about
+    what the epic looked like at that point, so it can't be the "different set in between" that
+    turns a repeat into a round trip. Rounds like that are bounded by `max_fail_rounds` instead."""
     if len(fails) < 3:
         return None
     current = set(fails[-1].get("failed") or [])
@@ -139,8 +186,10 @@ def _cycle_round(fails: list[dict]) -> int | None:
     for i, entry in enumerate(fails[:-1]):
         if set(entry.get("failed") or []) != current:
             continue
-        if any(set(between.get("failed") or []) != current for between in fails[i + 1:-1]):
-            return entry.get("round")
+        for between in fails[i + 1:-1]:
+            flagged = set(between.get("failed") or [])
+            if flagged and flagged != current:
+                return entry.get("round")
     return None
 
 
