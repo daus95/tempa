@@ -197,6 +197,52 @@ def test_build_qa_report_section_marks_advisory_notes_as_not_findings(tmp_path):
     assert "advisory" in tp._build_qa_report_section(config, "e1")
 
 
+# ---------------------------------------------------------------------------
+# _qa_report_staleness_note — an epic stuck on one finding is re-fed the same report
+# ---------------------------------------------------------------------------
+
+def test_staleness_note_is_silent_on_a_report_that_predates_nothing():
+    assert tp._qa_report_staleness_note({"qa_completed_features": 5, "completed_features": 5}) == ""
+
+
+def test_staleness_note_is_silent_when_no_qa_round_has_been_stamped_yet():
+    """Epics QA'd before this field existed have no baseline — saying nothing is right, since
+    claiming staleness we can't measure would be worse than the status quo."""
+    assert tp._qa_report_staleness_note({"completed_features": 6}) == ""
+
+
+def test_staleness_note_never_reads_a_shrinking_count_as_stale():
+    """A QA round that fails features lowers completed_features below the previous stamp; that's
+    the report being APPLIED, not overtaken."""
+    assert tp._qa_report_staleness_note({"qa_completed_features": 6, "completed_features": 5}) == ""
+
+
+def test_staleness_note_reports_the_features_completed_since_the_report():
+    note = tp._qa_report_staleness_note({"qa_completed_features": 5, "completed_features": 6})
+    assert "OUT OF DATE" in note
+    assert "1 feature completed" in note
+    assert "5 of this epic's features" in note and "6 are done now" in note
+
+
+def test_staleness_note_pluralises_and_still_demands_the_live_findings(tmp_path):
+    note = tp._qa_report_staleness_note({"qa_completed_features": 2, "completed_features": 5})
+    assert "3 features completed" in note
+    # It must not read as permission to skip the report wholesale.
+    assert "must still be fixed" in note
+
+
+def test_build_qa_report_section_carries_the_staleness_note(tmp_path):
+    report = tmp_path / "qa_report.md"
+    report.write_text("QA findings", encoding="utf-8")
+    config = {"epic": [{
+        "epic_name": "e1", "qa_report_filename": str(report),
+        "qa_completed_features": 5, "completed_features": 6,
+    }]}
+    section = tp._build_qa_report_section(config, "e1")
+    assert "MUST be fixed" in section
+    assert "OUT OF DATE" in section
+
+
 def _epic_with_reports_on_disk(tmp_path, count: int) -> tuple[dict, list]:
     """An epic whose qa_history holds `count` failed rounds, each with a report on disk."""
     reports = []
