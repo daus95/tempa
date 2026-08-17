@@ -320,6 +320,37 @@ and "B before A" at the same time — so it's deliberately left for a human deci
 epics/features in the plan) rather than an automatic restructuring attempt; see
 [Recovery](#recovery-if-something-goes-wrong) below once it's resolved.
 
+## What the Last Round Worked Out
+
+A session that spends its round working out *why* it can't finish has had nowhere to put that.
+It goes into the closing message; the runner scrapes it into `blocked_reason` for the human; the
+next round starts from nothing and works it out again. One epic spent four consecutive rounds
+re-deriving the same conclusion, each ending in a longer restatement of it than the last — and
+`--reset-failed` then dropped the session id too, so the retry began with *less* than the round
+before it.
+
+Every stalled round now records its own closing words as `last_round_note` (cleared the moment a
+round completes a feature — it describes a state that round moved past), and the next session's
+prompt carries it. `--reset-failed` deliberately keeps it: everything else that reset clears is a
+counter or status that would re-trip its own limit, whereas this is the only thing those rounds
+actually learned.
+
+The framing is the load-bearing part. Handed over as a finding, it would entrench whatever the
+last round believed — and on the epic this was built for, the first three rounds' stated blockers
+were **wrong**, disproved by the fourth round's own investigation. So it's passed as a *claim to
+check*, with the two acceptable outcomes named: disprove it and get on with the work, or confirm
+it and record it through the blocked-feature rule so it reaches a human. Quietly re-deriving it
+one more round is the one outcome the block rules out.
+
+**`blocked_reason` now quotes what the agent said, not what its tools printed.** It used to be
+the last six non-empty lines of the session log, which cannot work: a tool result is written as
+one `[Result] ...` chunk whose own content may span lines, and those continuation lines carry no
+marker, so the tail of a log is not separable into "what the agent said" and "what its last
+command printed". One epic's stored reason — the whole of what the dashboard's Halted panel shows
+— opened with a psql table header and `(0 rows)`; another's with an Edit tool's success message.
+The agent's closing prose is now captured off the event stream while the session runs, with the
+log tail kept only as the fallback for a session that produced no prose at all.
+
 ## Decisions Only You Can Make
 
 The guard above answers "is this epic still working?". Some features need a different answer:

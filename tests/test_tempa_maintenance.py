@@ -377,6 +377,21 @@ def test_reset_failed_epics_clears_run_and_stall_counters():
     assert "blocked_by_epic" not in epic
 
 
+def test_reset_failed_epics_keeps_what_the_last_round_worked_out():
+    """Everything else cleared here is a counter or status that would re-trip its own limit on
+    the retry. `last_round_note` is the only thing those rounds actually learned, and the reset
+    already costs the retry its session id — clearing this too made a reset start with less than
+    the round before it. The next prompt carries it as a claim to check, not as a finding."""
+    config = {"epic": [{
+        "epic_name": "e1", "status": "failed", "no_progress_rounds": 2,
+        "last_round_note": "m11.workflow.levels has no per-key merge.",
+    }]}
+
+    tm.reset_failed_epics(config)
+
+    assert config["epic"][0]["last_round_note"] == "m11.workflow.levels has no per-key merge."
+
+
 def test_reset_failed_epics_keeps_qa_history_but_marks_a_reset_boundary():
     # The history is the only record a human has that this epic was cycling through QA, so it
     # survives the reset -- a marker is appended instead, which is what makes the loop guard

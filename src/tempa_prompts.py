@@ -304,12 +304,45 @@ def build_session_prompt(
 
     qa_report_section = _build_qa_report_section(config, epic)
     prompt = (
-        build_prompt(template, params) + "\n\n" + features_block + qa_report_section
+        build_prompt(template, params) + "\n\n" + features_block
+        + _last_round_note_block(config, epic) + qa_report_section
         + config_rule + "\n" + dependency_block + "\n" + _blocked_feature_block(config, epic)
         + "\n" + config_path_note
     )
 
     return prompt
+
+
+def _last_round_note_block(config: dict, epic: str) -> str:
+    """What the previous round said when it ended without completing a feature — or "" if the
+    last round moved the epic forward (or is the first).
+
+    A session that works out why it can't finish has had nowhere to put that. It goes into the
+    closing message; the runner scrapes it for the human; the next round starts from nothing and
+    works it out again. One epic spent four consecutive rounds re-deriving the same conclusion,
+    each ending in a longer restatement of it than the last, and `--reset-failed` then dropped the
+    session id too, so the retry began with less than the round before it.
+
+    The framing matters as much as the text. Handed over as a finding, this entrenches whatever
+    the last round believed — and on that same epic the first three rounds' blockers were WRONG,
+    disproved by the fourth round's own investigation. So it is passed as a claim to check, with
+    the two acceptable outcomes named: disprove it and get on with the work, or confirm it and
+    record it properly. Quietly re-deriving it a third time is the one thing that must stop."""
+    epic_entry = next((s for s in (config.get("epic") or []) if s.get("epic_name") == epic), None)
+    note = str((epic_entry or {}).get("last_round_note") or "").strip()
+    if not note:
+        return ""
+    return (
+        f"WHAT THE PREVIOUS ROUND SAID WHEN IT ENDED WITHOUT FINISHING A FEATURE:\n"
+        f"{note}\n"
+        f"Treat that as a CLAIM TO CHECK, not as a finding — an earlier round's stated blocker\n"
+        f"has turned out to be wrong before, disproved by the very next round that looked at it.\n"
+        f"Check it against the code as it stands now, first, and then do one of exactly two\n"
+        f"things: if it does NOT hold, say so plainly and get on with the work; if it DOES hold,\n"
+        f"record it through the blocked-feature rule below so it reaches the user. Do not spend\n"
+        f"this round re-deriving it and restating it — that is what the previous round already\n"
+        f"did, and repeating it makes no progress and reaches nobody.\n\n"
+    )
 
 
 def _blocked_feature_block(config: dict, epic: str) -> str:

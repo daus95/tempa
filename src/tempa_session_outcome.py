@@ -26,10 +26,23 @@ from tempa_notifications import AttentionEventType, notify_attention
 
 
 def _last_meaningful_log_lines(log_path: Path, max_lines: int = 6) -> str:
-    """Return the last `max_lines` non-empty lines of `log_path`, dropping the trailing
-    `[Done] input=... output=...` accounting line if present — i.e. the backend's own
-    closing explanation of what it did/why it stopped, for surfacing to a human (e.g. the
-    no-forward-progress guard in `_handle_stalled_round`) instead of only living in a log file."""
+    """The session's own closing explanation of what it did and why it stopped, for surfacing to
+    a human (the no-forward-progress guard below puts it in `blocked_reason`, which is the whole
+    of what the dashboard's Halted panel shows).
+
+    Prefers what the agent actually said, captured off the event stream while the session ran
+    (see `_remember_agent_message`). This used to tail the log file instead, which cannot be made
+    to work: a tool result is logged as one `[Result] ...` chunk whose own content may span
+    lines, and those continuation lines carry no marker, so the tail of a log is not separable
+    into "what the agent said" and "what its last command printed". One epic's stored reason
+    opened with a psql table header and `(0 rows)`; another's with an Edit tool's success message.
+
+    The log tail is kept as the fallback for the case the capture cannot cover — a session that
+    produced no prose at all, or one whose outcome is being recorded by a process that didn't run
+    it (a test, a resumed run) — where six lines of possibly-mixed output still beat nothing."""
+    captured = (_state.last_agent_message or "").strip()
+    if captured:
+        return "\n".join(captured.splitlines()[-max_lines:])
     try:
         lines = [line for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
     except OSError:
@@ -61,6 +74,9 @@ def _update_no_progress_tracking(epic: dict, completed_before: int, limit: int) 
     if epic.get("completed_features", 0) > completed_before:
         epic["no_progress_rounds"] = 0
         epic["total_run"] = 0
+        # Whatever the last stalled round concluded is about a state this round just moved past;
+        # carrying it into the next prompt would argue against work that has already happened.
+        epic.pop("last_round_note", None)
         return False
     epic["no_progress_rounds"] = epic.get("no_progress_rounds", 0) + 1
     return epic["no_progress_rounds"] >= limit
@@ -289,10 +305,22 @@ def _handle_stalled_round(config: dict, index: int, session_label: str, complete
         return
 
     limit = config.get("implement_no_progress_rounds", 2)
-    if not _update_no_progress_tracking(epic, completed_before, limit):
+    stalled = _update_no_progress_tracking(epic, completed_before, limit)
+    reason = _last_meaningful_log_lines(log_path)
+    # `no_progress_rounds` is 0 here iff the round just completed a feature, in which case
+    # _update_no_progress_tracking has already dropped the previous note and this round has
+    # nothing to explain — writing one back would resurrect it a line after it was cleared.
+    if reason and epic.get("no_progress_rounds", 0) > 0:
+        # Recorded on EVERY stalled round, not only the one that trips the limit, and read back
+        # into the next round's prompt (see _last_round_note_block in tempa_prompts). A session
+        # that works out why it can't finish has, until now, had nowhere to put that: it goes into
+        # the closing message, the runner reads six lines of it for the human, and the next round
+        # starts over. Four consecutive rounds were once spent re-deriving the same conclusion,
+        # each ending in a longer restatement of it than the last.
+        epic["last_round_note"] = reason
+    if not stalled:
         save_config(config)
         return
-    reason = _last_meaningful_log_lines(log_path)
     epic["blocked_reason"] = reason
     blocked_by_epic = epic.get("blocked_by_epic")
     reorder_failure = (

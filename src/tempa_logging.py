@@ -42,6 +42,14 @@ class _RunnerState:
         self.server_overloaded_hit = False
         self.backend_stuck_after_done_hit = False
         self.background_tasks_terminated_hit = False
+        # The agent's own closing words from the session that just ran — its last piece of plain
+        # prose, as opposed to a tool call or a tool result. Captured while streaming because it
+        # cannot be recovered from the log file afterwards: a backend renders a tool result as one
+        # `[Result] ...` chunk whose own content may span lines, and those continuation lines
+        # carry no marker, so a tail scrape of the log has no way to tell "what the agent said"
+        # from "what a psql query printed". Reset per session in _stream_backend_process, the same
+        # way the flags above are.
+        self.last_agent_message = ""
         # Set only by the poll loop itself, and only once it has confirmed no session
         # thread is running — so "the user asked to stop and we reached a clean seam"
         # stays distinguishable from every other reason stop_event gets set (a failure,

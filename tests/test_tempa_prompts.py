@@ -685,3 +685,51 @@ def test_no_answered_decision_block_when_nothing_has_been_answered(tmp_path, iso
     _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
     config = _sample_config(tmp_path, epic=[_blocked_epic()])
     assert "HAS BEEN ANSWERED" not in tp.build_session_prompt(config, "e1")
+
+
+# ---------------------------------------------------------------------------
+# _last_round_note_block — what the previous stalled round concluded
+# ---------------------------------------------------------------------------
+
+def test_no_note_block_when_the_last_round_moved_the_epic_forward(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[{"epic_name": "e1", "status": "on_progress"}])
+    assert "PREVIOUS ROUND" not in tp.build_session_prompt(config, "e1")
+
+
+def test_the_previous_rounds_conclusion_is_carried_into_the_next_prompt(tmp_path, isolate_tempa_paths):
+    """One epic spent four consecutive rounds re-deriving the same conclusion because nothing
+    carried it forward — each round ended in a longer restatement than the last."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[{
+        "epic_name": "e1", "status": "require_fixing",
+        "last_round_note": "m11.workflow.levels has no per-key merge.",
+    }])
+
+    prompt = tp.build_session_prompt(config, "e1")
+
+    assert "m11.workflow.levels has no per-key merge." in prompt
+
+
+def test_the_carried_note_is_framed_as_a_claim_to_check_not_a_finding(tmp_path, isolate_tempa_paths):
+    """Handed over as a finding it entrenches whatever the last round believed — and on the epic
+    this was built for, the first three rounds' blockers were disproved by the fourth."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[{
+        "epic_name": "e1", "status": "require_fixing", "last_round_note": "blocked on X",
+    }])
+
+    prompt = tp.build_session_prompt(config, "e1")
+
+    assert "CLAIM TO CHECK" in prompt
+    assert "has turned out to be wrong before" in prompt
+    # Both acceptable outcomes named, so "re-derive and restate it again" isn't one of them.
+    assert "does NOT hold" in prompt and "blocked-feature rule" in prompt
+
+
+def test_a_blank_note_is_not_carried(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "implementation", "IMPL")
+    config = _sample_config(tmp_path, epic=[{
+        "epic_name": "e1", "status": "require_fixing", "last_round_note": "   \n ",
+    }])
+    assert "PREVIOUS ROUND" not in tp.build_session_prompt(config, "e1")

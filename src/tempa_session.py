@@ -421,6 +421,31 @@ def _apply_done_signal(readable: str, done_event: threading.Event) -> None:
         done_event.clear()
 
 
+# Every non-prose thing a backend's parse_line can produce is rendered inside square brackets —
+# "[Tool: Read] {...}", "[Result] ...", "[Error] ...", "[Done] turns=...", "[session_id=...]".
+# Plain agent prose never is, which is what makes one prefix test enough for all three backends
+# rather than a per-backend rule that would drift the moment one of them adds an event type.
+_NON_PROSE_PREFIX = "["
+
+
+def _remember_agent_message(readable: str) -> None:
+    """Keep the agent's latest piece of plain prose on `_state`, so the runner can quote what the
+    session actually SAID once it has finished.
+
+    Read back by `_last_meaningful_log_lines` (tempa_session_outcome), which used to reconstruct
+    this by tailing the log file. That could not work reliably: a tool result is logged as one
+    `[Result] ...` chunk whose own content may span lines, and those continuation lines carry no
+    marker of their own, so the tail of the log is not separable into "what the agent said" and
+    "what its last command printed". It showed: one epic's stored `blocked_reason` — the whole of
+    what the dashboard's Halted panel displays — opened with a psql table header and `(0 rows)`,
+    and another's with the text of an Edit tool's success message.
+
+    Only the LAST prose block is kept, deliberately: that's the closing summary a session writes
+    after its work, which is the part that explains why it stopped."""
+    if not readable.startswith(_NON_PROSE_PREFIX) and readable.strip():
+        _state.last_agent_message = readable.strip()
+
+
 def _grace_period_outcome(
     process: subprocess.Popen,
     done_event: threading.Event,
@@ -567,6 +592,7 @@ def _stream_backend_process(
     `terminate_leftover_processes` turns that off, in which case the container is a no-op and
     the spawn is byte-for-byte the one Tempa did before it existed."""
     _state.background_tasks_terminated_hit = False
+    _state.last_agent_message = ""
     # Sampled per spawn: this governs the process tree about to be created and is fixed for
     # that tree's lifetime, since a container cannot be attached after the fact. A value
     # saved mid-run therefore applies from the next session onward.
@@ -672,6 +698,7 @@ def _stream_contained_process(
                 log_file.write(readable + "\n")
                 log_file.flush()
                 _apply_done_signal(readable, done_event)
+                _remember_agent_message(readable)
             if on_json_event:
                 on_json_event(data)
         else:
