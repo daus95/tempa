@@ -34,6 +34,19 @@ once the first tagged release is cut.
   count is higher the prompt says how many features the report never saw and asks it to re-verify
   each ❌/⚠️ against the current code first. Findings that still hold are still mandatory.
 
+### Fixed
+
+- **An epic is no longer failed a round early because the session wrote the stall counter
+  itself.** `no_progress_rounds` is the runner's own tally of how many resumed sessions went by
+  without a feature completing, but it was missing from the runner-owned fields that get
+  snapshotted and restored around each session — so an agent rewriting its own `config.json`
+  entry could carry the counter along with the feature statuses it *was* asked to maintain, and
+  the runner would then increment the agent's number instead of its own. Seen on a 7-feature epic
+  whose counter the runner had just reset to `0` on a completed feature: the next session wrote
+  back `1`, the runner made it `2`, and the epic hit `implement_no_progress_rounds` and was marked
+  `failed` one full round before it actually stalled — spending the grace period that limit exists
+  to provide on an epic that was still moving.
+
 ## [0.6.12] - 2026-08-17
 
 ### Fixed

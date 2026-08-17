@@ -344,6 +344,17 @@ def test_restore_runner_owned_leaves_agent_owned_fields_alone():
     assert epic["completed_features"] == 3
 
 
+def test_restore_runner_owned_puts_back_a_no_progress_count_the_session_wrote():
+    """The stall counter is the runner's own tally of how many rounds went by without a feature
+    completing. A session that rewrites its config entry can carry it along with the fields it
+    WAS asked to maintain; _update_no_progress_tracking would then increment the agent's number
+    instead of the runner's and trip the limit early."""
+    epic = {"epic_name": "EPIC-04", "no_progress_rounds": 1}
+
+    assert tsr._restore_runner_owned({"epic": [epic]}, 0, {"no_progress_rounds": 0}, "EPIC-04") is True
+    assert epic["no_progress_rounds"] == 0
+
+
 def test_restore_runner_owned_is_a_no_op_when_nothing_was_touched():
     snapshot = {"qa_history": [{"round": 1}], "total_run": 2}
     epic = {"epic_name": "EPIC-03", "qa_history": [{"round": 1}], "total_run": 2}
