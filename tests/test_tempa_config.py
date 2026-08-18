@@ -880,6 +880,11 @@ def test_record_workspace_history_moves_existing_entry_to_front_without_duplicat
     assert [e["root"] for e in entries] == [str(a), str(b)]
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="case/separator-insensitive matching is a Windows filesystem semantic; "
+           "os.path.normcase is a no-op elsewhere, where these really are different paths",
+)
 def test_record_workspace_history_dedupes_case_and_separator_insensitively(tmp_path, isolate_tempa_paths):
     tempa_config.record_workspace_history(r"C:\A\b")
     tempa_config.record_workspace_history("c:/a/B")

@@ -83,9 +83,11 @@ def clear_active_workspace_root() -> None:
 
 
 def _history_key(root: str | Path) -> str:
-    """Normalize a workspace root for de-duplication in the history list: case and
-    separator differences (`C:\\A\\b` vs `c:/a/B`) must not create two entries for the
-    same folder on Windows."""
+    """Normalize a workspace root for de-duplication in the history list, using the host
+    platform's own filesystem semantics (os.path.normcase/normpath) — on Windows this
+    folds case and `/`/`\\` separator differences (`C:\\A\\b` vs `c:/a/B`) so they don't
+    create two entries for the same folder; elsewhere both are already meaningful
+    differences and normcase is a no-op."""
     return os.path.normcase(os.path.normpath(str(root)))
 
 
