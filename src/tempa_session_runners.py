@@ -62,9 +62,16 @@ from tempa_session_outcome import apply_session_outcome
 # the runner incremented to 2, and the epic was marked failed a full round before its stall
 # limit was actually reached — spending the grace period implement_no_progress_rounds exists to
 # provide, on an epic that was still moving.
+#
+# "last_round_note_kind" belongs here for the same reason as "last_round_note" beside it, and for
+# one more: separating the two is the specific failure the kind exists to prevent, since a note
+# that loses its kind is silently promoted back to a claim to check. "cut_short_rounds" is an
+# allowance rather than a counter, so an agent-written value hands an epic grace it never earned —
+# the same bug as above with the sign flipped. "ended_waiting_halts" decides what a human is told.
 _RUNNER_OWNED_EPIC_KEYS = (
     "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
-    "no_progress_rounds", "qa_completed_features", "last_round_note",
+    "no_progress_rounds", "qa_completed_features", "last_round_note", "last_round_note_kind",
+    "cut_short_rounds", "ended_waiting_halts",
 )
 
 _MISSING = object()

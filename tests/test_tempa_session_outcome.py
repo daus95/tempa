@@ -29,6 +29,7 @@ def reset_runner_state():
         tso._state.server_overloaded_hit = False
         tso._state.backend_stuck_after_done_hit = False
         tso._state.background_tasks_terminated_hit = False
+        tso._state.reclaimed_process_count = 0
         tso._state.last_agent_message = ""
         tso._state.stop_event.clear()
     _clear()
@@ -574,3 +575,281 @@ def test_the_halt_reason_falls_back_to_the_log_when_nothing_was_captured(tmp_pat
 
     assert "some closing words" in _saved_epic()["blocked_reason"]
 
+
+# ---------------------------------------------------------------------------
+# _ended_waiting_on_killed_work / the cut-short grace
+#
+# The 2026-08-18 EPIC-02 incident: a session did 182 turns of QA fixes, live-verified three
+# features, started a 12-minute `dotnet test` in the background and closed its turn saying it
+# would report back once it finished. That reply ended the run; Tempa's container teardown then
+# reclaimed 38 processes including the test. Two such rounds is what implement_no_progress_rounds
+# reads as an epic blocked on something outside itself, so it was failed and the runner stopped.
+# ---------------------------------------------------------------------------
+
+# The incident's own closing sentence, verbatim from session_EPIC-02_20260818_162124.txt.
+_INCIDENT_CLOSE = (
+    "I'm waiting for the full failure-list test run (background) to complete so I can confirm "
+    "whether the 16th failure is a genuine regression or matches the pre-existing baseline. "
+    "I'll report back once it finishes."
+)
+
+
+def _cut_short(message=_INCIDENT_CLOSE, reclaimed=38):
+    """Put _state into the shape a round Tempa cut short leaves behind."""
+    tso._state.last_agent_message = message
+    tso._state.reclaimed_process_count = reclaimed
+
+
+def test_a_round_tempa_cut_short_does_not_trip_the_stall_limit(tmp_path):
+    """The load-bearing half is that the round is STILL COUNTED: no_progress_rounds reaches the
+    limit honestly, and only the verdict is deferred. A design that stopped counting would be an
+    exemption, and 82% of exit-0 sessions in the incident workspace reclaimed something."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    epic = _saved_epic()
+    assert epic["status"] == "on_progress"
+    assert epic["no_progress_rounds"] == 2
+    assert epic["cut_short_rounds"] == 1
+    assert not tso._state.stop_event.is_set()
+
+
+def test_the_cut_short_grace_runs_out_and_the_epic_still_fails(tmp_path):
+    """The design's falsifier: this test fails under a blanket exemption."""
+    _write_config([_epic(no_progress_rounds=1, cut_short_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["status"] == "failed"
+    assert tso._state.stop_event.is_set()
+
+
+def test_a_reclaim_without_a_promise_to_come_back_is_counted_as_before(tmp_path):
+    """Reclaim alone grants nothing - it is the 82% signal, not evidence."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short(message="The schema owner has not added the column.", reclaimed=40)
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    epic = _saved_epic()
+    assert epic["status"] == "failed"
+    assert "cut_short_rounds" not in epic
+
+
+def test_a_promise_to_come_back_with_nothing_reclaimed_is_counted_as_before(tmp_path):
+    """Corroboration is required, not optional: prose alone cannot carry the classification."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short(reclaimed=0)
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["status"] == "failed"
+
+
+def test_a_promise_found_only_above_the_closing_paragraph_is_not_a_waiting_close(tmp_path):
+    """Only the LAST paragraph counts. A session that mentioned reporting back earlier and then
+    closed with a summary of what it changed did not end its turn to wait."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short(message=(
+        "Kicked off the suite and I'll report back once it finishes.\n\n"
+        "## What changed\n- ParameterValueWriteService now publishes the change event\n"
+        "- ReadinessCheckResult gained a status field\n- Added the pending-check spec"
+    ))
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["status"] == "failed"
+
+
+def test_a_stuck_after_done_round_never_earns_the_grace(tmp_path):
+    """Checked as a flag rather than inferred from the count: terminate_tree() counts first and
+    leaves the job handle set, so a later close() can re-count from another thread."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short()
+    tso._state.backend_stuck_after_done_hit = True
+    tso._handle_stalled_round(tempa_config.load_config(), 0, "EPIC-01", 1, tmp_path / "s.txt")
+
+    assert "cut_short_rounds" not in _saved_epic()
+
+
+def test_the_grace_never_delays_an_automatic_reorder(tmp_path):
+    """Both automatic repairs need no human and must keep firing on the round they always have.
+    Only the verdict that costs a human is deferred."""
+    _write_config(
+        [_epic(no_progress_rounds=1, blocked_by_epic="EPIC-17"),
+         {"epic_name": "EPIC-17", "status": "pending"}],
+        implement_no_progress_rounds=2,
+    )
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    config = tempa_config.load_config()
+    assert [e["epic_name"] for e in config["epic"]] == ["EPIC-17", "EPIC-01"]
+    assert config["epic"][1]["status"] == "pending"
+    assert "cut_short_rounds" not in config["epic"][1]
+
+
+def test_the_grace_never_delays_a_qa_state_desync_repair(tmp_path):
+    """Same reason as the reorder: this repair is the automatic fix for the config write race
+    save_config's own docstring documents."""
+    _write_config([_epic(
+        no_progress_rounds=1, completed_features=2, total_features=2,
+        features=[{"id": "F1", "status": "done"}, {"id": "F2", "status": "done"}],
+    )], implement_no_progress_rounds=2)
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=2)
+
+    epic = _saved_epic()
+    assert epic["status"] == "done"
+    assert epic["qa_status"] == "idle"
+    assert "cut_short_rounds" not in epic
+
+
+def test_progress_clears_the_grace_an_interrupted_round_earned(tmp_path):
+    """Grace is for an epic that was interrupted, not one that is stuck."""
+    _write_config([_epic(
+        no_progress_rounds=1, cut_short_rounds=1, completed_features=2,
+        last_round_note="something", last_round_note_kind="unfinished_check",
+    )], implement_no_progress_rounds=2)
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    epic = _saved_epic()
+    assert epic["no_progress_rounds"] == 0
+    assert "cut_short_rounds" not in epic
+    assert "last_round_note_kind" not in epic
+
+
+def test_a_waiting_close_is_recorded_as_what_it_is_not_as_a_blocker(tmp_path):
+    """The Halted panel renders blocked_reason and nothing else. On EPIC-02 a human opened it and
+    read a sentence about waiting for a test run, which names no blocker and reads as though the
+    run were still going."""
+    _write_config([_epic(no_progress_rounds=1, cut_short_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    reason = _saved_epic()["blocked_reason"]
+    assert reason.startswith("This round did not report a blocker")
+    # The session's own words are quoted underneath, never suppressed: on the real incident the
+    # closing message was the only record anywhere that three features had been finished.
+    assert _INCIDENT_CLOSE in reason
+    assert "Continue Implementation" in reason
+
+
+def test_a_blocker_that_says_waiting_is_left_exactly_as_the_session_wrote_it(tmp_path):
+    """The named hazard, pinned: classifying by topic rather than tense would drop a real
+    blocker's own words from the panel."""
+    blocker = "Blocked waiting on the client's API key - nothing here can proceed without it."
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short(message=blocker, reclaimed=40)
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["blocked_reason"].startswith(blocker)
+
+
+def test_a_second_waiting_halt_stops_reassuring_the_reader(tmp_path):
+    """Continue Implementation runs --reset-failed itself, which zeroes every counter - so a
+    panel that always said "no investigation needed" would rubber-stamp an unbounded loop."""
+    _write_config(
+        [_epic(no_progress_rounds=1, cut_short_rounds=1, ended_waiting_halts=1)],
+        implement_no_progress_rounds=2,
+    )
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    reason = _saved_epic()["blocked_reason"]
+    assert "2th time" in reason
+    assert "completed_features" in reason
+
+
+def test_a_halt_with_no_named_blocker_does_not_claim_an_outside_blocker(tmp_path):
+    """The old message asserted "very likely blocked on something outside this epic" and then
+    conceded, one line later, that no epic had been named. The claim is the part a human reads
+    first, and it sends them hunting a dependency that does not exist."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    tso._state.last_agent_message = "Ran out of turns partway through the migration."
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["status"] == "failed"
+
+
+def test_a_stalled_round_with_nothing_to_quote_still_explains_itself(tmp_path):
+    """blocked_reason is assigned unconditionally on this path, so a round with no prose and an
+    unreadable log stored "". The dashboard renders its Halted panel only when that field is
+    truthy, so the epic became a bare red cross with no way out anywhere on the page."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _apply(tmp_path=tmp_path, completed_before=1, log_path=tmp_path / "does-not-exist.txt")
+
+    reason = _saved_epic()["blocked_reason"]
+    assert reason
+    assert "does-not-exist.txt" in reason
+    assert "--reset-failed" in reason
+
+
+def test_an_unfinished_check_is_labelled_as_one_for_the_next_round(tmp_path):
+    _write_config([_epic(no_progress_rounds=0)], implement_no_progress_rounds=3)
+    _cut_short()
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    epic = _saved_epic()
+    assert epic["last_round_note"] == _INCIDENT_CLOSE
+    assert epic["last_round_note_kind"] == "unfinished_check"
+
+
+def test_a_note_that_is_a_real_conclusion_carries_no_kind(tmp_path):
+    _write_config([_epic(no_progress_rounds=0)], implement_no_progress_rounds=3)
+    _cut_short(message="The shared engine's merge semantics are wrong.", reclaimed=0)
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    epic = _saved_epic()
+    assert epic["last_round_note"]
+    assert "last_round_note_kind" not in epic
+
+
+def test_a_non_english_waiting_close_falls_back_to_todays_behaviour(tmp_path):
+    """Pinning the limitation rather than leaving it to be discovered: the phrase list is English
+    and Claude-shaped, and a miss degrades to exactly the behaviour Tempa had before."""
+    _write_config([_epic(no_progress_rounds=1)], implement_no_progress_rounds=2)
+    _cut_short(message="Menunggu test suite selesai - akan saya laporkan setelah selesai.")
+    _apply(tmp_path=tmp_path, completed_before=1)
+
+    assert _saved_epic()["status"] == "failed"
+
+
+def test_tempas_own_reclaim_line_is_not_quoted_back_as_the_sessions_explanation(tmp_path):
+    """_log_reclaimed appends its message into the session log AFTER the agent's last word, so on
+    any session that left processes running it IS the tail. The [Done] trim cannot catch it: that
+    only fires when [Done] is the last line, and the reclaim paragraph lands after it."""
+    log_path = tmp_path / "session.txt"
+    log_path.write_text(
+        "I've completed the code changes and live verification for all three features.\n"
+        "[Done] turns=182 cost=$?\n"
+        "\n"
+        "[EPIC-02] the backend CLI exited but left 38 process(es) of its own still running - "
+        "typically a dev server, build daemon, watcher or test runner it started and never "
+        "stopped. Turn off Terminate leftover processes in Settings.\n",
+        encoding="utf-8",
+    )
+    tso._state.last_agent_message = ""
+
+    reason = tso._last_meaningful_log_lines(log_path)
+    assert reason == "I've completed the code changes and live verification for all three features."
+
+
+def test_a_reclaim_line_quoted_inside_a_tool_result_does_not_truncate_the_log(tmp_path):
+    """A session that cats a Tempa log mid-round must not be able to truncate its own explanation
+    at the quoted copy - hence the near-start-of-line bound.
+
+    The bound is a bound, not a proof: a quoted copy landing within the first 80 characters of a
+    line still trims, which is the deliberately accepted residue (it costs a fallback reason, not
+    a real one, since the capture in _remember_agent_message is preferred whenever it exists).
+    This fixture is what the real shape looks like - a [Result] line carrying a command and its
+    output before the quoted text begins."""
+    log_path = tmp_path / "session.txt"
+    log_path.write_text(
+        "[Result] $ tail -3 /c/work/repo/other-workspace/.tempa/logs/process_20260818_150522.txt "
+        "which printed the following three lines from that other run: "
+        "] the backend CLI exited but left 3 process(es) of its own still running\n"
+        "The migration is done and the suite is green.\n",
+        encoding="utf-8",
+    )
+    tso._state.last_agent_message = ""
+
+    assert tso._last_meaningful_log_lines(log_path).endswith("the suite is green.")

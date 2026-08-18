@@ -23,6 +23,19 @@ from tempa_config import get_logs_dir
 # --show-prompt. (The prompt is always recorded to the log file regardless.)
 SHOW_PROMPT = "--show-prompt" in sys.argv
 
+# The stable middle of the message `_log_reclaimed` writes into both the runner log and the
+# session log (tempa_session). Exported because the outcome layer has to RECOGNISE that line
+# rather than quote it: `_log_reclaimed` appends it after the agent's last word, so on any
+# session that left processes running it IS the tail of the log, and
+# `_last_meaningful_log_lines`' fallback would otherwise hand back Tempa's report of its own
+# cleanup as the session's explanation of why it stopped — telling the human, in the dashboard's
+# Halted panel, that their epic is blocked on "Turn off Terminate leftover processes". Verified
+# present at the tail of both incident logs (session_EPIC-02_20260818_154723.txt, 38 processes;
+# _20260818_162124.txt, 35). Lives here rather than in tempa_session because
+# tempa_session_outcome already imports this module and must never start importing the session
+# engine — that edge would constrain every future refactor of the engine, one way, forever.
+RECLAIMED_LINE_MARKER = "] the backend CLI exited but left "
+
 
 class _RunnerState:
     """Mutable cross-thread state shared by the poll loop (check_and_run) and whichever
@@ -42,6 +55,16 @@ class _RunnerState:
         self.server_overloaded_hit = False
         self.backend_stuck_after_done_hit = False
         self.background_tasks_terminated_hit = False
+        # How many processes this session's own container had to kill on teardown (see
+        # `_log_reclaimed`). The only ground truth Tempa has for "the backend left work running
+        # and Tempa terminated it" — which is exactly the shape the flag above demonstrably does
+        # NOT cover: on 2026-08-18 Claude Code exited 0 with a `dotnet test` of its own about a
+        # minute old, printed no marker at all, and the container reclaimed 38 processes.
+        # Read only for truthiness, never for magnitude: `_PosixProcessGroup.terminate_tree`
+        # returns a literal 0-or-1 rather than a count (`count_is_exact` is False there), so any
+        # rule keyed on "how many" would quietly mean something different on Linux than on
+        # Windows. Reset per session in `_stream_backend_process`, like the flags above.
+        self.reclaimed_process_count = 0
         # The agent's own closing words from the session that just ran — its last piece of plain
         # prose, as opposed to a tool call or a tool result. Captured while streaming because it
         # cannot be recovered from the log file afterwards: a backend renders a tool result as one

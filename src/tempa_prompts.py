@@ -12,7 +12,13 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from tempa_config import PROMPT_DIR, get_config_path, get_sources, read_principles
+from tempa_config import (
+    LAST_ROUND_NOTE_UNFINISHED_CHECK,
+    PROMPT_DIR,
+    get_config_path,
+    get_sources,
+    read_principles,
+)
 from tempa_decisions import answered_features, blocked_features
 from tempa_logging import log
 from tempa_qa_history import earlier_report_paths, last_report_path
@@ -226,6 +232,70 @@ def _build_settled_findings_section(epic_entry: dict, current_report: str) -> st
     )
 
 
+def _collectable_work_block(record_rule: str) -> str:
+    """The rule that a session must not start work it cannot collect before its turn ends.
+
+    `AUTONOMOUS_SYSTEM_PROMPT` has forbidden this since 0.6.6 — twice, added after two earlier
+    incidents of the same class — and the incident this exists for happened anyway, in a session
+    that COMPLIED with it. It asked for the foreground with `"timeout": 600000` and was answered
+    "Command did not complete within its 600s timeout and was moved to the background"
+    (session_EPIC-02_20260818_162124.txt:25-26); its later attempt to wait for the job in the
+    foreground, with an `until [ -s ... ]; do sleep 5; done` loop, was backgrounded too. So
+    repeating the prohibition buys nothing. Three things here are new, and they are the whole
+    reason this is not the system-prompt rule with a louder voice:
+
+    - It names a REACHABLE move. "Use the foreground" is not followable for a twelve-minute suite;
+      "narrow it until it fits" is. The system prompt has been corrected to say the same thing.
+    - It names the stakes in this stage's own terms — the config.json record, the stall counter —
+      which a cross-stage system prompt cannot do.
+    - It hangs the requirement off an action the agent already performs per feature, rather than
+      off "before your turn ends", which has to be recalled at turn 182 when attention is lowest.
+
+    That last one is the clause that actually breaks the incident, and it is an ordering
+    inversion rather than another prohibition. Session #1's own closing message names the ordering
+    as its reason: "I've completed the code changes and live verification for all three features
+    this session (FEAT-02-02, FEAT-02-04, FEAT-02-05). I'm now waiting for the full
+    Configuration.Tests suite (270+ tests, background) to finish as a final regression check
+    *before* updating `.tempa/config.json`." `features_per_session` is 3 — that round finished its
+    entire allotted batch, verified all of it, and recorded none of it.
+
+    The trade deliberately accepted: a feature is recorded before a wider regression run has had
+    its say, so a `done` that a later suite disproves goes back through QA as `require_fixing` —
+    one extra round. That is the right direction for this runner, because an unrecorded feature is
+    invisible and a wrongly-recorded one is correctable, but it IS a trade and it will occasionally
+    produce a done that QA reverses. Which is why the rule says "checked with something you could
+    complete inside this turn" rather than simply "finished", and why it points a feature it could
+    not check at the two rules below rather than letting it be recorded optimistically.
+
+    Inline here rather than in `src/prompt/*.md` because every rule the runner's own state machine
+    depends on lives here (`config_rule`, `dependency_block`, `_blocked_feature_block`,
+    `_last_round_note_block`): it must not be editable away by a user tuning stage wording.
+    CONTRIBUTING's "prefer the templates" covers wording, not invariants. Not added to
+    `build_prompt` alongside the principles either — a clarify or plan-epics session gets nothing
+    from a rule whose teeth are the stage-specific record clause, and the stage-generic version of
+    this text is the system-prompt rule again."""
+    return (
+        "MANDATORY RULE — DO NOT START WORK THIS SESSION CANNOT COLLECT:\n"
+        "This session ends the instant you reply without calling a tool. No human is here and\n"
+        "nothing re-invokes you, so that reply is the last thing that happens — and every process\n"
+        "this session left running is terminated along with it. Work still going when you finish\n"
+        "produces a result nobody ever reads, and the next round is a fresh session that has\n"
+        "never heard of it.\n"
+        "  1. Run builds and test suites in the FOREGROUND. If one will not fit inside your\n"
+        "     tool's own timeout ceiling, do NOT background it to get around the ceiling and do\n"
+        "     NOT ask for a longer timeout — neither works, and the harness will move the command\n"
+        "     to the background by itself. NARROW the run until it fits (one project, one filter,\n"
+        "     the failing set only) and run the narrowed version. Stop any server, watcher or\n"
+        "     daemon you start as soon as you are done with it.\n"
+        "  2. Send full output to a file and read the file. Do not pipe it through `tail`: a run\n"
+        "     that reports how many tests failed but not which ones has to be repeated in full to\n"
+        "     find out, and that is a second long run this session does not have time for.\n"
+        f"{record_rule}"
+        "Your final message is a report, not a promise to come back. \"I'll report back once it\n"
+        "finishes\" is the one closing sentence that guarantees nothing ever does.\n"
+    )
+
+
 def build_session_prompt(
     config: dict,
     epic_name: str,
@@ -312,11 +382,24 @@ def build_session_prompt(
         f"Do NOT violate the architecture just to make progress on this epic.\n"
     )
 
+    record_rule = (
+        f"  3. Record each feature in {get_config_path()} per the rule above the moment you have\n"
+        f"     finished it AND checked it with something you could complete inside this turn —\n"
+        f"     BEFORE you start any wider regression or verification run. Work that is real but\n"
+        f"     unrecorded is work this run cannot see: the round is scored as having achieved\n"
+        f"     nothing, and enough of those in a row mark this epic \"failed\" and stop the whole\n"
+        f"     plan. A later run that disagrees is a reason to fix the feature next round, not a\n"
+        f"     reason to withhold the record now. A feature you could not finish, or could not\n"
+        f"     check at all, stays as it is — and if what stops you is a decision or work another\n"
+        f"     epic owns, use the two rules below rather than your closing message.\n"
+    )
+
     qa_report_section = _build_qa_report_section(config, epic)
     prompt = (
         build_prompt(template, params) + "\n\n" + features_block
         + _last_round_note_block(config, epic) + qa_report_section
-        + config_rule + "\n" + dependency_block + "\n" + _blocked_feature_block(config, epic)
+        + config_rule + "\n" + _collectable_work_block(record_rule) + "\n"
+        + dependency_block + "\n" + _blocked_feature_block(config, epic)
         + "\n" + config_path_note
     )
 
@@ -337,11 +420,41 @@ def _last_round_note_block(config: dict, epic: str) -> str:
     the last round believed — and on that same epic the first three rounds' blockers were WRONG,
     disproved by the fourth round's own investigation. So it is passed as a claim to check, with
     the two acceptable outcomes named: disprove it and get on with the work, or confirm it and
-    record it properly. Quietly re-deriving it a third time is the one thing that must stop."""
+    record it properly. Quietly re-deriving it a third time is the one thing that must stop.
+
+    A note is not always a conclusion, and the frame above is wrong for the other kind. Round 2 of
+    the EPIC-02 incident was handed round 1's "I'm now waiting for the full Configuration.Tests
+    suite (270+ tests, background) to finish... I'll report back once it completes." under this
+    exact header, followed by "Check it against the code as it stands now, first"
+    (process_20260818_150522.txt:760). It did: it re-ran the suite, in the background, for twelve
+    minutes, and ended the same way. Handing an intention over as a claim to check does not merely
+    waste the frame — it instructs the next round to redo the thing that killed the last one.
+
+    `last_round_note_kind` picks the frame, and an ABSENT kind means "claim", which is what every
+    note written before that field existed is — including the one sitting on EPIC-02 today. That
+    is why the default frame carries the same warning as a paragraph: classification is better
+    when Tempa can do it from evidence, but a note it cannot classify must still not be able to
+    send the next round back into the trap. The classification is deliberately never done from the
+    note's own text at read time — "waiting on something external" is a legitimate blocker, and no
+    keyword separates the two by topic."""
     epic_entry = next((s for s in (config.get("epic") or []) if s.get("epic_name") == epic), None)
     note = str((epic_entry or {}).get("last_round_note") or "").strip()
     if not note:
         return ""
+    if str((epic_entry or {}).get("last_round_note_kind") or "") == LAST_ROUND_NOTE_UNFINISHED_CHECK:
+        return (
+            f"AN UNFINISHED CHECK FROM THE ROUND BEFORE — ITS RESULT NO LONGER EXISTS:\n"
+            f"{note}\n"
+            f"That round ended its turn to wait for something it had started, which is how a\n"
+            f"session ends here — and Tempa then terminated what it had left running. No result\n"
+            f"ever arrived and none is coming. Do NOT treat the text above as a result and do NOT\n"
+            f"wait on it: whatever it describes is unverified as of right now. If it still\n"
+            f"matters, redo that check yourself this round, narrowed so it completes inside one\n"
+            f"foreground command, under the collect-your-own-work rule below. Read\n"
+            f"{get_config_path()} against the code FIRST — work that round says it finished may\n"
+            f"never have been recorded, and re-implementing something already done is how the\n"
+            f"round after this one also ends with nothing.\n\n"
+        )
     return (
         f"WHAT THE PREVIOUS ROUND SAID WHEN IT ENDED WITHOUT FINISHING A FEATURE:\n"
         f"{note}\n"
@@ -349,9 +462,13 @@ def _last_round_note_block(config: dict, epic: str) -> str:
         f"has turned out to be wrong before, disproved by the very next round that looked at it.\n"
         f"Check it against the code as it stands now, first, and then do one of exactly two\n"
         f"things: if it does NOT hold, say so plainly and get on with the work; if it DOES hold,\n"
-        f"record it through the blocked-feature rule below so it reaches the user. Do not spend\n"
-        f"this round re-deriving it and restating it — that is what the previous round already\n"
-        f"did, and repeating it makes no progress and reaches nobody.\n\n"
+        f"record it through the blocked-feature rule below so it reaches the user.\n"
+        f"If that note says only that the round was waiting on something it had started, it is\n"
+        f"neither a claim nor a blocker: that session ended when it said so, whatever it was\n"
+        f"waiting on was terminated with it, and the result it expected never existed. Redo the\n"
+        f"check yourself, narrowed, under the collect-your-own-work rule below.\n"
+        f"Do not spend this round re-deriving it and restating it — that is what the previous\n"
+        f"round already did, and repeating it makes no progress and reaches nobody.\n\n"
     )
 
 
@@ -469,7 +586,16 @@ def build_qa_prompt(config: dict, epic_name: str, qa_output_file: Path, is_conti
         template = load_prompt("qa_continuation") or load_prompt("qa")
     else:
         template = load_prompt("qa")
-    return build_prompt(template, params)
+    record_rule = (
+        f"  3. The report at {qa_output_file} and the {get_config_path()} update are this\n"
+        f"     session's only output. Start nothing after them that could outlast your turn, and\n"
+        f"     nothing before them whose result you cannot collect in time to write them. A QA\n"
+        f"     round whose verdict was never recorded cannot be told apart from one that never\n"
+        f"     ran: \"qa_status\" stays \"ongoing\", this same round is resumed ahead of every\n"
+        f"     other epic in the plan, its verdict never reaches the history the loop guard\n"
+        f"     reads, and the application you left running is terminated either way.\n"
+    )
+    return build_prompt(template, params) + "\n" + _collectable_work_block(record_rule)
 
 
 def _format_answer(answer: str) -> str:
