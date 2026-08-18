@@ -18,6 +18,7 @@ import copy
 import json
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -87,6 +88,14 @@ def get_qa_dir() -> Path:
 
 def get_verify_dir() -> Path:
     return _tempa_dir() / "verify"
+
+
+def get_decisions_dir() -> Path:
+    """Where a decision answered from outside the runner is recorded until the runner has
+    acted on it (see tempa_decisions.record_answer). One file per answered feature — the same
+    "one writer, one reader" shape as the graceful-stop sentinels below, and for the same
+    reason: config.json alone cannot carry state written from another process."""
+    return _tempa_dir() / "decisions"
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +390,105 @@ def read_config_safe() -> dict:
     except (OSError, json.JSONDecodeError):
         return {}
     return config if isinstance(config, dict) else {}
+
+
+# ---------------------------------------------------------------------------
+# Cross-process lock for a read-modify-write of config.json.
+#
+# save_config() above is atomic against a torn *read* but not against a lost *update*: two
+# processes that each load, edit and save keep only the second one's version of everything
+# the first one touched. That is tolerated for the runner's own writes (see its docstring),
+# but not for a write arriving from outside the runner while a run is going — the dashboard
+# answering a blocked feature's question has to edit one field of a file that the runner and
+# the spawned agent are both writing to, and losing it means the user's decision silently
+# never happened.
+#
+# O_CREAT|O_EXCL is the whole mechanism: creating the file IS acquiring the lock, on Windows
+# and POSIX alike, with no platform branch and no dependency. Its one weakness is that a
+# process killed while holding it leaves the file behind, so a lock older than
+# _STALE_LOCK_SEC is broken — the critical section is a read, a field assignment and a write,
+# so an age measured in seconds means a crash, not a slow writer.
+#
+# Acquisition FAILS OPEN: on timeout the body runs unlocked rather than raising, the same way
+# every other filesystem helper here degrades instead of stopping a run. An unlocked surgical
+# write is still far safer than the load-modify-save it replaces — it re-reads first and
+# touches one field — whereas refusing to write would drop a decision the user already made.
+# ---------------------------------------------------------------------------
+_STALE_LOCK_SEC = 30.0
+_LOCK_POLL_SEC = 0.05
+
+
+def get_config_lock_path() -> Path:
+    """Lock file guarding a read-modify-write of config.json. Lives beside config.json so it
+    follows the active workspace, exactly like the graceful-stop sentinels."""
+    return _tempa_dir() / "config.lock"
+
+
+def _break_stale_lock(path: Path) -> None:
+    """Drop a lock file left behind by a process that died holding it."""
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return
+    if age > _STALE_LOCK_SEC:
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
+@contextlib.contextmanager
+def config_lock(timeout: float = 10.0):
+    """Hold the config.json lock for the duration of the block.
+
+    Yields True when the lock was actually acquired and False when it timed out and the body
+    is running unlocked (see the fail-open rationale above), so a caller that wants to log the
+    difference can and one that doesn't can ignore it."""
+    path = get_config_lock_path()
+    deadline = time.monotonic() + max(timeout, 0.0)
+    fd = None
+    while True:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError):
+            # Held by someone else, or — on Windows — momentarily unopenable while its holder
+            # releases it. Either way the answer is to wait and retry.
+            _break_stale_lock(path)
+        except OSError:
+            # An unwritable .tempa/ is not a reason to lose the write: proceed unlocked
+            # rather than spinning until the deadline over a condition that won't clear.
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(_LOCK_POLL_SEC)
+    try:
+        if fd is not None:
+            # Contents are only ever read by a human wondering who is holding it.
+            with contextlib.suppress(OSError):
+                os.write(fd, f"{os.getpid()} {datetime.now().isoformat()}".encode())
+        yield fd is not None
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            with contextlib.suppress(OSError):
+                path.unlink()
+
+
+def update_config(mutate) -> bool:
+    """Apply `mutate` to config.json as one locked read-modify-write; report whether it saved.
+
+    The point is the re-read: the config handed to `mutate` is loaded from disk INSIDE the
+    lock, so a caller can never write back a document it read before another process edited
+    it. `mutate(config)` returns True to have the result saved and False to leave the file
+    untouched. Use this rather than load_config()/save_config() for any write that can happen
+    while a run is in progress."""
+    with config_lock():
+        config = read_config_safe() or load_config()
+        if not mutate(config):
+            return False
+        save_config(config)
+        return True
 
 
 def get_workspace(config: dict) -> dict:

@@ -51,6 +51,7 @@ JS_PARTS = (
     "64-clarify-run.js",
     "66-clarify-stop.js",
     "70-implement.js",
+    "72-decisions.js",
     "75-verify.js",
     "80-settings-form.js",
     "82-settings-save.js",

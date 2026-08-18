@@ -14,6 +14,7 @@ import time
 import pytest
 
 import tempa_config
+import tempa_decisions
 import tempa_implement as ti
 from tempa_logging import _state
 
@@ -648,7 +649,7 @@ def _deferred_epic(name="EPIC-04", answer=""):
         "epic_name": name, "status": "deferred", "qa_passed": False, "qa_status": "done",
         "completed_features": 1, "total_features": 2,
         "features": [
-            {"id": "F1", "status": "done"},
+            {"id": "F1", "name": "Groundwork", "status": "done"},
             {"id": "F2", "name": "Engine migration", "status": "blocked",
              "blocked_question": "Migrate, or descope?",
              "blocked_recommendation": "Descope for now.",
@@ -755,3 +756,71 @@ def test_running_out_of_work_with_nothing_deferred_says_nothing(isolate_tempa_pa
     assert ti._log_deferred_epics_on_stop({"epic": [
         {"epic_name": "EPIC-01", "status": "done", "qa_passed": True},
     ]}) is False
+
+
+def test_a_dropped_feature_does_not_leave_its_epic_deferred_forever(isolate_tempa_paths):
+    """answer_hint has always documented dropping a feature by setting its status to `done` —
+    but a dropped feature is no longer `blocked`, so answered_features() cannot see it, and the
+    epic sat in `deferred` with nothing left to answer, skipped by the scheduler and the QA gate
+    alike. Requeueing on "nothing left waiting" rather than on "something was answered" is what
+    covers it."""
+    config = {"epic": [_deferred_epic()]}
+    config["epic"][0]["features"][1]["status"] = "done"
+    config["epic"][0]["features"][1]["blocked_answer"] = "Not wanted any more."
+
+    assert ti._resume_answered_decisions(config) is True
+    assert config["epic"][0]["status"] == "require_fixing"
+
+
+def test_an_epic_deferred_with_a_question_still_open_is_left_alone(isolate_tempa_paths):
+    """The other side of the same rule — "nothing left waiting" must not fire while something
+    is."""
+    config = {"epic": [_deferred_epic()]}
+    assert ti._resume_answered_decisions(config) is False
+    assert config["epic"][0]["status"] == "deferred"
+
+
+def test_check_and_run_applies_a_decision_answered_from_the_dashboard(isolate_tempa_paths, monkeypatch):
+    """End to end through the poll: a recorded answer is applied to config.json, the epic comes
+    off `deferred`, and the session that picks it up is handed the decision."""
+    tempa_config.save_config({"epic": [_deferred_epic()]})
+    tempa_decisions.record_answer("EPIC-04", "F2", "Descope it, per your recommendation.")
+    monkeypatch.setattr(ti, "run_session", lambda *a, **k: None)
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    epic = tempa_config.load_config()["epic"][0]
+    assert epic["features"][1]["blocked_answer"] == "Descope it, per your recommendation."
+    assert epic["status"] != "deferred"
+
+
+def test_check_and_run_reapplies_an_answer_another_writer_wiped(isolate_tempa_paths, monkeypatch):
+    """config.json has several uncoordinated writers, so an answer written into it can be
+    overwritten by whichever of them next saves a copy it read beforehand. Re-applying every
+    poll makes that cost a poll interval instead of costing the decision."""
+    tempa_config.save_config({"epic": [_deferred_epic()]})
+    tempa_decisions.record_answer("EPIC-04", "F2", "Descope it.")
+    monkeypatch.setattr(ti, "run_session", lambda *a, **k: None)
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    assert tempa_config.load_config()["epic"][0]["features"][1]["blocked_answer"] == "Descope it."
+
+
+def test_check_and_run_drops_a_feature_that_was_answered_with_a_drop(isolate_tempa_paths, monkeypatch):
+    tempa_config.save_config({"epic": [_deferred_epic()]})
+    tempa_decisions.record_answer("EPIC-04", "F2", "Superseded by EPIC-09.", drop=True)
+    monkeypatch.setattr(ti, "run_session", lambda *a, **k: None)
+
+    ti.check_and_run()
+    if _state.running_thread is not None:
+        _state.running_thread.join(timeout=5)
+
+    epic = tempa_config.load_config()["epic"][0]
+    assert epic["features"][1]["status"] == "done"
+    assert epic["features"][1]["blocked_answer"] == "Superseded by EPIC-09."
+    assert epic["status"] != "deferred"

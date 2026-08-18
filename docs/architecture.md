@@ -53,7 +53,7 @@ functions directly in-process.
 | `tempa_process_group_win.py` | The Windows half of the above: Job Object ctypes structs and kernel32 prototypes. Written to import on every platform (no `ctypes.wintypes`, lazy `WinDLL`) so its struct layout is covered by tests on ubuntu CI. |
 | `tempa_session_runners.py` | The per-stage runners on top of that engine — implementation, QA, one-shot (plan/review), clarification, apply-clarification. Each decides what to log, what to record in config.json, and which session id to keep so the next round can resume instead of re-reading everything. |
 | `tempa_session_outcome.py` | What a finished implementation session MEANS for its epic — `apply_session_outcome()`, called by `run_session` under `_state.lock`. Exit code 0 is not the same question as "did this epic make progress?": a usage-limit/auth/overload stop is a pause, a session the backend cut short is not a stalled epic, and an exit-0 session that completed no feature for `implement_no_progress_rounds` rounds gets triaged into reorder-the-plan / repair-a-QA-state-desync / fail-and-stop. |
-| `tempa_decisions.py` | Reading the "this needs a human" state off an epic: which features are `blocked` and still waiting, which have an answer to act on, whether the epic has other work it could get on with, and how to render the question for a person. Pure — it decides and writes nothing; the judgement calls built on it live in `tempa_session_outcome` (when to defer), `tempa_implement` (when to requeue) and `tempa_prompts` (what to tell the session). See [start-implementation.md](start-implementation.md#decisions-only-you-can-make). |
+| `tempa_decisions.py` | The "this needs a human" state on an epic: which features are `blocked` and still waiting, which have an answer to act on, whether the epic has other work it could get on with, and how to render the question for a person. It decides nothing — the judgement calls built on it live in `tempa_session_outcome` (when to defer), `tempa_implement` (when to requeue) and `tempa_prompts` (what to tell the session). It also owns the recorded-answer files under `.tempa/decisions/` (`record_answer` / `apply_pending_answers`) and the single definition of what answering does (`apply_answer_to_config`), shared by the dashboard's write and the runner's re-application so the two can't drift. See [start-implementation.md](start-implementation.md#decisions-only-you-can-make). |
 | `tempa_backend.py` | Per-CLI backend adapters (Claude Code, GitHub Copilot CLI, OpenAI Codex CLI): argv building (including the `--effort`/`--reasoning-effort`/`-c model_reasoning_effort=...` flag per backend), prompt delivery (stdin vs. a sidecar file for CLIs whose `-p`-style flag can't take a multi-line argument on Windows), output parsing, session-id extraction, usage-limit/auth-error markers, each backend's valid reasoning-effort levels (per-model for Codex, uniform for Claude/Copilot — see `is_valid_reasoning_effort`), and per-backend readiness (`get_backend_status()` — see [cli-availability.md](cli-availability.md)). |
 | `tempa_clarify.py` | The clarify workflow: evaluate, answer, apply, and the evaluate+apply finalize loop. |
 | `tempa_implement.py` | The implement poll loop and scheduler: `check_and_run` walks four steps in priority order — `_resume_interrupted_qa`, `_resume_in_progress_epic`, `_run_qa_gate`, `_start_next_epic` — and the first one that takes the poll wins. That order IS the policy: resuming interrupted work beats starting new work, and no epic is implemented past one still waiting on QA. |
@@ -69,6 +69,7 @@ functions directly in-process.
 | `dashboard_server.py` | `_DashboardHandler` — the HTTP layer and nothing else: two route tables (`GET_ROUTES`/`POST_ROUTES`), body/query reading, and one thin adapter per route that hands off to a `dashboard_api_*` module and sends back the `(status, payload)` it returns. |
 | `dashboard_api_spec.py` | Specification pane: read/save/upload/delete/rename inside the PRD folder, all confined to it by `dashboard_spec._resolve_within`. |
 | `dashboard_api_clarify.py` | Clarification pane: render one findings file, write answers back into it (`apply_answers_to_file`), the skip-minor toggle, and the server-side gate on starting a Finalized Clarification run. |
+| `dashboard_api_decisions.py` | Answering a blocked feature's question from the Implementation page. The one dashboard write that has to assume a run is happening underneath it, so it records the decision under `.tempa/decisions/` first and only then edits `config.json` through `tempa_config.update_config` — locked, re-read inside the lock, one field touched. |
 | `dashboard_api_status.py` | The read-only/polled endpoints: `/api/tree`'s first-paint payload, both live run-status payloads, the log and QA-report viewers, the update check, and `backend_status()` (see [cli-availability.md](cli-availability.md)). |
 | `dashboard_api_settings.py` | Settings pane: reading config.json for the form, and validating + saving it back. The validation is plain functions over the payload, so every rule (and its user-facing message) is testable without HTTP. Architecture Principles and the SMTP test live here too. |
 | `dashboard_api_workspace.py` | Home page's working-folder controls and the Settings maintenance actions — select/open/detach a workspace, Clear Everything, apply an update, restart the server. Each shells out to `tempa.py <command>` rather than doing the work in-process (see [The CLI/dashboard boundary](#the-clidashboard-boundary)). |
@@ -153,6 +154,9 @@ A key in `config.json` was the obvious alternative and is the wrong one: the run
 threads read-modify-write that file constantly, so a flag written from outside would be lost the
 next time the runner saved. A separate file has one writer and one reader and races with nothing.
 
+The same reasoning produced the second cross-process channel, `.tempa/decisions/` — see
+[Answering a decision](#answering-a-decision-the-other-write-that-crosses-the-boundary) below.
+
 Who reads it, and where the stop lands:
 
 | Run | Reader | Seam |
@@ -171,6 +175,33 @@ The same file is what makes `tempa implement --stop-graceful` in a terminal stop
 the dashboard, and vice versa: both sides resolve it through the active workspace. The dashboard's
 status endpoints OR the sentinel into the in-memory flag so a request made either way shows up in
 the UI.
+
+### Answering a decision: the other write that crosses the boundary
+
+Answering a blocked feature is the one dashboard action that writes into the `epic` array while a
+run may be underway, so it faces the graceful-stop problem from the opposite direction: not "how
+does a request reach the runner" but "how does a value survive in a file three processes write".
+
+Both halves of that are handled, because both can lose the answer:
+
+- **This write clobbering someone else's.** `tempa_config.update_config` takes `.tempa/config.lock`
+  (an `O_CREAT|O_EXCL` lock file — no platform branch, no dependency), re-reads `config.json` from
+  disk *inside* the lock, mutates the one feature, and saves atomically. It can never write back a
+  document it read before another process edited it. A lock older than 30 seconds is broken as a
+  crashed holder's, and acquisition fails open: on timeout the body runs unlocked rather than
+  raising, because refusing to write would drop a decision the user has already made.
+- **Someone else clobbering this write.** Nothing makes the runner or the spawned agent take that
+  lock — the agent edits `config.json` with its own tools. So the answer is *also* recorded under
+  `.tempa/decisions/<EPIC>__<FEATURE>.json` before `config.json` is touched at all, and
+  `tempa_implement.check_and_run` re-applies every recorded answer on each poll. An overwrite then
+  costs a poll interval instead of the decision. The record is retired once the answer is in
+  `config.json` **and** the feature has left `blocked` — i.e. once the epic is genuinely back in
+  the queue; retiring it any earlier would reopen the window it exists to close.
+
+`save_config` itself is deliberately left unlocked. Its callers' read-modify-write spans are far
+wider than a write-time lock could cover, most already run under `_state.lock`, and wrapping ~40
+call sites invites deadlock for no real gain — the recorded-answer file is what actually makes the
+value durable.
 
 ## Prompt construction
 

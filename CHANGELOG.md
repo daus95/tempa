@@ -8,6 +8,45 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **A feature parked on your decision can now be answered from the dashboard.** Shipping the
+  blocked-feature mechanism in 0.7.0 left the answering half where it had always been: the
+  callout told you to open `config.json`, find the right entry among the epics, and type into a
+  `blocked_answer` field. On a real plan that is a 300KB file with a running agent writing to it,
+  which is a bad thing to ask anyone to edit by hand and an easy thing to break — one live epic
+  sat deferred rather than be answered. A deferred epic's card now shows each blocked feature's
+  question and the session's own recommendation as their own elements, with an **Answer…** button
+  that opens a dialog offering three choices: follow the recommendation, write your own answer, or
+  drop the feature. Saving does everything the manual edit did, and the epic returns to the queue
+  on the next poll exactly as before. The old instructions still work and are still what
+  `tempa status`, the halt log and the decision email show, since there is no button in any of
+  those.
+- **The answer can't be lost to a config.json write race.** `config.json` has several
+  uncoordinated writers — the runner's session threads, and the spawned agent, which is told to
+  edit its own epic's entry directly — so a field written from a third process can be overwritten
+  by whichever of them next saves from a copy it read beforehand. That failure is silent and it is
+  the worst one available here: you believe you decided, and the epic never comes back. Answering
+  is therefore written down twice. The decision is recorded first under `.tempa/decisions/`, one
+  file per answered feature, with one writer and one reader — the same shape the graceful-stop
+  sentinel already uses, and for the same stated reason. Only then is `config.json` edited, through
+  a new cross-process lock (`.tempa/config.lock`) that re-reads the file inside the lock and
+  touches nothing but that one field, so this write can never clobber another's either. The runner
+  re-applies the recorded answer on every poll until the epic has actually moved, so an overwrite
+  costs a poll interval instead of the decision, and the record is deleted once it has been acted
+  on.
+
+### Fixed
+
+- **Dropping a blocked feature no longer strands its epic in `deferred` forever.** The instructions
+  have always offered dropping a feature outright — set its `status` to `done` and say why in
+  `blocked_answer` — but a dropped feature is no longer `blocked`, so the check for "has this been
+  answered" could not see it, and `deferred` is skipped by both the scheduler and the QA gate. The
+  epic was left parked with nothing remaining to answer and no way back into the queue short of
+  editing its status by hand. An epic now returns to the queue as soon as nothing is left waiting
+  on you, which covers being answered and being dropped alike — including a drop done by hand,
+  which was the only way to do one before this release.
+
 ## [0.7.0] - 2026-08-18
 
 ### Added

@@ -400,12 +400,34 @@ epics behind it, and the rest of the plan carries on. An
 `implementation_decision_required` email alert fires with the question and the recommendation
 in it, and `tempa status` and the dashboard card show both.
 
-**How you answer.** Write your decision into that feature's `blocked_answer` field in
-`config.json`. There is no command to remember — the next poll picks it up, puts the feature
-back to `require_fixing` and the epic back in the queue, and hands your answer to the session
-that takes it, which is told to implement it as given and not re-argue it. To drop the feature
-instead, set its `status` to `done` and say why in `blocked_answer`. Either way the answer stays
-on the feature afterwards, as the record of what was decided and why.
+**How you answer.** On the dashboard's Implementation page, the deferred epic's card shows the
+question and the recommendation with an **Answer…** button beside them. That opens a dialog with
+three choices — follow the recommendation, write your own answer, or drop the feature — and Save
+records it. There is no command to remember and nothing to reset: the next poll picks the answer
+up, puts the feature back to `require_fixing` and the epic back in the queue, and hands your
+decision to the session that takes it, which is told to implement it as given and not re-argue it.
+
+Answering by hand still works and does exactly the same thing — write into that feature's
+`blocked_answer` field in `config.json`, or set its `status` to `done` and say why in
+`blocked_answer` to drop it. Either way the answer stays on the feature afterwards, as the record
+of what was decided and why.
+
+**Why answering is written down twice.** `config.json` has several uncoordinated writers: the
+runner's own session threads, and the spawned agent, which is told to edit its epic's entry
+directly. A field written into it from anywhere else can be overwritten by whichever of them next
+saves a copy it read beforehand — and a lost answer is the worst way this can fail, because you
+believe you decided and the epic simply never comes back. So an answer saved from the dashboard is
+recorded first in its own file under `.tempa/decisions/` (one file per answered feature, one
+writer, one reader) and only then written into `config.json`, under a cross-process lock and
+re-reading the file inside it so the write touches nothing but that one field. The runner
+re-applies the recorded answer on every poll until the epic has actually moved, so an overwrite
+costs a poll interval rather than the decision, and the record is retired once it has been acted
+on.
+
+Dropping a feature used to leave its epic stuck: a dropped feature is no longer `blocked`, so
+nothing recognised it as answered, and `deferred` is skipped by the scheduler and the QA gate
+alike. An epic now returns to the queue as soon as *nothing is left waiting on you*, whether that
+came about by answering or by dropping.
 
 If a run ends while a question is still open, the stop message says so and prints it rather
 than reporting the plan as finished — and a deferred epic still counts as unfinished plan, so

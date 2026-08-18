@@ -30,6 +30,16 @@ is never counted as complete, so nothing about this path lets an epic reach `don
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
+import re
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+from tempa_config import get_decisions_dir
+
 # Set by the session on a feature it cannot finish without an answer; see _blocked_feature_block.
 FEATURE_BLOCKED = "blocked"
 # Statuses that mean "there is still implementation work here the runner can hand to a session".
@@ -92,5 +102,153 @@ def answer_hint(config_path: str, epic_name: str) -> str:
         "write your decision into the blocked feature's \"blocked_answer\" field. The epic goes "
         "back into the queue by itself on the next run — the answer is handed to the session that "
         "picks it up. To drop the feature instead, set its \"status\" to \"done\" and say why in "
-        "\"blocked_answer\"."
+        "\"blocked_answer\". Or answer it from the dashboard's Implementation page, which "
+        "does all of that for you."
     )
+
+
+# ---------------------------------------------------------------------------
+# Recorded answers — how a decision made outside the runner survives long enough to be acted
+# on.
+#
+# config.json cannot carry it alone. The runner's session threads read-modify-write that file
+# constantly and the spawned agent is told to edit its own epic's entry directly, so a field
+# written from a third process can be overwritten by whichever of them next saves from a copy
+# it read earlier — the same reasoning that made the graceful-stop request a sentinel file
+# rather than a config key (see tempa_config.get_graceful_stop_path). A lost answer is the
+# worst failure this feature has: the user believes they decided, and the epic never comes
+# back.
+#
+# So an answer is recorded here first, in its own file, and re-applied by the runner on every
+# poll until it has demonstrably been acted on. One file per answered feature, so two answers
+# saved at once are two files with one writer each rather than one file two processes are both
+# rewriting.
+# ---------------------------------------------------------------------------
+_SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _answer_filename(epic_name: str, feature_id: str) -> str:
+    """A filesystem-safe name for the (epic, feature) pair an answer belongs to. Only that pair
+    identifies the file, so re-answering overwrites rather than accumulating."""
+    slug = _SLUG_UNSAFE.sub("-", f"{epic_name}__{feature_id}").strip("-")
+    return f"{slug or 'decision'}.json"
+
+
+def record_answer(epic_name: str, feature_id: str, answer: str, drop: bool = False) -> Path:
+    """Record a decision under .tempa/decisions/ and return the file it was written to.
+
+    Written the way config.json is (temp file in the same directory, then os.replace), so a
+    reader sees either the whole answer or none of it. Callers write this BEFORE touching
+    config.json: crashing between the two then leaves a decision the runner will still apply,
+    whereas the reverse order could lose one the user has already been told was saved."""
+    directory = get_decisions_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "epic_name": epic_name,
+        "feature_id": feature_id,
+        "answer": answer,
+        "drop": bool(drop),
+        "written_at": datetime.now().isoformat(),
+    }
+    target = directory / _answer_filename(epic_name, feature_id)
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".decision.", suffix=".json.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4, ensure_ascii=False)
+        os.replace(tmp_path, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
+    return target
+
+
+def pending_answers() -> list[tuple[Path, dict]]:
+    """Every recorded answer not yet retired, as (path, payload) pairs in a stable order.
+
+    An unreadable or malformed file is skipped rather than raised on: one corrupt sidecar must
+    not stop the others from being applied, nor stop the runner from polling at all."""
+    results: list[tuple[Path, dict]] = []
+    try:
+        entries = sorted(get_decisions_dir().glob("*.json"))
+    except OSError:
+        return results
+    for entry in entries:
+        try:
+            payload = json.loads(entry.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict) and payload.get("epic_name") and payload.get("feature_id"):
+            results.append((entry, payload))
+    return results
+
+
+def _retire(path: Path) -> None:
+    """Drop a recorded answer that has been acted on, or that has nothing left to act on."""
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def find_feature(config: dict, epic_name: str, feature_id: str) -> tuple[dict | None, dict | None]:
+    """The (epic, feature) entries `epic_name`/`feature_id` name, either of which may be None
+    if it isn't there — a plan can be re-planned out from under a recorded answer."""
+    for epic in (config.get("epic") or []):
+        if epic.get("epic_name") != epic_name:
+            continue
+        for feature in (epic.get("features") or []):
+            if feature.get("id") == feature_id:
+                return epic, feature
+        return epic, None
+    return None, None
+
+
+def apply_answer_to_config(config: dict, epic_name: str, feature_id: str, answer: str,
+                           drop: bool = False) -> bool:
+    """Write one decision into `config` (mutated in place); return whether it changed anything.
+
+    The single definition of what answering actually does, shared by the dashboard's own write
+    and by the runner re-applying a recorded answer, so the two can never drift apart. Dropping
+    additionally marks the feature `done`; the epic then leaves `deferred` through the same
+    "nothing left waiting on you" rule an ordinary answer takes (see _resume_answered_decisions
+    in tempa_implement), rather than needing a second, parallel recovery path."""
+    _, feature = find_feature(config, epic_name, feature_id)
+    if feature is None:
+        return False
+    already_answered = feature.get("blocked_answer") == answer
+    if already_answered and (not drop or feature.get("status") == "done"):
+        return False
+    feature["blocked_answer"] = answer
+    if drop:
+        feature["status"] = "done"
+    return True
+
+
+def apply_pending_answers(config: dict) -> bool:
+    """Re-apply every recorded answer to `config` (mutated in place); return whether anything
+    changed, so the caller knows to save.
+
+    This is the half of the design that makes a decision durable. Nothing coordinates the
+    processes writing config.json, so an answer written into it can be overwritten by a runner
+    thread, or by the spawned agent saving a copy it read beforehand. Re-applying on every poll
+    makes such a loss cost one poll interval instead of costing the decision.
+
+    An answer is retired once it has demonstrably been acted on — present in config.json AND
+    the feature no longer `blocked`, meaning _resume_answered_decisions has already put the epic
+    back in the queue. Retiring any earlier would reopen the exact window this closes."""
+    changed = False
+    for path, payload in pending_answers():
+        epic_name = str(payload.get("epic_name") or "")
+        feature_id = str(payload.get("feature_id") or "")
+        answer = str(payload.get("answer") or "")
+        drop = bool(payload.get("drop"))
+        _, feature = find_feature(config, epic_name, feature_id)
+        if feature is None:
+            # Re-planned or cleared out from under it: there is nothing left to answer, so
+            # retire it rather than retrying forever.
+            _retire(path)
+            continue
+        if apply_answer_to_config(config, epic_name, feature_id, answer, drop):
+            changed = True
+        elif feature.get("status") != FEATURE_BLOCKED:
+            _retire(path)
+    return changed

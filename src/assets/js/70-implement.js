@@ -76,6 +76,55 @@ function qaHistoryHtml(epic) {
   );
 }
 
+// One blocked feature inside a deferred epic's callout: what it is, the question, the session's
+// own recommendation, and the button that answers it. The recommendation travels with the
+// question deliberately — "yes, do what you suggested" is the common answer, and making someone
+// open a log file to find out what was suggested is what turns a 30-second decision into a
+// deferred one.
+function decisionFeatureHtml(epic, feature) {
+  const answered = String(feature.blocked_answer || "").trim();
+  const question = String(feature.blocked_question || "").trim();
+  const recommendation = String(feature.blocked_recommendation || "").trim();
+  const line = (label, text) =>
+    `<div class="decision-line"><span class="decision-label">${label}</span>` +
+    `<span class="decision-text">${escapeHtml(text)}</span></div>`;
+  const action = answered
+    ? `<div class="decision-answered">${line("Your answer", answered)}` +
+        `<span class="decision-answered-note">Saved — this epic goes back in the queue on the ` +
+        `runner's next poll.</span></div>`
+    : `<button type="button" class="decision-answer-btn" ` +
+        `data-epic="${escapeHtml(epic.epic_name || "")}" ` +
+        `data-feature="${escapeHtml(feature.id || "")}">Answer…</button>`;
+  return `<div class="decision-item">` +
+      `<div class="decision-feature">${escapeHtml(feature.id || "?")} — ${escapeHtml(feature.name || "")}</div>` +
+      (question ? line("Question", question) : "") +
+      (recommendation ? line("Its recommendation", recommendation) : "") +
+      action +
+    `</div>`;
+}
+
+// A "deferred" epic is the opposite of a halted one: nothing went wrong, the runner carried on
+// with the rest of the plan, and this card is the question itself waiting to be answered. Built
+// from the blocked features rather than from the epic's stored `blocked_reason` prose, so each
+// question can carry its own Answer button — and so the "open config.json and type into
+// blocked_answer" instructions in that prose can be left out here, where there's a button
+// instead. The prose stays as the fallback for a config written before the per-feature fields
+// existed, and is still what `tempa status`, the halt log and the decision email show.
+function decisionCalloutHtml(epic) {
+  if (epic.status !== "deferred") return "";
+  const blocked = (epic.features || []).filter((f) => f.status === "blocked");
+  if (!blocked.length) {
+    return epic.blocked_reason
+      ? `<div class="impl-epic-decision-needed">⛔ Waiting on your decision:<br>` +
+        `${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
+      : "";
+  }
+  return `<div class="impl-epic-decision-needed decision-panel">` +
+      `<div class="decision-heading">⛔ Waiting on your decision:</div>` +
+      blocked.map((f) => decisionFeatureHtml(epic, f)).join("") +
+    `</div>`;
+}
+
 function renderImplementStatus() {
   // The 1s poll rebuilds every card from scratch, and emptying the container collapses its
   // height — which makes the browser clamp the panel's scrollTop to 0. Without capturing and
@@ -109,13 +158,9 @@ function renderImplementStatus() {
     const blockedReason = epic.status === "failed" && epic.blocked_reason
       ? `<div class="impl-epic-blocked-reason">⚠ Halted:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
       : "";
-    // A "deferred" epic is the opposite of a halted one: nothing went wrong, the runner carried
-    // on with the rest of the plan, and this card is the question itself waiting to be answered.
-    // Same field, deliberately different styling and label — reading it as a failure is what the
-    // whole deferral mechanism exists to avoid.
-    const decisionNeeded = epic.status === "deferred" && epic.blocked_reason
-      ? `<div class="impl-epic-decision-needed">⛔ Waiting on your decision:<br>${escapeHtml(epic.blocked_reason).replace(/\n/g, "<br>")}</div>`
-      : "";
+    // Deliberately different styling and label from the halted callout above — reading a
+    // deferred epic as a failure is what the whole deferral mechanism exists to avoid.
+    const decisionNeeded = decisionCalloutHtml(epic);
     card.innerHTML =
       `<div class="impl-epic-header">` +
         `<span class="impl-epic-icon">${epicStatusIcon(epic.status)}</span>` +
@@ -152,6 +197,11 @@ implStatusBody.addEventListener("click", async (e) => {
   if (reportLink) {
     e.preventDefault();
     openQaReportModal(reportLink.dataset.qaReport);
+    return;
+  }
+  const answerBtn = e.target.closest(".decision-answer-btn");
+  if (answerBtn) {
+    await openDecisionModal(answerBtn.dataset.epic, answerBtn.dataset.feature);
     return;
   }
   const specBtn = e.target.closest(".impl-epic-spec-btn");

@@ -5,7 +5,10 @@ autouse `isolate_tempa_paths` fixture in conftest.py."""
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
+import time
 
 import pytest
 
@@ -714,3 +717,136 @@ def test_request_graceful_stop_creates_the_tempa_dir_if_absent(tmp_path, isolate
     tempa_config.request_graceful_stop("clarify")
 
     assert tempa_config.graceful_stop_requested("clarify") is True
+
+
+# ---------------------------------------------------------------------------
+# config_lock / update_config — the cross-process read-modify-write
+# ---------------------------------------------------------------------------
+
+def test_config_lock_acquires_and_cleans_up_after_itself(isolate_tempa_paths):
+    lock_path = tempa_config.get_config_lock_path()
+    with tempa_config.config_lock() as acquired:
+        assert acquired is True
+        assert lock_path.exists()
+    assert not lock_path.exists()
+
+
+def test_config_lock_is_exclusive_while_it_is_held(isolate_tempa_paths):
+    """The whole point: a second process must not get in between another one's read and its
+    write. Driven from a thread because the lock is a file, not a threading primitive — a
+    second acquisition in the same process is blocked exactly as another process would be."""
+    contender = []
+
+    with tempa_config.config_lock() as acquired:
+        assert acquired is True
+
+        def contend():
+            with tempa_config.config_lock(timeout=0.2) as got:
+                contender.append(got)
+
+        thread = threading.Thread(target=contend)
+        thread.start()
+        thread.join(timeout=5)
+
+    assert contender == [False], "a second holder got in while the lock was held"
+
+
+def test_a_contender_that_gave_up_does_not_delete_the_held_lock(isolate_tempa_paths):
+    """Fail-open must not turn into fail-destructive: the timed-out caller proceeds unlocked,
+    but releasing a lock it never took would hand the file to a third caller mid-write."""
+    lock_path = tempa_config.get_config_lock_path()
+    with tempa_config.config_lock():
+        def contend():
+            with tempa_config.config_lock(timeout=0.1):
+                pass
+
+        thread = threading.Thread(target=contend)
+        thread.start()
+        thread.join(timeout=5)
+        assert lock_path.exists()
+
+
+def test_config_lock_fails_open_rather_than_raising_when_it_cannot_be_taken(isolate_tempa_paths):
+    """Refusing to write would drop a decision the user has already made. The body runs anyway,
+    and the caller is told the lock wasn't held so it can say so."""
+    with tempa_config.config_lock():
+        result = []
+
+        def contend():
+            with tempa_config.config_lock(timeout=0.1) as got:
+                result.append(got)
+                result.append("body ran")
+
+        thread = threading.Thread(target=contend)
+        thread.start()
+        thread.join(timeout=5)
+
+    assert result == [False, "body ran"]
+
+
+def test_config_lock_breaks_a_lock_left_behind_by_a_dead_process(isolate_tempa_paths):
+    """O_EXCL's one weakness. The critical section is a read, an assignment and a write, so a
+    lock file this old is a crash, not a slow writer — and without breaking it the dashboard
+    would be wedged until someone deleted the file by hand."""
+    lock_path = tempa_config.get_config_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("4242 crashed", encoding="utf-8")
+    stale = time.time() - (tempa_config._STALE_LOCK_SEC + 5)
+    os.utime(lock_path, (stale, stale))
+
+    with tempa_config.config_lock(timeout=1.0) as acquired:
+        assert acquired is True
+
+
+def test_config_lock_leaves_a_lock_that_is_still_fresh_alone(isolate_tempa_paths):
+    lock_path = tempa_config.get_config_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("4242 working", encoding="utf-8")
+
+    with tempa_config.config_lock(timeout=0.2) as acquired:
+        assert acquired is False
+    assert lock_path.exists()
+
+
+def test_config_lock_path_follows_the_active_workspace(tmp_path, isolate_tempa_paths):
+    workspace_root = tmp_path / "ws"
+    workspace_root.mkdir()
+    tempa_config.set_active_workspace_root(workspace_root)
+    assert tempa_config.get_config_lock_path() == workspace_root / ".tempa" / "config.lock"
+
+
+def test_update_config_reads_fresh_from_disk_inside_the_lock(isolate_tempa_paths):
+    """The reason to use this over load_config/save_config: a caller holding a config it read
+    earlier can never write that stale copy back over what landed in between."""
+    tempa_config.save_config({"epic": [], "a": 1})
+    stale = tempa_config.load_config()
+    tempa_config.save_config({"epic": [], "a": 1, "written_by_someone_else": True})
+
+    seen = {}
+
+    def mutate(config):
+        seen.update(config)
+        config["answered"] = True
+        return True
+
+    assert tempa_config.update_config(mutate) is True
+
+    on_disk = json.loads(tempa_config.get_config_path().read_text(encoding="utf-8"))
+    assert seen.get("written_by_someone_else") is True, "mutator was handed a stale config"
+    assert on_disk["written_by_someone_else"] is True, "the other writer's key was clobbered"
+    assert on_disk["answered"] is True
+    assert "written_by_someone_else" not in stale
+
+
+def test_update_config_does_not_write_when_the_mutator_reports_no_change(isolate_tempa_paths):
+    tempa_config.save_config({"a": 1})
+    before = tempa_config.get_config_path().read_text(encoding="utf-8")
+
+    assert tempa_config.update_config(lambda config: False) is False
+    assert tempa_config.get_config_path().read_text(encoding="utf-8") == before
+
+
+def test_update_config_releases_the_lock_afterwards(isolate_tempa_paths):
+    tempa_config.save_config({"a": 1})
+    tempa_config.update_config(lambda config: config.update({"b": 2}) or True)
+    assert not tempa_config.get_config_lock_path().exists()
