@@ -233,6 +233,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/workspace/init": "_handle_workspace_init",
         "/api/workspace/open": "_handle_workspace_open",
         "/api/workspace/close": "_handle_workspace_close",
+        "/api/workspace/open-recent": "_handle_workspace_open_recent",
+        "/api/workspace/pick-parent": "_handle_workspace_pick_parent",
+        "/api/workspace/create": "_handle_workspace_create",
+        "/api/workspace/recent/remove": "_handle_workspace_recent_remove",
         "/api/config/save": "_handle_config_save",
         "/api/notifications/test-email": "_handle_test_email",
         "/api/principles/save": "_handle_principles_save",
@@ -458,6 +462,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_workspace_close(self) -> None:
         self._send_json(*dashboard_api_workspace.close_workspace(self.server))
+
+    def _handle_workspace_open_recent(self) -> None:
+        self._send_json(*dashboard_api_workspace.open_recent_workspace(self.server, self._read_json_body()))
+
+    def _handle_workspace_pick_parent(self) -> None:
+        self._send_json(*dashboard_api_workspace.pick_parent_folder(_pick_folder_dialog))
+
+    def _handle_workspace_create(self) -> None:
+        self._send_json(*dashboard_api_workspace.create_workspace(self.server, self._read_json_body()))
+
+    def _handle_workspace_recent_remove(self) -> None:
+        self._send_json(*dashboard_api_workspace.remove_recent_workspace(self._read_json_body()))
 
     def _handle_config_save(self) -> None:
         self._send_json(*dashboard_api_settings.save_settings(

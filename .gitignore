@@ -5,8 +5,11 @@ __pycache__/
 
 # Active-workspace pointer + scratch config/logs/qa/verify used before a workspace is
 # selected (or after `close-folder`) — the real per-workspace state lives in
-# <workspace_root>/.tempa/ instead (see docs/folders-and-paths.md).
+# <workspace_root>/.tempa/ instead (see docs/folders-and-paths.md). The recent-workspaces
+# history (Home page's "recent working folders" list) lives beside the pointer, for the
+# same reason.
 .active-workspace
+.workspace-history.json
 .tempa/
 
 **/claude.md

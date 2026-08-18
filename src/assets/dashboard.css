@@ -123,6 +123,32 @@
     padding: 60px 20px; color: var(--muted); text-align: center; }
   .home-init-text { max-width: 480px; line-height: 1.6; }
   .home-init-text code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; }
+  .home-init-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .home-recent { max-width: 720px; width: 100%; margin: 8px auto 0; text-align: left; }
+  .home-recent-title { display: flex; align-items: center; gap: 8px; color: var(--muted);
+    font-weight: 600; font-size: 0.85rem; margin-bottom: 8px; }
+  .home-recent-title .icon-svg { width: 16px; height: 16px; }
+  .home-recent-list { list-style: none; margin: 0; padding: 0; display: flex;
+    flex-direction: column; gap: 6px; }
+  .home-recent-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel);
+    cursor: pointer; }
+  .home-recent-item:hover:not(.missing) { border-color: var(--accent); background: var(--accent-soft); }
+  .home-recent-item.loading { opacity: 0.6; pointer-events: none; }
+  .home-recent-item.missing { opacity: 0.55; cursor: default; }
+  .home-recent-icon { flex: none; }
+  .home-recent-icon .icon-svg { width: 18px; height: 18px; vertical-align: -3px; }
+  .home-recent-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .home-recent-name { font-weight: 600; font-size: 0.9rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .home-recent-path { color: var(--muted); font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .home-recent-missing-note { color: var(--danger); font-size: 0.78rem; }
+  .home-recent-time { flex: none; color: var(--muted); font-size: 0.78rem; }
+  .home-recent-remove { flex: none; border: none; background: transparent; color: var(--muted);
+    line-height: 1; cursor: pointer; padding: 5px; border-radius: 6px; }
+  .home-recent-remove .icon-svg { width: 14px; height: 14px; display: block; }
+  .home-recent-remove:hover { background: var(--danger); color: #fff; }
   .home-workspace-panel { display: flex; align-items: center; gap: 10px; max-width: 720px;
     margin: 0 auto 18px; padding: 12px 18px; border: 1px solid var(--border-strong);
     border-radius: 10px; background: var(--panel); }

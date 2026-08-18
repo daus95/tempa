@@ -163,7 +163,7 @@ def test_tree_returns_the_full_first_paint_payload(dash):
     assert status == 200
     assert body["ok"] is True
     assert set(body) == {"ok", "workspace", "spec", "clarify", "principles", "backends"}
-    assert set(body["workspace"]) == {"initialized", "root", "canClose"}
+    assert set(body["workspace"]) == {"initialized", "root", "canClose", "recent"}
     assert body["spec"]["tree"]["name"] == dash.prd_dir.name
     assert set(body["clarify"]) == {
         "unanswered", "answered", "findings", "finalize", "implementReadiness",

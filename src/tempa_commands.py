@@ -37,10 +37,12 @@ from tempa_config import (
     graceful_stop_requested,
     load_config,
     read_principles,
+    record_workspace_history,
     resolve_workspace_paths,
     save_config,
     set_active_workspace_root,
 )
+from tempa_config import get_active_workspace_root as _get_active_workspace_root
 from tempa_config import resolve_clar_dir as _resolve_clar_dir
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
 from tempa_decisions import (
@@ -276,7 +278,14 @@ def run_close_folder() -> None:
     nothing on disk is deleted or modified. The workspace's own `.tempa/` folder
     (config.json, epic/session state, logs, qa, specs) is left exactly as it was, so
     reopening it later with `tempa init <same_path>` resumes right where it left off.
+
+    Records the folder being closed into the recent-workspaces history first — it genuinely
+    is the most recently open one, and this doubles as a one-time migration for installs
+    that predate that history: the first close after upgrading is what seeds it.
     """
+    root = _get_active_workspace_root()
+    if root is not None:
+        record_workspace_history(root)
     clear_active_workspace_root()
     log("Working folder closed — no workspace is active. Its .tempa/ folder "
         "(config, logs, qa, specs) was left untouched; reopen it with `tempa init <path>`.")
@@ -320,6 +329,7 @@ def run_init(args: argparse.Namespace) -> None:
     workspace["root"] = str(root_path)
     config["workspace"] = workspace
     save_config(config)
+    record_workspace_history(root_path)
     log("Working folders saved to config.json (key \"workspace\").")
 
     # Create the root folder first (if missing), then every sub-folder under it.
