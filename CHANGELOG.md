@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-18
+
 ### Added
 
 - **A feature parked on your decision can now be answered from the dashboard.** Shipping the
