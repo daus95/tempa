@@ -117,3 +117,177 @@ def test_answer_hint_names_the_file_the_field_and_the_way_out():
     # Dropping the feature is a legitimate answer and has to be spelled out — it's the one the
     # QA report itself keeps recommending.
     assert "drop the feature" in hint
+
+
+# ---------------------------------------------------------------------------
+# Recorded answers — the sidecar that keeps a decision from being lost
+# ---------------------------------------------------------------------------
+
+def _blocked_config(answer="", status="blocked"):
+    return {"epic": [{
+        "epic_name": "EPIC-04", "status": "deferred",
+        "features": [
+            {"id": "F1", "name": "one", "status": "done"},
+            {"id": "F2", "name": "two", "status": status, "blocked_answer": answer,
+             "blocked_question": "Migrate, or descope?",
+             "blocked_recommendation": "Descope for now."},
+        ],
+    }]}
+
+
+def test_record_answer_round_trips_through_pending_answers(isolate_tempa_paths):
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+
+    pending = td.pending_answers()
+    assert len(pending) == 1
+    _, payload = pending[0]
+    assert payload["epic_name"] == "EPIC-04"
+    assert payload["feature_id"] == "F2"
+    assert payload["answer"] == "Descope it."
+    assert payload["drop"] is False
+    assert payload["written_at"]
+
+
+def test_record_answer_leaves_no_temp_file_behind(isolate_tempa_paths):
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+    names = sorted(p.name for p in td.get_decisions_dir().iterdir())
+    assert names == ["EPIC-04__F2.json"]
+
+
+def test_re_answering_the_same_feature_overwrites_rather_than_accumulates(isolate_tempa_paths):
+    td.record_answer("EPIC-04", "F2", "First thought.")
+    td.record_answer("EPIC-04", "F2", "Actually, descope it.")
+
+    pending = td.pending_answers()
+    assert len(pending) == 1
+    assert pending[0][1]["answer"] == "Actually, descope it."
+
+
+def test_two_features_answered_at_once_are_two_files(isolate_tempa_paths):
+    """One file per answer is the point — a single shared file would be two writers racing on
+    the very thing this exists to stop racing on."""
+    td.record_answer("EPIC-04", "F2", "a")
+    td.record_answer("EPIC-05", "F1", "b")
+    assert len(td.pending_answers()) == 2
+
+
+def test_a_label_with_path_separators_cannot_escape_the_decisions_folder(isolate_tempa_paths):
+    td.record_answer("../../EPIC-04", "F2/../..", "Descope it.")
+    written = list(td.get_decisions_dir().iterdir())
+    assert len(written) == 1
+    assert written[0].parent == td.get_decisions_dir()
+
+
+def test_pending_answers_skips_a_corrupt_file_instead_of_raising(isolate_tempa_paths):
+    """One unreadable sidecar must not stop the others being applied, nor stop the runner from
+    polling at all."""
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+    (td.get_decisions_dir() / "broken.json").write_text("{not json", encoding="utf-8")
+
+    pending = td.pending_answers()
+    assert [p[1]["feature_id"] for p in pending] == ["F2"]
+
+
+def test_pending_answers_skips_a_file_that_names_no_feature(isolate_tempa_paths):
+    directory = td.get_decisions_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "half.json").write_text('{"epic_name": "EPIC-04"}', encoding="utf-8")
+    assert td.pending_answers() == []
+
+
+def test_pending_answers_is_empty_when_nothing_has_been_answered(isolate_tempa_paths):
+    assert td.pending_answers() == []
+
+
+def test_apply_answer_writes_the_decision_onto_the_feature(isolate_tempa_paths):
+    config = _blocked_config()
+    assert td.apply_answer_to_config(config, "EPIC-04", "F2", "Descope it.") is True
+    assert config["epic"][0]["features"][1]["blocked_answer"] == "Descope it."
+    assert config["epic"][0]["features"][1]["status"] == "blocked"
+
+
+def test_apply_answer_reports_no_change_when_it_is_already_there(isolate_tempa_paths):
+    config = _blocked_config(answer="Descope it.")
+    assert td.apply_answer_to_config(config, "EPIC-04", "F2", "Descope it.") is False
+
+
+def test_apply_answer_with_drop_marks_the_feature_done(isolate_tempa_paths):
+    config = _blocked_config()
+    assert td.apply_answer_to_config(config, "EPIC-04", "F2", "No longer wanted.", drop=True) is True
+    feature = config["epic"][0]["features"][1]
+    assert feature["status"] == "done"
+    assert feature["blocked_answer"] == "No longer wanted."
+
+
+def test_apply_answer_on_a_feature_that_is_not_there_changes_nothing(isolate_tempa_paths):
+    config = _blocked_config()
+    assert td.apply_answer_to_config(config, "EPIC-04", "NOPE", "x") is False
+    assert td.apply_answer_to_config(config, "EPIC-99", "F2", "x") is False
+
+
+def test_apply_pending_answers_applies_a_recorded_decision(isolate_tempa_paths):
+    config = _blocked_config()
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+
+    assert td.apply_pending_answers(config) is True
+    assert config["epic"][0]["features"][1]["blocked_answer"] == "Descope it."
+
+
+def test_a_recorded_answer_is_kept_until_the_feature_has_left_blocked(isolate_tempa_paths):
+    """Retiring it the moment it lands in config.json would reopen the exact window this
+    closes — the answer is only safe once the epic is actually back in the queue."""
+    config = _blocked_config()
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+
+    td.apply_pending_answers(config)
+    assert td.apply_pending_answers(config) is False, "already applied, nothing to change"
+    assert len(td.pending_answers()) == 1, "retired while the feature was still blocked"
+
+
+def test_a_recorded_answer_is_retired_once_it_has_been_acted_on(isolate_tempa_paths):
+    config = _blocked_config()
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+    td.apply_pending_answers(config)
+
+    # What _resume_answered_decisions does to it on the next poll.
+    config["epic"][0]["features"][1]["status"] = "require_fixing"
+
+    assert td.apply_pending_answers(config) is False
+    assert td.pending_answers() == []
+
+
+def test_a_recorded_answer_survives_being_clobbered_by_another_writer(isolate_tempa_paths):
+    """The durability property this whole mechanism exists for: the runner or the spawned agent
+    saving a config it read before the answer landed wipes the field, and the next poll simply
+    puts it back."""
+    config = _blocked_config()
+    td.record_answer("EPIC-04", "F2", "Descope it.")
+    td.apply_pending_answers(config)
+
+    config["epic"][0]["features"][1]["blocked_answer"] = ""
+
+    assert td.apply_pending_answers(config) is True
+    assert config["epic"][0]["features"][1]["blocked_answer"] == "Descope it."
+
+
+def test_a_recorded_answer_for_a_feature_that_no_longer_exists_is_retired(isolate_tempa_paths):
+    """A re-plan can take the feature out from under a recorded answer. Keeping it would mean
+    retrying forever against a plan that has moved on."""
+    td.record_answer("EPIC-04", "GONE", "Descope it.")
+
+    assert td.apply_pending_answers(_blocked_config()) is False
+    assert td.pending_answers() == []
+
+
+def test_find_feature_reports_the_epic_even_when_the_feature_is_missing(isolate_tempa_paths):
+    epic, feature = td.find_feature(_blocked_config(), "EPIC-04", "NOPE")
+    assert epic is not None and epic["epic_name"] == "EPIC-04"
+    assert feature is None
+
+
+def test_answer_hint_points_at_the_dashboard_as_well_as_the_file(isolate_tempa_paths):
+    """The hint reaches the CLI, the halt log and the decision email — places with no button —
+    so it has to name both ways of answering."""
+    hint = td.answer_hint("/tmp/config.json", "EPIC-04")
+    assert "blocked_answer" in hint
+    assert "dashboard" in hint

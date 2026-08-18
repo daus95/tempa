@@ -30,7 +30,13 @@ from tempa_config import (
     load_config,
     save_config,
 )
-from tempa_decisions import EPIC_DEFERRED, answered_features, blocked_features, describe
+from tempa_decisions import (
+    EPIC_DEFERRED,
+    answered_features,
+    apply_pending_answers,
+    blocked_features,
+    describe,
+)
 from tempa_logging import _banner, _init_process_log, _state, log, process_log_path
 from tempa_maintenance import (
     _epic_features_actually_done,
@@ -404,7 +410,14 @@ def _resume_answered_decisions(config: dict) -> bool:
     changed = False
     for epic in (config.get("epic") or []):
         answered = answered_features(epic)
-        if not answered:
+        # Keyed on "nothing is waiting on the user any more" rather than on "something was
+        # answered", because those are not the same set. A blocked feature can also leave the
+        # queue by being dropped outright — status set to `done`, which answer_hint documents
+        # and the dashboard's Drop option does — and a dropped feature is no longer `blocked`,
+        # so answered_features() cannot see it. Without this the epic stayed `deferred` forever,
+        # skipped by the scheduler and the QA gate alike, with nothing left to answer.
+        nothing_left_waiting = epic.get("status") == EPIC_DEFERRED and not blocked_features(epic)
+        if not answered and not nothing_left_waiting:
             continue
         for feature in answered:
             feature["status"] = "require_fixing"
@@ -421,9 +434,13 @@ def _resume_answered_decisions(config: dict) -> bool:
         epic["no_progress_rounds"] = 0
         changed = True
         label = epic.get("epic_name", "?")
-        ids = ", ".join(f.get("id", "?") for f in answered)
-        log(f"[{label}] the decision it was waiting on has been answered ({ids}) — back in the "
-            "implementation queue; the answer is handed to the session that picks it up.")
+        if answered:
+            ids = ", ".join(f.get("id", "?") for f in answered)
+            log(f"[{label}] the decision it was waiting on has been answered ({ids}) — back in "
+                "the implementation queue; the answer is handed to the session that picks it up.")
+        else:
+            log(f"[{label}] has nothing left waiting on a decision — back in the implementation "
+                "queue.")
     return changed
 
 
@@ -527,11 +544,16 @@ def check_and_run(features_override: int | None = None) -> None:
         # make a scheduling decision. Also repairs configs written by older versions, which
         # had no such reconciliation at all.
         repaired = reconcile_qa_passed_features_and_log(config)
+        # Decisions answered from outside this process (the dashboard, or a hand edit) are
+        # re-applied first, so an answer that some other writer overwrote costs a poll interval
+        # rather than costing the decision — see apply_pending_answers for why config.json alone
+        # can't be trusted to hold it.
+        applied = apply_pending_answers(config)
         # Answers written into a deferred epic's blocked feature put it back in the queue before
         # anything below reads a status to schedule on. Evaluated separately from `repaired`
         # rather than in one `or`, which would skip it whenever a repair had already happened.
         resumed = _resume_answered_decisions(config)
-        if repaired or resumed:
+        if repaired or applied or resumed:
             save_config(config)
 
         # Scheduling priority, highest first: each step returns True once this poll is

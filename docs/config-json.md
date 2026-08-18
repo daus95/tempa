@@ -53,3 +53,11 @@ Prompt templates are **no longer** in config.json — see [prompt-templates.md](
 Architecture principles aren't in config.json either: they live in
 `.tempa/architecture-principles.md` — see
 [architecture-principles.md](architecture-principles.md).
+
+## Files that live beside config.json
+
+| Path | What it is |
+|---|---|
+| `.tempa/config.lock` | Held for the duration of a read-modify-write that comes from outside the runner (currently: answering a blocked feature's decision from the dashboard). Created and deleted around the write; a lock file older than 30 seconds is assumed to belong to a process that died holding it and is broken. Safe to delete by hand if one is ever left behind. |
+| `.tempa/decisions/<EPIC>__<FEATURE>.json` | A decision answered from the dashboard, recorded before it is written into `config.json` and re-applied by the runner on every poll until the epic has moved on — so an answer can't be lost to another writer saving a stale copy of `config.json` over it. Deleted automatically once it has been acted on. See [start-implementation.md](start-implementation.md#decisions-only-you-can-make). |
+| `.tempa/graceful-stop-implement`, `.tempa/graceful-stop-clarify` | Sentinels for **Stop After Current Session**. Presence is the whole message. |

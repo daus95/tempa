@@ -215,6 +215,40 @@
   .impl-epic-decision-needed { margin-top: 10px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--major); background: var(--accent-soft); color: var(--text);
     font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
+  /* The structured form of the callout above: real elements per blocked feature rather than
+     one pre-wrapped blob, so each question can carry its own Answer button. pre-wrap is moved
+     off the container onto the text itself — the container now has markup in it, and preserving
+     the whitespace between those tags would show up as gaps. */
+  .decision-panel { white-space: normal; }
+  .decision-heading { font-weight: 700; margin-bottom: 8px; }
+  .decision-item { padding: 8px 0; border-top: 1px solid var(--border); }
+  .decision-item:first-of-type { border-top: none; padding-top: 0; }
+  .decision-feature { font-weight: 600; margin-bottom: 6px; }
+  .decision-line { display: flex; gap: 8px; margin-bottom: 6px; align-items: baseline; }
+  .decision-label { flex: none; color: var(--muted); font-weight: 600; min-width: 118px; }
+  .decision-text { white-space: pre-wrap; }
+  .decision-answer-btn { margin-top: 4px; padding: 5px 14px; font-size: 0.85rem;
+    border-radius: 6px; border: 1px solid var(--accent); background: var(--accent);
+    color: #fff; font-weight: 600; cursor: pointer; }
+  .decision-answer-btn:hover { filter: brightness(1.08); }
+  .decision-answered { margin-top: 4px; }
+  .decision-answered-note { display: block; color: var(--muted); font-size: 0.8rem; }
+
+  /* The answer dialog itself (see assets/js/72-decisions.js). Taller and wider than the
+     confirm modal's default because a real question runs to a paragraph, and the recommendation
+     usually to two — capped and scrollable so a long one can't push Save off-screen. */
+  .decision-modal { max-height: min(58vh, 520px); overflow-y: auto; padding-right: 4px; }
+  .decision-modal-feature { font-weight: 700; margin-bottom: 10px; }
+  .decision-modal-block { margin-bottom: 12px; }
+  .decision-modal-block h4 { margin: 0 0 3px; font-size: 0.82rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.03em; }
+  .decision-modal-block p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+  .decision-modal-modes { max-width: none; margin-bottom: 12px; }
+  .decision-answer { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 0.9rem; line-height: 1.5; resize: vertical; }
+  .decision-answer:disabled { background: var(--accent-soft); color: var(--muted); }
+
   .clarify-locked-banner { margin-bottom: 12px; padding: 8px 12px; border-radius: 6px;
     border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
     font-size: 0.85rem; line-height: 1.5; }
@@ -590,6 +624,7 @@
     border: 1px solid var(--border-strong); border-radius: 12px; padding: 22px 24px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
   .modal-box.wide { width: 480px; }
+  .modal-box.wide:has(.decision-modal) { width: 720px; }
   .modal-title { font-size: 1.05rem; font-weight: 700; margin: 0 0 12px;
     overflow-wrap: anywhere; }
   .modal-message { color: var(--text); font-size: 0.92rem; line-height: 1.6; }

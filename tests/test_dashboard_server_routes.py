@@ -28,6 +28,7 @@ import dashboard_server
 import dashboard_verify
 import tempa_backend
 import tempa_config
+import tempa_decisions
 import tempa_update
 
 STAGES = ("clarify", "clarify_apply", "plan", "implement")
@@ -932,3 +933,183 @@ def test_workspace_open_without_a_workspace_folder_is_404(dash, monkeypatch):
     status, body = dash.post("/api/workspace/open", {})
     assert status == 404
     assert body["error"] == "Working folder not found on disk."
+
+
+# ---------------------------------------------------------------------------
+# /api/implement/decision — answering a blocked feature from the epic card
+# ---------------------------------------------------------------------------
+
+def _seed_deferred_epic(status="blocked", answer=""):
+    """A deferred epic parked on one blocked feature, alongside enough unrelated top-level
+    config for a save to be able to prove it left the rest of the document alone."""
+    tempa_config.save_config({
+        "models": {"implement": "claude-sonnet-5"},
+        "poll_interval_sec": 60,
+        "epic": [{
+            "epic_name": "EPIC-04", "status": "deferred",
+            "completed_features": 1, "total_features": 2,
+            "features": [
+                {"id": "F1", "name": "one", "status": "done"},
+                {"id": "F2", "name": "two", "status": status, "blocked_answer": answer,
+                 "blocked_question": "Migrate, or descope?",
+                 "blocked_recommendation": "Descope for now."},
+            ],
+        }],
+    })
+
+
+def _saved_feature():
+    return tempa_config.load_config()["epic"][0]["features"][1]
+
+
+def test_decision_follow_stores_the_session_own_recommendation(dash):
+    """The answer text is read out of the feature server-side rather than taken from the
+    request — the client should not get to decide what "I approve your recommendation" turns
+    out to have meant."""
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "follow",
+                              "answer": "something else entirely"})
+    assert status == 200
+    assert body["ok"] is True and body["dropped"] is False
+    assert body["answer"] == "Descope for now."
+    assert _saved_feature()["blocked_answer"] == "Descope for now."
+
+
+def test_decision_is_recorded_in_its_own_file_as_well_as_config(dash):
+    """Both writes matter: config.json so it takes effect now, the sidecar so it survives being
+    overwritten by the runner or the agent."""
+    _seed_deferred_epic()
+    dash.post("/api/implement/decision",
+              {"epic": "EPIC-04", "feature": "F2", "mode": "own", "answer": "Migrate it."})
+
+    pending = tempa_decisions.pending_answers()
+    assert [p[1]["answer"] for p in pending] == ["Migrate it."]
+    assert _saved_feature()["blocked_answer"] == "Migrate it."
+
+
+def test_decision_own_answer_is_stored_verbatim(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "own",
+                              "answer": "  Migrate it, but behind a flag.  "})
+    assert status == 200
+    assert body["answer"] == "Migrate it, but behind a flag."
+    assert _saved_feature()["blocked_answer"] == "Migrate it, but behind a flag."
+
+
+def test_decision_drop_marks_the_feature_done(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "drop",
+                              "answer": "Superseded by EPIC-09."})
+    assert status == 200
+    assert body["dropped"] is True
+    feature = _saved_feature()
+    assert feature["status"] == "done"
+    assert feature["blocked_answer"] == "Superseded by EPIC-09."
+
+
+def test_decision_leaves_the_rest_of_the_config_untouched(dash):
+    """The write is surgical: one field of one feature, re-read inside the lock, so it can never
+    clobber what another writer put in the same file."""
+    _seed_deferred_epic()
+    before = tempa_config.load_config()
+    dash.post("/api/implement/decision",
+              {"epic": "EPIC-04", "feature": "F2", "mode": "own", "answer": "Migrate it."})
+    after = tempa_config.load_config()
+
+    assert after["epic"][0]["features"][0] == before["epic"][0]["features"][0]
+    assert after["models"] == before["models"]
+    assert after["epic"][0]["total_features"] == before["epic"][0]["total_features"]
+
+
+def test_decision_rejects_a_malformed_body(dash):
+    status, body = dash.post("/api/implement/decision", raw=b"{not json")
+    assert status == 400
+    assert body == {"ok": False, "error": "Malformed request."}
+
+
+def test_decision_rejects_a_missing_epic(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision", {"feature": "F2", "mode": "follow"})
+    assert status == 400
+    assert body["error"] == "Missing or invalid epic."
+
+
+def test_decision_rejects_an_epic_label_that_is_not_a_label(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "../../etc", "feature": "F2", "mode": "follow"})
+    assert status == 400
+    assert body["error"] == "Missing or invalid epic."
+
+
+def test_decision_rejects_a_missing_feature(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision", {"epic": "EPIC-04", "mode": "follow"})
+    assert status == 400
+    assert body["error"] == "Missing or invalid feature."
+
+
+def test_decision_rejects_an_unknown_mode(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "maybe"})
+    assert status == 400
+    assert body["error"] == "Invalid answer mode."
+
+
+def test_decision_rejects_an_own_answer_with_nothing_in_it(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "own", "answer": "   "})
+    assert status == 400
+    assert body["error"] == "Write an answer before saving."
+
+
+def test_decision_on_an_unknown_epic_is_a_404(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-99", "feature": "F2", "mode": "follow"})
+    assert status == 404
+    assert body["error"] == 'No epic named "EPIC-99" in the plan.'
+
+
+def test_decision_on_an_unknown_feature_is_a_404(dash):
+    _seed_deferred_epic()
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F9", "mode": "follow"})
+    assert status == 404
+    assert body["error"] == 'No feature "F9" in EPIC-04.'
+
+
+def test_decision_on_a_feature_that_moved_on_is_a_conflict(dash):
+    """A stale tab answering a question the runner has already got past — say so rather than
+    quietly writing a blocked_answer onto a feature nothing will read it from."""
+    _seed_deferred_epic(status="require_fixing")
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "follow"})
+    assert status == 409
+    assert "no longer waiting on a decision" in body["error"]
+
+
+def test_decision_follow_needs_a_recommendation_to_follow(dash):
+    """Nothing guarantees the session wrote one — offering to follow an empty recommendation
+    would store a blank answer, which reads as unanswered and parks the epic again."""
+    tempa_config.save_config({"epic": [{
+        "epic_name": "EPIC-04", "status": "deferred",
+        "features": [{"id": "F2", "name": "two", "status": "blocked",
+                      "blocked_question": "Migrate, or descope?"}],
+    }]})
+    status, body = dash.post("/api/implement/decision",
+                             {"epic": "EPIC-04", "feature": "F2", "mode": "follow"})
+    assert status == 409
+    assert "no recommendation to follow" in body["error"]
+
+
+def test_a_rejected_decision_records_nothing(dash):
+    _seed_deferred_epic()
+    dash.post("/api/implement/decision",
+              {"epic": "EPIC-04", "feature": "F9", "mode": "follow"})
+    assert tempa_decisions.pending_answers() == []

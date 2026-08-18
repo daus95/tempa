@@ -1,8 +1,8 @@
 """The dashboard HTTP handler.
 
 _DashboardHandler serves the single-page app and the /api/* GET/POST routes (spec browse/
-edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop, verify run/stop/
-delete, clear, workspace init/open/close, config get/save). All file access is confined to
+edit/upload/delete/rename, clarify view/save/run/stop, implement run/stop/decision, verify
+run/stop/delete, clear, workspace init/open/close, config get/save). All file access is confined to
 prd_dir / clar_dir / the verify report folder via _resolve_within."""
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 import dashboard_api_clarify
+import dashboard_api_decisions
 import dashboard_api_settings
 import dashboard_api_spec
 import dashboard_api_status
@@ -227,6 +228,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/implement/stop": "_handle_implement_run_stop",
         "/api/implement/stop-graceful": "_handle_implement_stop_graceful",
         "/api/implement/stop-graceful/cancel": "_handle_implement_stop_graceful_cancel",
+        "/api/implement/decision": "_handle_implement_decision",
         "/api/clear": "_handle_clear_all",
         "/api/workspace/init": "_handle_workspace_init",
         "/api/workspace/open": "_handle_workspace_open",
@@ -437,6 +439,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "error": "Verification run not found."})
             return
         self._send_json(200, {"ok": True})
+
+    def _handle_implement_decision(self) -> None:
+        """Answer a blocked feature's question from the Implementation page's card, instead of
+        hand-editing config.json the way the callout text used to be the only way to. Safe to
+        call while a run is in progress — see dashboard_api_decisions for how the write avoids
+        both halves of the lost-update race against the runner and the agent."""
+        self._send_json(*dashboard_api_decisions.save_answer(self._read_json_body()))
 
     def _handle_clear_all(self) -> None:
         self._send_json(*dashboard_api_workspace.clear_everything(self.server.clarify_run["running"], self.server.implement_run["running"]))
