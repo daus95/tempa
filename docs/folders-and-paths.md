@@ -54,6 +54,13 @@ and everything below it) is read from/stored in that workspace's own `config.jso
   `.tempa/config.json` unchanged); on a new folder, it creates a fresh one.
 - This is how two workspaces stay independent: closing one and opening another never mixes
   or overwrites either one's config/history.
+- Every `init` (and, for the folder being left behind, every `close-folder`) also records
+  the workspace's absolute path into `.workspace-history.json` — another small file at
+  Tempa's own install root, next to `.active-workspace` — an MRU list of up to the 10 most
+  recently opened workspaces. This is what powers the dashboard Home page's "recent working
+  folders" list, and it is the only place a workspace's path is remembered once you've
+  closed it. `close-folder` never touches this file's contents beyond adding that one entry
+  — it is a separate, longer-lived history, not a second pointer.
 
 Every workspace sub-folder (both under `workspace` and `sources`, see below) is stored
 **relative** to `workspace.root`, so no absolute path (other than `root` itself) is repeated
@@ -156,6 +163,7 @@ once one is selected.
 | [`src/prompt/`](../src/prompt/) | prompt templates (`.md`), one file per prompt — shipped with Tempa, not workspace-specific |
 | `docs/` (this folder) | supplementary README documentation |
 | `.active-workspace` | the active-workspace pointer (absolute path, or absent = no active workspace) |
+| `.workspace-history.json` | MRU list (up to 10) of previously opened workspaces — survives `close-folder`, unlike `.active-workspace` |
 
 > **`specs` is the one exception.** Every other pre-`init` fallback above lives inside
 > `<tempa_install>/.tempa/`. `specs` doesn't — with no active workspace, it resolves to

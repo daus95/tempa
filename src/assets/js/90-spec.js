@@ -137,6 +137,7 @@ async function refreshSpecTree() {
       state.workspaceInitialized = !!data.workspace.initialized;
       state.workspaceRoot = data.workspace.root || "";
       state.workspaceCanClose = !!data.workspace.canClose;
+      state.recentWorkspaces = data.workspace.recent || [];
       state.clarifyFindings = data.clarify.findings;
       state.clarifyFinalize = data.clarify.finalize;
       state.implementReadiness = data.clarify.implementReadiness;

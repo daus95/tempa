@@ -37,6 +37,16 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 # Absent = no active workspace (fresh install, or after `close-folder`).
 ACTIVE_WORKSPACE_POINTER = SCRIPT_DIR / ".active-workspace"
 
+# MRU list of workspace roots ever opened via `tempa init`, newest first — lives beside
+# ACTIVE_WORKSPACE_POINTER at Tempa's own install root (NOT under _tempa_dir(), which
+# follows whichever workspace is currently active and would make this fragment per
+# workspace instead of surviving across them). Powers the dashboard Home page's "recent
+# working folders" list, which is exactly the situation where no workspace is active yet
+# and _tempa_dir() would resolve to install-root scratch space anyway. Read/write helpers
+# below.
+WORKSPACE_HISTORY_PATH = SCRIPT_DIR / ".workspace-history.json"
+WORKSPACE_HISTORY_MAX = 10
+
 # Per-workspace state (config.json + logs/ + qa/ + verify/ + specs/) all live under this
 # hidden sub-folder, INSIDE the workspace being automated — not inside Tempa's own install —
 # so each workspace keeps its own config/history across switches. Until a workspace is
@@ -70,6 +80,83 @@ def clear_active_workspace_root() -> None:
     only the pointer to it is removed, so reopening it later resumes where it left off."""
     if ACTIVE_WORKSPACE_POINTER.exists():
         ACTIVE_WORKSPACE_POINTER.unlink()
+
+
+def _history_key(root: str | Path) -> str:
+    """Normalize a workspace root for de-duplication in the history list: case and
+    separator differences (`C:\\A\\b` vs `c:/a/B`) must not create two entries for the
+    same folder on Windows."""
+    return os.path.normcase(os.path.normpath(str(root)))
+
+
+def read_workspace_history() -> list[dict]:
+    """Read the recent-workspaces list, tolerantly: any read/parse error, a non-list
+    payload, or an entry that isn't a dict with a non-empty string "root" is dropped
+    rather than raised, mirroring read_config_safe()'s degrade-gracefully contract. Always
+    newest-first and capped at WORKSPACE_HISTORY_MAX, regardless of what's on disk."""
+    try:
+        raw = json.loads(WORKSPACE_HISTORY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        root = item.get("root")
+        if not isinstance(root, str) or not root:
+            continue
+        opened_at = item.get("opened_at")
+        if not isinstance(opened_at, (int, float)) or isinstance(opened_at, bool):
+            opened_at = 0
+        entries.append({"root": root, "opened_at": opened_at})
+    return entries[:WORKSPACE_HISTORY_MAX]
+
+
+def _save_workspace_history(entries: list[dict]) -> None:
+    """Write the history list atomically (temp file + os.replace(), same pattern as
+    save_config()). Fails open — a read-only or missing install folder must not turn
+    "remember this folder" into a crashed init/close-folder."""
+    with contextlib.suppress(OSError):
+        WORKSPACE_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=WORKSPACE_HISTORY_PATH.parent, prefix=".workspace-history.", suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, WORKSPACE_HISTORY_PATH)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp_path)
+            raise
+
+
+def record_workspace_history(root: str | Path) -> None:
+    """Move `root` to the front of the recent-workspaces list (adding it if new), stamped
+    with the current time, and trim to WORKSPACE_HISTORY_MAX. Called once a workspace is
+    actually registered (`tempa init`) and again when it's closed (`tempa close-folder`) —
+    see those callers for why both matter. No cross-process lock: unlike config.json, a
+    lost update here just means one dashboard's MRU bump was overwritten by another's,
+    never a silently-dropped user decision, so the plain read-modify-write is enough."""
+    root_str = str(Path(root))
+    key = _history_key(root_str)
+    entries = [e for e in read_workspace_history() if _history_key(e["root"]) != key]
+    entries.insert(0, {"root": root_str, "opened_at": time.time()})
+    _save_workspace_history(entries[:WORKSPACE_HISTORY_MAX])
+
+
+def remove_workspace_history(root: str | Path) -> bool:
+    """Drop the entry matching `root` from the recent-workspaces list. Returns whether
+    anything was actually removed."""
+    key = _history_key(root)
+    entries = read_workspace_history()
+    kept = [e for e in entries if _history_key(e["root"]) != key]
+    if len(kept) == len(entries):
+        return False
+    _save_workspace_history(kept)
+    return True
 
 
 def _tempa_dir() -> Path:

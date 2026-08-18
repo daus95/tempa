@@ -14,6 +14,14 @@ function escapeHtml(s) {
 function iconSvg(name, extraClass) {
   return `<svg class="icon-svg${extraClass ? " " + extraClass : ""}"><use href="#i-${name}"></use></svg>`;
 }
+// dd/MM HH:mm, local time — the wall-clock timestamp format used everywhere in the app
+// (banners, log lines, home page). `epochSeconds` is epoch seconds, falsy/missing -> "–".
+function formatEpochShort(epochSeconds) {
+  if (!epochSeconds) return "–";
+  const d = new Date(epochSeconds * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 function inlineMd(src) {
   const codes = [];
   src = src.replace(/`([^`]+?)`/g, (m, c) => {

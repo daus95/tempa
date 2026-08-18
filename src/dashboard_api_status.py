@@ -25,6 +25,7 @@ from dashboard_config import (
     _load_clarify_applied_hashes,
     _load_clarify_file_timings,
     _load_dashboard_config,
+    _recent_workspaces,
     _workspace_can_close,
     _workspace_initialized,
     _workspace_root,
@@ -75,7 +76,7 @@ def tree_payload(prd_dir: Path, clar_dir: Path, backends: dict) -> Response:
     return 200, {
         "ok": True,
         "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
-                       "canClose": _workspace_can_close()},
+                       "canClose": _workspace_can_close(), "recent": _recent_workspaces()},
         "spec": {"tree": build_tree(prd_dir)},
         "clarify": {"unanswered": unanswered, "answered": answered,
                     "findings": findings,

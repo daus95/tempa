@@ -58,6 +58,21 @@ def _workspace_can_close() -> bool:
     return True
 
 
+def _recent_workspaces() -> list[dict]:
+    """The Home page's "recent working folders" list — newest first, each entry's
+    `exists` recomputed fresh from disk on every call so a folder that was deleted or
+    moved since it was last opened greys out without needing a dashboard restart."""
+    return [
+        {
+            "root": entry["root"],
+            "name": Path(entry["root"]).name or entry["root"],
+            "openedAt": entry["opened_at"],
+            "exists": Path(entry["root"]).is_dir(),
+        }
+        for entry in tempa_config.read_workspace_history()
+    ]
+
+
 def _resolve_source_dir(source_key: str, specs_fallback: str) -> Path:
     """Resolve one `sources` folder (e.g. "prd", "clarifications") to an absolute path
     via the shared tempa_config.get_sources() — the same resolution the CLI uses, so the

@@ -23,13 +23,8 @@ function findingsCell(file) {
   return parts.length ? parts.join(" ") : "–";
 }
 
-// dd/MM HH:mm, local time — matches the wall-clock timestamps used everywhere else in
-// the app (banners, log lines). `startedAt` is epoch seconds, falsy/missing -> "–".
 function formatClarifyStartedAt(startedAt) {
-  if (!startedAt) return "–";
-  const d = new Date(startedAt * 1000);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return formatEpochShort(startedAt);
 }
 
 function formatClarifyDuration(seconds) {

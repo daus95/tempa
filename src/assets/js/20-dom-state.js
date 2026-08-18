@@ -36,6 +36,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   homeNotInit = $("homeNotInit"), homeSteps = $("homeSteps"),
   homeSelectFolderBtn = $("homeSelectFolderBtn"), homeWorkspacePath = $("homeWorkspacePath"),
   homeWorkspaceCloseBtn = $("homeWorkspaceCloseBtn"),
+  homeCreateFolderBtn = $("homeCreateFolderBtn"), homeRecent = $("homeRecent"), homeRecentList = $("homeRecentList"),
   homeBackendStatusList = $("homeBackendStatusList"), settingsBackendStatusList = $("settingsBackendStatusList"),
   settingsDetectBackendsBtn = $("settingsDetectBackendsBtn"),
   homeStep1 = $("homeStep1"), homeStep2 = $("homeStep2"), homeStep3 = $("homeStep3"),
@@ -151,6 +152,7 @@ const state = {
   workspaceInitialized: !!INITIAL_WORKSPACE_INITIALIZED,
   workspaceRoot: INITIAL_WORKSPACE_ROOT || "",
   workspaceCanClose: !!INITIAL_WORKSPACE_CAN_CLOSE,
+  recentWorkspaces: INITIAL_WORKSPACE_RECENT || [],
   clarifyFindings: INITIAL_CLARIFY_FINDINGS || { critical: 0, major: 0, minor: 0 },
   clarifyFinalize: INITIAL_CLARIFY_FINALIZE ||
     { hasRun: false, lastAction: null, critical: 0, ready: false, round: 0, maxRound: 0,

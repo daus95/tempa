@@ -8,6 +8,17 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard Home page now shows recent working folders and can create a new one.** The
+  empty state (no working folder selected yet) previously offered only "Select Working
+  Folder", forcing a re-navigation through the native picker even for a project you had
+  already opened before. It now also lists up to the 10 most recently opened working
+  folders (newest first) — click one to reopen it, or the ✕ to drop it from the list — and
+  a "Create New Working Folder" button that picks a parent location, prompts for a name,
+  and runs `init` on the new path. Recent folders are tracked in a new install-root
+  `.workspace-history.json`, updated on every `init` and `close-folder`.
+
 ## [0.9.0] - 2026-08-18
 
 ### Fixed

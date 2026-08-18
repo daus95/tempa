@@ -21,6 +21,7 @@ from dashboard_clarify_parse import (
 )
 from dashboard_config import (
     _load_dashboard_config,
+    _recent_workspaces,
     _workspace_can_close,
     _workspace_initialized,
     _workspace_root,
@@ -115,6 +116,7 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
     workspace_initialized_json = json.dumps(_workspace_initialized())
     workspace_root_json = json.dumps(_workspace_root())
     workspace_can_close_json = json.dumps(_workspace_can_close())
+    workspace_recent_json = json.dumps(_recent_workspaces(), ensure_ascii=False)
     principles_set_json = json.dumps(bool(tempa_config.read_principles()))
     dashboard_config = _load_dashboard_config()
     latest_findings = _latest_evaluation_findings(
@@ -158,6 +160,7 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
         .replace("/*__WORKSPACE_INITIALIZED__*/null", workspace_initialized_json)
         .replace("/*__WORKSPACE_ROOT__*/null", workspace_root_json)
         .replace("/*__WORKSPACE_CAN_CLOSE__*/null", workspace_can_close_json)
+        .replace("/*__WORKSPACE_RECENT__*/null", workspace_recent_json)
         .replace("/*__PRINCIPLES_SET__*/null", principles_set_json)
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)

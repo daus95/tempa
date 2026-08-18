@@ -850,3 +850,91 @@ def test_update_config_releases_the_lock_afterwards(isolate_tempa_paths):
     tempa_config.save_config({"a": 1})
     tempa_config.update_config(lambda config: config.update({"b": 2}) or True)
     assert not tempa_config.get_config_lock_path().exists()
+
+
+# ---------------------------------------------------------------------------
+# Recent-workspaces history (read_workspace_history / record_workspace_history /
+# remove_workspace_history) — the Home page's "recent working folders" list.
+# ---------------------------------------------------------------------------
+def test_read_workspace_history_empty_when_file_absent(isolate_tempa_paths):
+    assert tempa_config.read_workspace_history() == []
+
+
+def test_record_then_read_round_trip(tmp_path, isolate_tempa_paths):
+    root = tmp_path / "ws"
+    tempa_config.record_workspace_history(root)
+
+    entries = tempa_config.read_workspace_history()
+    assert len(entries) == 1
+    assert entries[0]["root"] == str(root)
+    assert entries[0]["opened_at"] > 0
+
+
+def test_record_workspace_history_moves_existing_entry_to_front_without_duplicating(tmp_path, isolate_tempa_paths):
+    a, b = tmp_path / "a", tmp_path / "b"
+    tempa_config.record_workspace_history(a)
+    tempa_config.record_workspace_history(b)
+    tempa_config.record_workspace_history(a)
+
+    entries = tempa_config.read_workspace_history()
+    assert [e["root"] for e in entries] == [str(a), str(b)]
+
+
+def test_record_workspace_history_dedupes_case_and_separator_insensitively(tmp_path, isolate_tempa_paths):
+    tempa_config.record_workspace_history(r"C:\A\b")
+    tempa_config.record_workspace_history("c:/a/B")
+
+    entries = tempa_config.read_workspace_history()
+    assert len(entries) == 1
+
+
+def test_record_workspace_history_caps_at_max_keeping_the_newest(tmp_path, isolate_tempa_paths):
+    for i in range(tempa_config.WORKSPACE_HISTORY_MAX + 3):
+        tempa_config.record_workspace_history(tmp_path / f"ws{i}")
+
+    entries = tempa_config.read_workspace_history()
+    assert len(entries) == tempa_config.WORKSPACE_HISTORY_MAX
+    newest_first = [str(tmp_path / f"ws{i}") for i in range(
+        tempa_config.WORKSPACE_HISTORY_MAX + 2, 2, -1)]
+    assert [e["root"] for e in entries] == newest_first
+
+
+@pytest.mark.parametrize("bad_payload", [
+    "not json {{{",
+    json.dumps({"not": "a list"}),
+    json.dumps([{"no_root_key": True}]),
+    json.dumps([{"root": ""}]),
+    json.dumps(["just a string"]),
+])
+def test_read_workspace_history_degrades_to_empty_list_on_bad_payload(bad_payload, isolate_tempa_paths):
+    tempa_config.WORKSPACE_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tempa_config.WORKSPACE_HISTORY_PATH.write_text(bad_payload, encoding="utf-8")
+
+    assert tempa_config.read_workspace_history() == []
+
+
+def test_remove_workspace_history_drops_the_matching_entry(tmp_path, isolate_tempa_paths):
+    a, b = tmp_path / "a", tmp_path / "b"
+    tempa_config.record_workspace_history(a)
+    tempa_config.record_workspace_history(b)
+
+    assert tempa_config.remove_workspace_history(a) is True
+    entries = tempa_config.read_workspace_history()
+    assert [e["root"] for e in entries] == [str(b)]
+
+
+def test_remove_workspace_history_reports_false_for_unknown_path(tmp_path, isolate_tempa_paths):
+    tempa_config.record_workspace_history(tmp_path / "a")
+    assert tempa_config.remove_workspace_history(tmp_path / "does-not-exist") is False
+
+
+def test_clear_active_workspace_root_leaves_history_untouched(tmp_path, isolate_tempa_paths):
+    root = tmp_path / "ws"
+    tempa_config.set_active_workspace_root(root)
+    tempa_config.record_workspace_history(root)
+
+    tempa_config.clear_active_workspace_root()
+
+    assert tempa_config.read_workspace_history() == [
+        {"root": str(root), "opened_at": tempa_config.read_workspace_history()[0]["opened_at"]}
+    ]

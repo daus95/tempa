@@ -4,7 +4,7 @@
 function renderHomeWorkflow() {
   homeNotInit.classList.toggle("hidden", state.workspaceInitialized);
   homeSteps.classList.toggle("hidden", !state.workspaceInitialized);
-  if (!state.workspaceInitialized) return;
+  if (!state.workspaceInitialized) { renderRecentWorkspaces(); return; }
 
   homeWorkspacePath.textContent = state.workspaceRoot;
   homeWorkspaceCloseBtn.classList.toggle("hidden", !state.workspaceCanClose);
@@ -121,6 +121,109 @@ homeSelectFolderBtn.addEventListener("click", async () => {
     toast("Could not set the working folder.", true);
   } finally {
     homeSelectFolderBtn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Recent working folders (empty-state only) — reopen a folder Tempa has seen before
+// with one click, or create a brand-new one via a native "pick location" + "type a
+// name" pair of steps.
+// ---------------------------------------------------------------------------
+function renderRecentWorkspaces() {
+  const entries = state.recentWorkspaces || [];
+  homeRecent.classList.toggle("hidden", !entries.length);
+  homeRecentList.innerHTML = "";
+  for (const entry of entries) {
+    const li = document.createElement("li");
+    li.className = "home-recent-item" + (entry.exists ? "" : " missing");
+
+    const icon = document.createElement("span");
+    icon.className = "home-recent-icon";
+    icon.innerHTML = iconSvg("folder");
+    li.appendChild(icon);
+
+    const info = document.createElement("span");
+    info.className = "home-recent-info";
+    info.innerHTML = `<span class="home-recent-name">${escapeHtml(entry.name)}</span>` +
+      `<span class="home-recent-path">${escapeHtml(entry.root)}</span>` +
+      (entry.exists ? "" : '<span class="home-recent-missing-note">Folder not found</span>');
+    li.appendChild(info);
+
+    const time = document.createElement("span");
+    time.className = "home-recent-time";
+    time.textContent = formatEpochShort(entry.openedAt);
+    li.appendChild(time);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "home-recent-remove";
+    removeBtn.title = "Remove from recent list";
+    removeBtn.innerHTML = iconSvg("x");
+    removeBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        const res = await fetch("/api/workspace/recent/remove", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: entry.root }),
+        });
+        const data = await res.json();
+        if (!data.ok) { toast(data.error || "Could not remove the folder.", true); return; }
+        state.recentWorkspaces = data.recent || [];
+        renderRecentWorkspaces();
+      } catch (e) {
+        toast("Network error while removing the folder.", true);
+      }
+    });
+    li.appendChild(removeBtn);
+
+    if (entry.exists) {
+      li.addEventListener("click", async () => {
+        li.classList.add("loading");
+        try {
+          const res = await fetch("/api/workspace/open-recent", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: entry.root }),
+          });
+          const data = await res.json();
+          if (!data.ok) { toast(data.error || "Could not open the working folder.", true); return; }
+          toast("Working folder set: " + data.root);
+          await refreshSpecTree();
+        } catch (e) {
+          toast("Could not open the working folder.", true);
+        } finally {
+          li.classList.remove("loading");
+        }
+      });
+    }
+    homeRecentList.appendChild(li);
+  }
+}
+
+homeCreateFolderBtn.addEventListener("click", async () => {
+  homeCreateFolderBtn.disabled = true;
+  try {
+    const pickRes = await fetch("/api/workspace/pick-parent", { method: "POST" });
+    const pickData = await pickRes.json();
+    if (pickData.cancelled) return;
+    if (!pickData.ok) { toast(pickData.error || "Could not choose a location.", true); return; }
+
+    const name = await promptModal("New working folder name", "", {
+      title: "Create New Working Folder", okLabel: "Create",
+    });
+    if (!name || !name.trim()) return;
+
+    const createRes = await fetch("/api/workspace/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent: pickData.path, name: name.trim() }),
+    });
+    const createData = await createRes.json();
+    if (!createData.ok) { toast(createData.error || "Could not create the working folder.", true); return; }
+    toast("Working folder created: " + createData.root);
+    await refreshSpecTree();
+  } catch (e) {
+    toast("Could not create the working folder.", true);
+  } finally {
+    homeCreateFolderBtn.disabled = false;
   }
 });
 

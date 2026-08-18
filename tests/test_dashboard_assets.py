@@ -33,6 +33,7 @@ DATA_PLACEHOLDERS = [
     "/*__WORKSPACE_INITIALIZED__*/null",
     "/*__WORKSPACE_ROOT__*/null",
     "/*__WORKSPACE_CAN_CLOSE__*/null",
+    "/*__WORKSPACE_RECENT__*/null",
     "/*__PRINCIPLES_SET__*/null",
     "/*__CLARIFY_FINDINGS__*/null",
     "/*__CLARIFY_FINALIZE__*/null",
