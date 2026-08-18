@@ -41,3 +41,17 @@ the same rules apply to clarification, planning, implementation, QA, and verific
 There is no placeholder for it: injection is unconditional, so a `${...}` would duplicate the
 block. An absent or blank file injects nothing, leaving the templates exactly as written. Read the
 current value with `tempa show-principles`; edit it in the dashboard.
+
+## The collect-your-own-work rule is appended to two prompts
+
+`_collectable_work_block()` in `src/tempa_prompts.py` is appended to the **implementation** and
+**QA** prompts only, each with its own closing clause naming what that stage has to record. It
+tells a session that its turn ending ends the run, that whatever it left running is terminated
+with it, and that a long command should be *narrowed* until it fits rather than backgrounded or
+given a longer timeout — the harness moves a command to the background by itself once its own
+ceiling expires, so asking for more time is not a move that exists.
+
+Like the principles above, it has no `${...}` placeholder because injection is unconditional. It
+is deliberately **not** editable from `src/prompt/*.md`: every rule the runner's own state machine
+depends on lives in `tempa_prompts.py`, and a user tuning stage wording must not be able to remove
+one. The "prefer the templates" guidance in CONTRIBUTING covers wording, not invariants.

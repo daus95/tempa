@@ -727,3 +727,54 @@ def test_confirm_destructive_eof_error_treated_as_cancel(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         tm._confirm_destructive("cancelled")
     assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# reset_failed_epics and the last round's note
+#
+# --reset-failed drops the session id, so the retry is a memoryless session. What it is handed
+# instead is last_round_note — and on EPIC-02 that note was a promise to come back, handed over
+# dressed as a finding about the code, which is an instruction to redo the thing that killed the
+# last round. The label has to survive with the note it labels.
+# ---------------------------------------------------------------------------
+
+def test_reset_failed_epics_keeps_a_notes_kind_with_the_note():
+    """A note that loses its kind is silently promoted back to a claim to check, and that
+    promotion is precisely what this function would otherwise do to it."""
+    config = {"epic": [{
+        "epic_name": "EPIC-02", "status": "failed",
+        "last_round_note": "I'll report back once it finishes.",
+        "last_round_note_kind": "unfinished_check",
+    }]}
+    tm.reset_failed_epics(config)
+
+    epic = config["epic"][0]
+    assert epic["last_round_note"] == "I'll report back once it finishes."
+    assert epic["last_round_note_kind"] == "unfinished_check"
+
+
+def test_reset_failed_epics_drops_a_kind_with_no_note_to_label():
+    config = {"epic": [{"epic_name": "EPIC-02", "status": "failed",
+                        "last_round_note_kind": "unfinished_check"}]}
+    tm.reset_failed_epics(config)
+
+    assert "last_round_note_kind" not in config["epic"][0]
+
+
+def test_reset_failed_epics_clears_the_cut_short_grace():
+    """cut_short_rounds is an allowance, not a record: a clean-slate retry gets a fresh one
+    rather than a spent one, exactly like the counters beside it."""
+    config = {"epic": [{"epic_name": "EPIC-02", "status": "failed", "cut_short_rounds": 1}]}
+    tm.reset_failed_epics(config)
+
+    assert "cut_short_rounds" not in config["epic"][0]
+
+
+def test_reset_failed_epics_keeps_the_count_of_waiting_halts():
+    """Continue Implementation runs --reset-failed itself before every pass, so every counter it
+    clears restarts. A halt message that tells a human no investigation is needed must carry a
+    counter that survives this function, or the guard it replaced is not a guard."""
+    config = {"epic": [{"epic_name": "EPIC-02", "status": "failed", "ended_waiting_halts": 2}]}
+    tm.reset_failed_epics(config)
+
+    assert config["epic"][0]["ended_waiting_halts"] == 2

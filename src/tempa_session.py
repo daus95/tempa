@@ -20,6 +20,7 @@ import contextlib
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -39,7 +40,7 @@ from tempa_config import (
     get_usage_limit_retry_wait_sec,
     load_config,
 )
-from tempa_logging import SHOW_PROMPT, _banner, _state, log
+from tempa_logging import RECLAIMED_LINE_MARKER, SHOW_PROMPT, _banner, _state, log
 from tempa_notifications import AttentionEventType, notify_attention
 from tempa_process_group import NullProcessGroup, make_process_group
 
@@ -112,12 +113,47 @@ def _handle_background_terminated(text: str, label: str, backend: Backend) -> bo
     if not _is_background_terminated_text(text, backend):
         return False
     _state.background_tasks_terminated_hit = True
+    _warn_if_ceiling_disagrees(text, label)
     log(f"[{label}] {backend.label} hit its own ceiling on waiting for background work "
         "(a delegated sub-agent, or a command left running in the background) and killed "
         "it, cutting this session short. Whatever it finished before that is on disk and "
         "the session stays resumable, so this round is not counted as a stalled one. "
         "Raise `backend_background_wait_sec` in config.json if this keeps happening.")
     return True
+
+
+# The seconds count in the CLI's own "Background tasks still running after 600s; terminating."
+# line. Deliberately parsed here and NOT added to `background_terminated_markers`: the marker
+# must stay seconds-free or a configured ceiling other than the default stops matching at all
+# (see tests/test_tempa_backend.py's guard for exactly that).
+_CEILING_SECONDS = re.compile(r"after\s+(\d+)\s*s", re.IGNORECASE)
+
+
+def _warn_if_ceiling_disagrees(text: str, label: str) -> None:
+    """Log a warning when the ceiling the backend CLI reports is not the one Tempa set.
+
+    `backend_background_wait_sec` reaches the CLI as an environment default only
+    (`_backend_env` uses `setdefault`), through a variable name the vendor owns. If that name is
+    ever renamed, or the value is overridden further down, Tempa's setting silently stops doing
+    anything and every message telling a user to raise it becomes advice about a knob that is no
+    longer connected to anything. Nothing else in the runner could ever notice.
+
+    This is the only check that can. And it has something to say already: every occasion the
+    ceiling actually fired in the incident workspace reported 600s — Claude Code's own default —
+    including session_EPIC-10_20260816_134605.txt, and all of them predate the commit that
+    introduced the variable. So there is no observation anywhere that Tempa's value has ever
+    reached the CLI. A warning rather than a failure: being wrong about this costs a
+    configuration setting, not a session."""
+    match = _CEILING_SECONDS.search(text)
+    if not match:
+        return
+    configured = get_backend_background_wait_sec(load_config())
+    if int(match.group(1)) != int(configured):
+        log(f"[{label}] the backend reported a background-work ceiling of {match.group(1)}s, but "
+            f"`backend_background_wait_sec` is set to {int(configured)}s — Tempa's value is not "
+            "reaching the CLI, so raising it will not change anything. The environment variable "
+            "the backend reads may have been renamed, or something in this environment is "
+            "setting it already (Tempa only fills it in when it is unset).")
 
 
 def _is_auth_error_text(text: str, backend: Backend) -> bool:
@@ -441,9 +477,21 @@ def _remember_agent_message(readable: str) -> None:
     and another's with the text of an Edit tool's success message.
 
     Only the LAST prose block is kept, deliberately: that's the closing summary a session writes
-    after its work, which is the part that explains why it stopped."""
-    if not readable.startswith(_NON_PROSE_PREFIX) and readable.strip():
-        _state.last_agent_message = readable.strip()
+    after its work, which is the part that explains why it stopped.
+
+    Lines are filtered individually rather than by testing the readable's first character. One
+    assistant event can carry a text block AND a tool_use block, and `parse_line` joins them with
+    a newline — so a readable that merely STARTS with prose used to be stored whole, tool-call
+    JSON included. Seen live in session_EPIC-02_20260818_162124.txt: "The tail-only output
+    doesn't show which tests failed. Let's get the full failure list." stored together with
+    `[Tool: Bash] {"command": ..., "run_in_background": true}`. That JSON then reaches
+    `blocked_reason` — the whole of what the dashboard's Halted panel shows — and, worse, reaches
+    anything that reads the closing message for what the round MEANT."""
+    prose = "\n".join(
+        line for line in readable.splitlines() if not line.startswith(_NON_PROSE_PREFIX)
+    ).strip()
+    if prose:
+        _state.last_agent_message = prose
 
 
 def _grace_period_outcome(
@@ -593,6 +641,7 @@ def _stream_backend_process(
     the spawn is byte-for-byte the one Tempa did before it existed."""
     _state.background_tasks_terminated_hit = False
     _state.last_agent_message = ""
+    _state.reclaimed_process_count = 0
     # Sampled per spawn: this governs the process tree about to be created and is fixed for
     # that tree's lifetime, since a container cannot be attached after the fact. A value
     # saved mid-run therefore applies from the next session onward.
@@ -627,13 +676,30 @@ def _stream_backend_process(
 
 
 def _log_reclaimed(reclaimed: int, group: NullProcessGroup, label: str, log_file) -> None:
-    """Report what tearing the container down actually had to kill. Silent when nothing was
-    left running, which is the normal case — a line per clean session would be pure noise."""
+    """Report what tearing the container down actually had to kill, and record it on `_state`
+    for the outcome layer next door to read.
+
+    The log line stays silent when nothing was left running, which is the normal case — a line
+    per clean session would be pure noise. The `_state` write deliberately is not: 0 is a fact
+    the outcome layer needs exactly as much as 38 is, and skipping it would leave the previous
+    session's count standing.
+
+    This runs in `_stream_backend_process`'s `finally`, so it completes before that function
+    returns to `_run_backend_session`, which returns to `run_session` long before
+    `apply_session_outcome` — same thread, same round. No lock, no ordering change and no
+    cross-thread visibility question is needed to make the value readable there. The live log
+    corroborates the sequence to the second: reclaim line, SUCCEEDED, "made no progress", all
+    stamped [2026-08-18 16:35:45] in that order in process_20260818_150522.txt."""
+    _state.reclaimed_process_count = reclaimed
     if not reclaimed:
         return
     count = f"{reclaimed} " if group.count_is_exact else ""
+    # Built FROM the marker rather than merely containing the same words. The outcome layer
+    # recognises this line to keep it out of `blocked_reason` (see `_last_meaningful_log_lines`),
+    # and a marker that drifts out of the message it is meant to match has no other symptom —
+    # the epic simply starts reporting Tempa's cleanup notice as its own blocker again.
     message = (
-        f"[{label}] the backend CLI exited but left {count}process(es) of its own still "
+        f"[{label}{RECLAIMED_LINE_MARKER}{count}process(es) of its own still "
         "running — typically a dev server, build daemon, watcher or test runner it started "
         "and never stopped. Terminated them along with the session, so they don't sit "
         "holding memory and ports until the machine is rebooted. Turn off "
@@ -689,9 +755,14 @@ def _stream_contained_process(
             log_file.write(raw_line)
             log_file.flush()
             break
+        # `raw_line`, not `marker_text`: `_failure_marker_text`'s narrowing exists to stop
+        # application text such as an OpenAPI `#/components/responses/Unauthorized` reference
+        # faking a CLI auth failure, and it makes this marker ineligible the moment the CLI puts
+        # it inside a `result` event with exitCode 0. This handler cannot cause that class of
+        # harm — it terminates nothing and sets no stop_event — so it gets the whole line.
         # Not a `break`: the CLI keeps streaming (and exits 0) after this — the rest of
         # its output still belongs in the log, and only the flag matters downstream.
-        _handle_background_terminated(marker_text, label, backend)
+        _handle_background_terminated(raw_line, label, backend)
         if data is not None:
             readable = backend.parse_line(data)
             if readable:

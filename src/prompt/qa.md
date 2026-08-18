@@ -82,7 +82,9 @@ IMPORTANT: You MUST update ${config_path} (set qa_status="done") under one of th
 Otherwise, the agent runner will detect that QA is still ongoing and try to resume this session.
 
 FIELDS YOU MUST NEVER WRITE in ${config_path}:
-   "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run"
+   "qa_history", "qa_loop_strikes", "blocked_reason", "total_run", "qa_total_run",
+   "no_progress_rounds", "last_round_note", "last_round_note_kind", "cut_short_rounds",
+   "ended_waiting_halts"
 These belong to the agent runner, which maintains them itself once your session ends. Writing
 them corrupts its record of how many QA rounds this epic has actually had — an extra
 "qa_history" entry duplicates the round you are working on right now, and two rounds with an

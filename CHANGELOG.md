@@ -8,6 +8,101 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An epic is no longer failed over work Tempa itself terminated.** A session did 182 turns of QA
+  fixes, live-verified three features, started a twelve-minute test suite in the background and
+  closed its turn saying it would report back once it finished. Under a headless one-shot CLI run,
+  writing that sentence *is* how a session ends: the CLI exited 0, Tempa's own container teardown
+  reclaimed 38 processes including the suite, and the result the round was waiting for never
+  existed. The next round started over with no memory of the verification, did the same thing, and
+  reclaimed 35 more — and two exit-0 rounds with no feature completed is exactly what
+  `implement_no_progress_rounds` reads as an epic blocked on something outside itself. The epic was
+  marked `failed` and the whole runner stopped, over an epic that was blocked on nothing.
+  Tempa already had a guard for this shape, but it could not fire: `background_tasks_terminated_hit`
+  is set only by recognising the backend CLI's own "Background tasks still running after Ns;
+  terminating." message, which covers background work that CLI's harness tracks — not a shell the
+  session started with its Bash tool's `run_in_background`, for which the CLI prints nothing and
+  exits 0. Tempa's own kill path set nothing at all. The teardown is now recorded on `_state`, and a
+  round that both promised to come back with a result AND had processes reclaimed earns the epic one
+  extra round before the count is allowed to matter.
+  Deliberately an allowance, not an exemption. Both signals are required because either alone is
+  wrong in a direction that matters: leftover processes were reclaimed on **82%** of exit-0 sessions
+  in the workspace this came from (62 of 76), so a grace keyed on reclaim alone would just be
+  `implement_no_progress_rounds: 4` wearing a mechanism costume, and would make a genuinely blocked
+  epic that happens to leave a `vite` server running effectively unfailable. The allowance is one
+  round, is dropped the moment a feature completes, is cleared by `--reset-failed`, and is spent
+  only in the failure arm — so the two fully automatic repairs beside it (the dependency reorder and
+  the QA-state desync repair) still fire on exactly the round they always have.
+- **A halt no longer claims a blocker Tempa has no evidence for.** The failure message asserted the
+  epic was "very likely blocked on something outside this epic" and then conceded, one line later
+  and verbatim, that "the session didn't name a specific epic it's blocked on". The claim is the
+  part a human reads first, and it sent them hunting a dependency that did not exist. When no
+  `blocked_by_epic` was named, the halt now states only what is known; when the round was one Tempa
+  cut short, it says so in Tempa's own voice and quotes the session's words underneath rather than
+  instead of them. That quoting is load-bearing: the incident round's closing message was the only
+  record anywhere that three features had been finished, since the round ended before writing them
+  into `config.json`.
+- **The next round is no longer told to redo the thing that killed the last one.** `last_round_note`
+  is handed to the following session as a "CLAIM TO CHECK … check it against the code as it stands
+  now, first". Round 2 of the incident received round 1's *"I'm now waiting for the full
+  Configuration.Tests suite… I'll report back once it completes."* under that header and did exactly
+  as instructed: it re-ran the suite, in the background, for twelve minutes, and ended the same way.
+  A note now travels with a `last_round_note_kind`, and an `unfinished_check` arrives under a header
+  saying its result no longer exists and pointing the round at redoing the check narrowed, reading
+  `config.json` first. Notes written before that field existed carry no kind and still arrive as
+  claims — a real blocker must — so the same warning is merged into the default frame as well.
+  `--reset-failed` keeps the kind with the note it labels, because a note that loses its label is
+  silently promoted back to a claim.
+- **Tempa's own cleanup notice is no longer quoted back as an epic's blocker.** `_log_reclaimed`
+  appends its message into the session log *after* the agent's last word, so on any session that
+  left processes running it is the tail — and the log-tail fallback would hand it back as the
+  session's explanation, telling a human in the Halted panel that their epic was blocked on "Turn
+  off Terminate leftover processes in Settings → Runs". The existing `[Done]` trim could not catch
+  it, since that only fires when `[Done]` is the last line. The message is now built from the same
+  constant the outcome layer matches, so the two cannot drift apart.
+- **A stalled round that left nothing quotable now still explains itself.** `blocked_reason` was
+  assigned unconditionally on that path, so a round with no captured prose and an unreadable log
+  stored `""` — and both the dashboard's Halted panel and `tempa status` render their block only
+  when that field is truthy, so the epic became a bare red ✗ with no explanation and, since the
+  retry hint rides on the same string, no way out anywhere on the page.
+- **An agent's closing words no longer carry its tool-call JSON.** One assistant event can carry a
+  text block and a `tool_use` block, joined with a newline, and the capture only rejected a readable
+  that *started* with `[`. So prose plus a `run_in_background` call was stored whole and could reach
+  `blocked_reason`, which is the entire content of the Halted panel. Lines are now filtered
+  individually.
+
+### Changed
+
+- **The prompts tell a session to narrow a long run, not to background it or ask for more time.**
+  The system prompt has forbidden ending a turn to wait since 0.6.6, and the incident happened
+  anyway in a session that *complied* with it: it asked for the foreground with a 600000 ms timeout
+  and was answered "Command did not complete within its 600s timeout and was moved to the
+  background"; its later, compliant `until [ -s … ]; do sleep 5; done` foreground wait was
+  backgrounded too. An instruction the harness converts into the forbidden action is not an
+  instruction. The implementation and QA prompts now carry a rule naming a reachable move — narrow
+  the run until it fits — plus "write output to a file rather than piping it through `tail`", and
+  the system prompt's contradictory "raise the timeout" sentence is corrected to match.
+- **A feature is recorded before the wider regression run, not after it.** The incident round
+  finished its entire allotted batch of three features and verified all of them, then went to run a
+  full suite *before* updating `config.json` — so the round was scored as having achieved nothing.
+  The rule now hangs the record off finishing and checking each feature, ahead of any wider run. The
+  trade is deliberate and stated: a `done` a later suite disproves goes back through QA as
+  `require_fixing`, one extra round, which is the right direction because an unrecorded feature is
+  invisible while a wrongly-recorded one is correctable.
+- **Tempa warns when a backend's background-work ceiling disagrees with `backend_background_wait_sec`.**
+  That setting reaches the CLI as an environment default only, under a variable name the vendor owns,
+  so if the name is ever renamed the setting silently stops doing anything and every message telling
+  you to raise it becomes advice about a disconnected knob. Nothing else in the runner could notice.
+  It has something to say already: every ceiling message in the workspace this came from reported
+  Claude Code's own 600s default rather than Tempa's configured value.
+- The background-terminated marker is now matched against the raw output line rather than the
+  narrowed failure-marker text, so it is still recognised when the CLI reports it inside a `result`
+  event with exit code 0.
+- `max_session_run` is documented for what it is — a backstop against a run of consecutive
+  zero-progress sessions, not a lifetime session cap. It was never reached in the incident
+  workspace: one epic has 20 session logs on disk and a stored `total_run` of 2.
+
 ## [0.8.0] - 2026-08-18
 
 ### Added

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import tempa_backend as tb
 import tempa_config
 import tempa_prompts as tp
 
@@ -749,3 +750,129 @@ def test_a_blank_note_is_not_carried(tmp_path, isolate_tempa_paths):
         "epic_name": "e1", "status": "require_fixing", "last_round_note": "   \n ",
     }])
     assert "PREVIOUS ROUND" not in tp.build_session_prompt(config, "e1")
+
+
+# ---------------------------------------------------------------------------
+# _collectable_work_block — the turn that ends to wait
+#
+# AUTONOMOUS_SYSTEM_PROMPT has forbidden ending a turn to wait since 0.6.6, and the EPIC-02
+# incident happened anyway in a session that COMPLIED with it: it asked for the foreground with
+# an explicit 600000ms timeout and the harness answered "moved to the background". A prohibition
+# the harness converts into the forbidden action is not an instruction, which is why this block
+# names a reachable move instead of repeating the ban.
+# ---------------------------------------------------------------------------
+
+def _prompt_config(**epic_overrides):
+    epic = {"epic_name": "EPIC-02", "status": "on_progress", "completed_features": 2,
+            "total_features": 6, "features": []}
+    epic.update(epic_overrides)
+    return {"epic": [epic], "features_per_session": 3}
+
+
+def test_the_implementation_prompt_forbids_ending_a_turn_to_wait():
+    prompt = tp.build_session_prompt(_prompt_config(), "EPIC-02")
+
+    assert "DO NOT START WORK THIS SESSION CANNOT COLLECT" in prompt
+    assert "ends the instant you reply without calling a tool" in prompt
+    # The quoted sentence is wrapped across a line in the block, so match its two halves rather
+    # than a span that only exists once the wrapping is undone.
+    assert "I'll report back once it" in prompt
+    assert "is the one closing sentence that guarantees nothing ever does" in prompt
+
+
+def test_the_prompt_says_to_narrow_a_run_rather_than_background_or_extend_it():
+    """The incident session asked for its tool's ceiling and was auto-backgrounded anyway, then
+    had its compliant foreground wait backgrounded too. "Use the foreground" is not a followable
+    instruction for a twelve-minute suite; "narrow it until it fits" is."""
+    prompt = tp.build_session_prompt(_prompt_config(), "EPIC-02")
+
+    assert "NARROW the run until it fits" in prompt
+    assert "NOT ask for a longer timeout" in prompt
+
+
+def test_no_prompt_surface_tells_the_agent_to_raise_a_timeout():
+    """Shipping a session prompt that says "narrow it" alongside a system prompt that says
+    "raise the timeout" would be two prompts contradicting each other."""
+    surfaces = [
+        tp.build_session_prompt(_prompt_config(), "EPIC-02"),
+        tp.build_qa_prompt(_prompt_config(), "EPIC-02", Path("qa.md")),
+        tb.AUTONOMOUS_SYSTEM_PROMPT,
+    ]
+    for surface in surfaces:
+        assert "raised timeout" not in surface
+        assert "raise the timeout" not in surface
+
+
+def test_the_prompt_puts_the_config_record_before_the_verification_run():
+    """The ordering inversion is the clause that actually breaks the incident: session #1
+    finished its entire allotted batch of three features, verified all of it, and recorded none
+    of it because it was waiting to run a wider regression suite first."""
+    prompt = tp.build_session_prompt(_prompt_config(), "EPIC-02")
+
+    assert "BEFORE you start any wider regression or verification run" in prompt
+    assert prompt.index("BEFORE you start any wider regression") > prompt.index("MANDATORY RULE — DO NOT SKIP")
+
+
+def test_a_feature_that_cannot_be_checked_is_pointed_at_the_two_rules_below():
+    """The trade this rule accepts is that a feature is recorded before a wider run has had its
+    say. It must not become licence to record a feature that was never checked at all."""
+    prompt = tp.build_session_prompt(_prompt_config(), "EPIC-02")
+
+    assert "check at all, stays as it is" in prompt
+    assert "rather than your closing message" in prompt
+
+
+def test_the_qa_prompt_carries_the_rule_and_names_its_own_record():
+    """qa.md tells the session to start the application and never tells it to stop it, so QA is
+    the session shape most likely to leave work running."""
+    prompt = tp.build_qa_prompt(_prompt_config(), "EPIC-02", Path("qa.md"))
+
+    assert "DO NOT START WORK THIS SESSION CANNOT COLLECT" in prompt
+    assert "qa_status" in prompt
+    assert "the loop guard" in prompt
+    assert "regression or verification run" not in prompt
+
+
+def test_the_collect_rule_survives_a_user_emptying_the_templates():
+    """Pins the "Python, not a template placeholder" decision: every rule the runner's own state
+    machine depends on lives in this module, so a user tuning stage wording cannot delete it."""
+    (tempa_config.PROMPT_DIR).mkdir(parents=True, exist_ok=True)
+    (tempa_config.PROMPT_DIR / "implementation.md").write_text("", encoding="utf-8")
+    (tempa_config.PROMPT_DIR / "qa.md").write_text("", encoding="utf-8")
+
+    assert "DO NOT START WORK THIS SESSION CANNOT COLLECT" in tp.build_session_prompt(
+        _prompt_config(), "EPIC-02")
+    assert "DO NOT START WORK THIS SESSION CANNOT COLLECT" in tp.build_qa_prompt(
+        _prompt_config(), "EPIC-02", Path("qa.md"))
+
+
+def test_an_unfinished_check_is_not_handed_over_as_a_claim_to_check():
+    """Round 2 of the incident was handed round 1's "I'll report back once it completes." under
+    the CLAIM TO CHECK header, followed by "Check it against the code as it stands now, first".
+    It did: it re-ran the suite, in the background, and ended the same way."""
+    config = _prompt_config(
+        last_round_note="I'm waiting for the full failure-list test run to complete.",
+        last_round_note_kind="unfinished_check",
+    )
+    prompt = tp.build_session_prompt(config, "EPIC-02")
+
+    assert "AN UNFINISHED CHECK FROM THE ROUND BEFORE" in prompt
+    assert "CLAIM TO CHECK" not in prompt
+    assert "foreground command" in prompt
+
+
+def test_a_note_with_no_kind_still_warns_about_a_round_that_was_only_waiting():
+    """Closes the legacy exposure: every note written before last_round_note_kind existed carries
+    no kind, including the one sitting on EPIC-02 right now. A real blocker must still arrive as a
+    claim, so the warning is merged into the default frame rather than replacing it."""
+    config = _prompt_config(
+        last_round_note=(
+            "I'm waiting for the full failure-list test run (background) to complete so I can "
+            "confirm whether the 16th failure is a genuine regression. I'll report back once it "
+            "finishes."
+        ),
+    )
+    prompt = tp.build_session_prompt(config, "EPIC-02")
+
+    assert "CLAIM TO CHECK" in prompt
+    assert "neither a claim nor a blocker" in prompt

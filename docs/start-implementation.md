@@ -148,6 +148,27 @@ against a real loop. Setting `backend_background_wait_sec` to `0` means "wait in
 isn't the default, because a session that leaves a dev server running would then hang the runner
 with no upper bound.
 
+**Nor does a session Tempa itself cut short.** The marker above only covers background work the
+CLI's own harness tracks and waits on. A shell the session starts with its Bash tool's
+`run_in_background` is not that: the CLI prints nothing, exits **0** — in the incident, about a
+minute after the shell started — and it is Tempa's own container teardown that kills the work,
+logging *"the backend CLI exited but left N process(es) of its own still running"* and nothing
+machine-readable. That ending is byte-for-byte indistinguishable from a session that simply had
+nothing left to do, so it was counted as a no-progress round. One epic did 182 turns of QA fixes,
+live-verified three features, started a twelve-minute test suite in the background and closed its
+turn saying it would report back; 38 processes were reclaimed, the next round did the same and
+reclaimed 35 more, and two such rounds is exactly what `implement_no_progress_rounds` reads as an
+epic blocked on something outside itself. The teardown is now recorded, and a round that ended by
+promising to come back with a result whose object Tempa terminated earns the epic **one** extra
+round before the count is allowed to matter — dropped as soon as a feature completes, and not
+granted twice. Deliberately an allowance and not an exemption: leftover processes are reclaimed on
+**82%** of sessions in the workspace this came from (62 of 76), so exempting every such round would
+make a genuinely blocked epic that happens to leave a `vite` server running effectively unfailable.
+The prompts also now tell a session to narrow a long run rather than background it, to write output
+to a file rather than pipe it through `tail`, and to record a finished feature *before* the
+regression run rather than after — guidance to the agent, not detection, and an epic whose rounds
+keep ending this way still fails, one round later than before.
+
 ## Epic Status Lifecycle
 
 ```

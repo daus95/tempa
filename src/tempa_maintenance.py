@@ -380,7 +380,8 @@ def reset_failed_epics(config: dict) -> list[str]:
     in tempa_session.py) would just immediately re-trip the exact same limit on its very next
     attempt, making --reset-failed look like it worked while actually being a dead end.
 
-    The QA round history is the one thing NOT cleared: it is the only record a human has that
+    The QA round history is not cleared, and neither is the last round's note or the label beside
+    it (see below): the history is the only record a human has that
     this epic was cycling through QA, and `tempa status` prints it. It gets a reset marker
     appended instead (append_reset_marker), which is what makes the QA loop guard start counting
     from here — the same clean slate, without destroying the evidence that led to it.
@@ -405,12 +406,26 @@ def reset_failed_epics(config: dict) -> list[str]:
             append_reset_marker(session)
             session.pop("blocked_reason", None)
             session.pop("blocked_by_epic", None)
-            # `last_round_note` is deliberately NOT cleared. Everything above is a counter or a
-            # status that would re-trip its own limit on the retry; that note is the only thing
-            # the previous rounds actually learned, and dropping the session id just above
-            # already costs the retry its conversation. Clearing this too is what made a reset
-            # start with less than the round before it — the next prompt carries the note as a
-            # claim to check (see _last_round_note_block), which is exactly what a retry needs.
+            session.pop("cut_short_rounds", None)
+            if "last_round_note" not in session:
+                session.pop("last_round_note_kind", None)
+            # `last_round_note` is deliberately NOT cleared, and neither is the kind stored beside
+            # it. Everything above is a counter or a status that would re-trip its own limit on
+            # the retry; that note is the only thing the previous rounds actually learned, and
+            # dropping the session id just above already costs the retry its conversation.
+            # Clearing it too is what made a reset start with less than the round before it — the
+            # next prompt carries the note as a claim to check (see _last_round_note_block).
+            #
+            # What was wrong on EPIC-02 was never that the note was kept — it was that a promise
+            # to come back ("I'm waiting for the full failure-list test run (background) to
+            # complete... I'll report back once it finishes.") was handed to a memoryless retry
+            # dressed as a finding about the code, which is an instruction to redo the thing that
+            # killed the last round. So the KIND has to survive with it, not separately: a note
+            # that loses its kind is silently promoted back to a claim to check, and that
+            # promotion is precisely what this function would otherwise do to that note.
+            # `ended_waiting_halts` survives for a different reason — it is the only thing that
+            # can tell the first halt of that shape from the tenth, and this function running
+            # before every dashboard retry is what makes the tenth possible.
     return reset
 
 

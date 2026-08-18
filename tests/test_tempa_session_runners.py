@@ -29,6 +29,7 @@ def reset_runner_state():
         tsr._state.server_overloaded_hit = False
         tsr._state.backend_stuck_after_done_hit = False
         tsr._state.background_tasks_terminated_hit = False
+        tsr._state.reclaimed_process_count = 0
         tsr._state.last_agent_message = ""
         tsr._state.stop_event.clear()
     _clear()
@@ -433,3 +434,32 @@ def test_run_qa_session_records_the_round_it_just_finished(monkeypatch, tmp_path
     tsr.run_qa_session(0, "prompt", "EPIC-01")
 
     assert saved["epic"][0]["qa_history"][0]["failed"] == ["F1"]
+
+
+def test_restore_runner_owned_puts_back_a_cut_short_count_the_session_wrote():
+    """cut_short_rounds is an allowance rather than a counter, so an agent-written value is the
+    same bug as the stall counter above with the sign flipped: it hands an epic a spare round it
+    never earned, or spends one it was owed."""
+    epic = {"epic_name": "EPIC-02", "cut_short_rounds": 0}
+
+    assert tsr._restore_runner_owned({"epic": [epic]}, 0, {"cut_short_rounds": 1}, "EPIC-02") is True
+    assert epic["cut_short_rounds"] == 1
+
+
+def test_restore_runner_owned_never_separates_a_note_from_its_kind():
+    """Separating the two is the specific failure the kind exists to prevent — a note that loses
+    its kind is silently promoted back to a claim to check, which is the framing that sent round 2
+    of the EPIC-02 incident straight back into the trap."""
+    snapshot = {"last_round_note": "I'll report back once it finishes.",
+                "last_round_note_kind": "unfinished_check"}
+    epic = {"epic_name": "EPIC-02", "last_round_note": "I'll report back once it finishes."}
+
+    assert tsr._restore_runner_owned({"epic": [epic]}, 0, snapshot, "EPIC-02") is True
+    assert epic["last_round_note_kind"] == "unfinished_check"
+
+
+def test_restore_runner_owned_puts_back_the_count_of_waiting_halts():
+    epic = {"epic_name": "EPIC-02", "ended_waiting_halts": 0}
+
+    assert tsr._restore_runner_owned({"epic": [epic]}, 0, {"ended_waiting_halts": 2}, "EPIC-02") is True
+    assert epic["ended_waiting_halts"] == 2

@@ -18,9 +18,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from tempa_backend import Backend
-from tempa_config import get_config_path, load_config, save_config
+from tempa_config import (
+    LAST_ROUND_NOTE_UNFINISHED_CHECK,
+    get_config_path,
+    load_config,
+    save_config,
+)
 from tempa_decisions import EPIC_DEFERRED, answer_hint, blocked_features, describe, has_other_work
-from tempa_logging import _state, log
+from tempa_logging import RECLAIMED_LINE_MARKER, _state, log
 from tempa_maintenance import _epic_features_actually_done, with_retry_hint
 from tempa_notifications import AttentionEventType, notify_attention
 
@@ -37,6 +42,9 @@ def _last_meaningful_log_lines(log_path: Path, max_lines: int = 6) -> str:
     into "what the agent said" and "what its last command printed". One epic's stored reason
     opened with a psql table header and `(0 rows)`; another's with an Edit tool's success message.
 
+    A round that ended on a promise to come back now has Tempa's own account written above these
+    words rather than these words alone (see `_waiting_close_notice`).
+
     The log tail is kept as the fallback for the case the capture cannot cover — a session that
     produced no prose at all, or one whose outcome is being recorded by a process that didn't run
     it (a test, a resumed run) — where six lines of possibly-mixed output still beat nothing."""
@@ -47,9 +55,120 @@ def _last_meaningful_log_lines(log_path: Path, max_lines: int = 6) -> str:
         lines = [line for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
     except OSError:
         return ""
+    # Drop Tempa's own reclaim line and anything after it. `_log_reclaimed` appends that message
+    # into the session log AFTER the agent's last word, so on any session that left processes
+    # running it IS the tail — and this fallback would then hand back Tempa's report of killing
+    # them as the session's own explanation of why it stopped, on precisely the epic where that
+    # is the most confusing sentence available ("Turn off Terminate leftover processes in
+    # Settings → Runs", presented to a human as their epic's blocker). The existing [Done] trim
+    # below cannot catch it: that only fires when [Done] is the LAST line, and once the reclaim
+    # paragraph lands after it, it is not. Matched from the end and only near the start of a
+    # line, so a session that happened to `cat` a Tempa log mid-round cannot truncate its own
+    # explanation at the quoted copy — the accepted residue is that a quoted copy appearing as
+    # the very last output would still trim, which costs a fallback reason, not a real one.
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].startswith("[") and 0 <= lines[i].find(RECLAIMED_LINE_MARKER) <= 80:
+            lines = lines[:i]
+            break
     if lines and lines[-1].startswith("[Done]"):
         lines = lines[:-1]
     return "\n".join(lines[-max_lines:])
+
+
+# Closing phrases that only make sense if the speaker expects to be called again. Deliberately
+# NOT a list of ways to say "waiting": "blocked waiting on the client's API key" is a perfectly
+# good blocker report that has to reach the Halted panel word for word, and no keyword tells it
+# apart from "waiting for the test run I started" by topic — this repo's own fixture for the
+# failure path is literally "waiting on something external". What separates them is TENSE: a
+# promise about what this session will do later, which under Tempa is a promise about a session
+# that stopped existing the moment it was written. Both rounds of the EPIC-02 incident ended on
+# one — "I'll report back once it completes." and "I'll report back once it finishes."
+#
+# English, and shaped by two observations on one backend. A Copilot or Codex session, or a plan
+# written in another language, may end a turn to wait in words this misses; that degrades to
+# exactly the behaviour Tempa had before this existed, which is the safe direction. A list to
+# extend from live logs, the way `usage_limit_markers` and `background_terminated_markers` grew.
+_PROMISED_TO_COME_BACK = (
+    "report back", "i'll report", "i will report", "let you know once", "let you know when",
+    "update you once", "update you when", "check back", "circle back", "i'll resume",
+    "i will resume", "i'll continue once", "i will continue once", "i'll pick this up",
+    "standing by", "will follow", "results to follow", "once it completes", "once it finishes",
+)
+
+
+def _ended_waiting_on_killed_work() -> bool:
+    """True when this round both promised to come back with a result and had the thing it was
+    waiting on destroyed by Tempa's own container teardown.
+
+    Two signals, both required, because either alone gets it wrong in a direction that matters.
+    The prose alone cannot carry it, for the reason above. The reclaim alone cannot either, and
+    the margin is not close: `terminate_leftover_processes` defaults on and agent CLIs leave dev
+    servers behind constantly, so across the five containment-era process logs in the incident
+    workspace 62 of 76 exit-0 sessions — 82% — reclaimed something, three of the five runs being
+    entirely healthy. Anything keyed on reclaim alone is not a mechanism, it is `+1` to
+    `implement_no_progress_rounds` with a story attached.
+
+    Reads `_state.last_agent_message` rather than the six-line summary
+    `_last_meaningful_log_lines` returns, and reads the message's LAST paragraph. 163 of the 178
+    session logs in that workspace close with a prose block longer than six lines — the incident's
+    own closing message happened to be one line, which is the only reason a tail-based version of
+    this would have looked like it worked. The longest is 47 lines, whose final six are a fragment
+    of a markdown bullet list.
+
+    Stuck-after-done is excluded explicitly rather than inferred. It is tempting to argue that
+    path always reclaims 0, because `_terminate_if_stuck_after_done` already called
+    `group.terminate_tree()` — but Windows' `terminate_tree` counts first and leaves `self._job`
+    set, so the later `close()` re-counts a job whose members `TerminateJobObject` may not have
+    reaped, from a different thread, with nothing synchronising the two. And that path can reach
+    here with exit code 0, since `apply_session_outcome`'s stall branch does not exclude the flag.
+    Checking it directly costs one clause and removes the cross-thread reasoning from the
+    correctness argument entirely."""
+    if not _state.reclaimed_process_count or _state.backend_stuck_after_done_hit:
+        return False
+    paragraphs = [p for p in (_state.last_agent_message or "").split("\n\n") if p.strip()]
+    if not paragraphs:
+        return False
+    closing = paragraphs[-1].lower()
+    return any(phrase in closing for phrase in _PROMISED_TO_COME_BACK)
+
+
+# One. Not a configurable allowance and not two: this is the difference between "Tempa does not
+# manufacture the verdict on the very round it killed" and "a stalling epic gets a longer leash".
+_CUT_SHORT_GRACE_ROUNDS = 1
+
+
+def _bank_cut_short_grace(epic: dict) -> bool:
+    """Whether `epic` still has a spare round because Tempa itself cut one of its sessions short,
+    banking this one if so. Called only on the round that would otherwise fail the epic.
+
+    Every session runs inside a container Tempa tears down when the backend CLI exits, and what
+    that teardown kills is often real. Seen live on EPIC-02: session #1 spent 182 turns doing QA
+    fixes for FEAT-02-02/04/05 and live-verifying all three, started a 12-minute `dotnet test` in
+    the background, and closed its turn saying it would report back once the suite finished —
+    which, in a headless one-shot run, is how a session ends. The CLI exited 0, the container
+    reclaimed 38 processes, and the result that round was waiting on never existed. Session #2
+    started over with no memory of the verification, did the same thing, and reclaimed 35 more.
+    Two exit-0 rounds with no feature completed is precisely what `implement_no_progress_rounds`
+    reads as an epic blocked on something outside itself, so EPIC-02 was marked failed and the
+    whole runner stopped — over work Tempa had killed, on an epic that was blocked on nothing.
+
+    Deliberately a bounded grace rather than the outright exemption
+    `background_tasks_terminated_hit` grants, and deliberately spent HERE rather than by raising
+    the limit at the top of `_handle_stalled_round`. That limit gates the entire triage, so
+    raising it would also postpone `_try_reorder_for_dependency` and `_requeue_for_qa_after_desync`
+    — two repairs that need no human at all, one of them the automatic fix for the config write
+    race `save_config`'s own docstring documents. Spending the grace in the failure arm alone
+    means `no_progress_rounds` keeps counting honestly (so the eventual halt says four rounds when
+    four rounds happened), both repairs keep firing on the round they do today, and the only thing
+    bought is one more attempt before a human is told.
+
+    The balance is dropped the moment a feature completes (`_update_no_progress_tracking`): this
+    is grace for an epic that was interrupted, not for one that is stuck."""
+    banked = epic.get("cut_short_rounds", 0)
+    if banked >= _CUT_SHORT_GRACE_ROUNDS:
+        return False
+    epic["cut_short_rounds"] = banked + 1
+    return True
 
 
 def _update_no_progress_tracking(epic: dict, completed_before: int, limit: int) -> bool:
@@ -70,6 +189,13 @@ def _update_no_progress_tracking(epic: dict, completed_before: int, limit: int) 
     (this epic's own, much lower threshold) always has the chance to catch a genuine stall
     first, making max_session_run a redundant, higher backstop instead of a competing trap.
 
+    Worth being precise about what that makes max_session_run: a backstop against a run of
+    consecutive zero-progress sessions, and nothing wider. It is not a lifetime session cap and
+    was never reached in the incident workspace — EPIC-13 has 20 session logs on disk and a stored
+    `total_run` of 2, EPIC-03 has 21 QA rounds against a limit of 30 it never approached. Any
+    sentence elsewhere that offers max_session_run as the remaining safety net for an epic that
+    keeps making a little progress is overstating it.
+
     Mutates `epic` in place, mirroring how `total_run` is already tracked directly on it."""
     if epic.get("completed_features", 0) > completed_before:
         epic["no_progress_rounds"] = 0
@@ -77,6 +203,11 @@ def _update_no_progress_tracking(epic: dict, completed_before: int, limit: int) 
         # Whatever the last stalled round concluded is about a state this round just moved past;
         # carrying it into the next prompt would argue against work that has already happened.
         epic.pop("last_round_note", None)
+        epic.pop("last_round_note_kind", None)
+        # And the spare round Tempa's own teardown bought this epic: that grace was banked
+        # against a stall this round has just ended. A later stall gets a fresh one, not this
+        # one's change.
+        epic.pop("cut_short_rounds", None)
         return False
     epic["no_progress_rounds"] = epic.get("no_progress_rounds", 0) + 1
     return epic["no_progress_rounds"] >= limit
@@ -191,14 +322,18 @@ def _reason_with_counterpart_context(reason: str, epics: list[dict], blocked_by_
 
 
 def _requeue_reordered_epic(config: dict, epic: dict, session_label: str, blocked_by_epic: str,
-                            reason: str, limit: int, log_path: Path) -> None:
+                            reason: str, rounds: int, log_path: Path) -> None:
     """The blocker the session named was moved ahead of this epic in the plan — put this one
-    back in the queue behind it. Not a failure: nothing needs a human."""
+    back in the queue behind it. Not a failure: nothing needs a human.
+
+    `rounds` is this epic's own `no_progress_rounds`, not the configured threshold — the two
+    agree today and the message is trying to state the first."""
     epic["no_progress_rounds"] = 0
+    epic.pop("cut_short_rounds", None)
     epic["status"] = "pending"
     save_config(config)
     log(
-        f"Session [{session_label}] made no progress for {limit} resumed session(s) "
+        f"Session [{session_label}] made no progress for {rounds} resumed session(s) "
         f"in a row — it reported being blocked on '{blocked_by_epic}', which hasn't "
         "been implemented yet. Automatically moved it ahead in the plan so it runs "
         f"next; [{session_label}] will resume once it's done. Its own last "
@@ -217,16 +352,20 @@ def _requeue_reordered_epic(config: dict, epic: dict, session_label: str, blocke
 
 
 def _requeue_for_qa_after_desync(config: dict, epic: dict, session_label: str, reason: str,
-                                 limit: int, log_path: Path) -> None:
+                                 rounds: int, log_path: Path) -> None:
     """The epic's own feature bookkeeping proves it's actually fully implemented — this
     isn't a real external blocker, it's a QA-state bookkeeping desync (e.g. the epic was
     already QA-passed and its epic-level status/qa_passed got reverted or lost — see
     tempa_config.save_config's non-atomic-write caveat). Repair it and route it back through
-    the normal QA gate instead of failing it."""
+    the normal QA gate instead of failing it.
+
+    `rounds` is this epic's own `no_progress_rounds`, not the configured threshold — the two
+    agree today and the message is trying to state the first."""
     _repair_qa_state_desync(epic)
+    epic.pop("cut_short_rounds", None)
     save_config(config)
     log(
-        f"Session [{session_label}] made no progress for {limit} resumed session(s) "
+        f"Session [{session_label}] made no progress for {rounds} resumed session(s) "
         "in a row, but its own feature bookkeeping shows all "
         f"{epic.get('total_features', 0)} feature(s) are actually done — this looks "
         "like a QA-state bookkeeping desync (the epic was likely already QA-passed and "
@@ -254,32 +393,145 @@ def _requeue_for_qa_after_desync(config: dict, epic: dict, session_label: str, r
     )
 
 
+def _waiting_close_notice(reason: str, halts: int) -> str:
+    """What the dashboard's Halted panel shows for an epic whose rounds keep ending on a promise
+    to come back.
+
+    That panel renders `blocked_reason` verbatim and nothing else, so on EPIC-02 a human opening
+    a halted epic read: "I'm waiting for the full failure-list test run (background) to complete
+    ... I'll report back once it finishes." That answers no question the panel is asking, names no
+    blocker, and reads as though the run were still going. Everything the reader actually needed
+    was known to Tempa and printed nowhere: that the session had already ended, that Tempa itself
+    terminated what it was waiting for, and that this epic is blocked on nothing at all.
+
+    So Tempa says that part in its own voice and quotes the session UNDERNEATH it rather than
+    instead of it. The quoting is not politeness. EPIC-02's first round closed with "I've
+    completed the code changes and live verification for all three features this session
+    (FEAT-02-02, FEAT-02-04, FEAT-02-05)" — the only record anywhere that the work happened, since
+    the round ended before writing it into config.json. A filter that suppressed that sentence for
+    being a statement of waiting would have destroyed the most valuable line in the incident.
+
+    `halts` escalates the text, and it is the reason `ended_waiting_halts` survives
+    `reset_failed_epics`. Continue Implementation runs `--reset-failed` itself before every pass,
+    which zeroes every counter and restarts the QA loop guard's window — so a panel that told the
+    reader nothing needed fixing would be a rubber stamp on an unbounded loop, with nothing on
+    either side of the screen distinguishing the first halt of this shape from the tenth. The
+    first one says what happened. The second says it has now happened twice across two resets,
+    and names the one number that tells an interrupted epic from a stuck one."""
+    repeat = ""
+    if halts > 1:
+        repeat = (
+            f"\n\nThis is the {halts}th time this epic has halted this way, across {halts} "
+            "reset(s). Once is an interruption. Twice is a pattern, and the likelier reading is "
+            "that these rounds cannot finish for a reason none of them has managed to state. "
+            "Check whether \"completed_features\" on this epic has moved at all across those "
+            "halts: if it has not, this needs looking at rather than another retry."
+        )
+    return (
+        "This round did not report a blocker — it ended by promising to come back with a result "
+        "later, and it could not. A Tempa session is one headless CLI run: writing that sentence "
+        "ended the turn, ending the turn ended the run, and Tempa's own cleanup then terminated "
+        "the process(es) the session had left running.\n\n"
+        "So read this epic's counters as understating it. Whatever that round says it finished "
+        "was never written into config.json, because it ended before that step, and whatever it "
+        "was waiting on produced nothing anywhere. Nothing here says the epic is blocked on "
+        "another epic or on a decision from you — the next round has to redo that check itself, "
+        f"narrowed so it completes inside one command.{repeat}\n\n"
+        f"The session's own closing words, in full:\n{reason}"
+    )
+
+
+def _no_closing_words(log_path: Path) -> str:
+    """What to record when a stalled round left nothing quotable at all.
+
+    `blocked_reason` is assigned unconditionally on this path, unlike the `last_round_note` write
+    a few lines above it, so a round that produced no prose and whose log could not be read stored
+    "". The dashboard renders its Halted panel only when that field is truthy and `tempa status`
+    skips its block for the same reason — so the epic showed as a bare red ✗ with no explanation
+    and, because the retry hint rides on this same string, no way out anywhere on the page. That
+    is the exact defect `with_retry_hint` was added to fix, reachable again through the one branch
+    that never checked."""
+    return (
+        "This round left no closing explanation of its own, so there is nothing to quote here. "
+        f"Its log has everything it did: {log_path.name}"
+    )
+
+
 def _fail_blocked_epic(config: dict, epic: dict, session_label: str, reason: str,
-                       blocked_by_epic: str | None, reorder_failure: str, log_path: Path) -> None:
-    """Nothing could be fixed automatically: the epic is very likely blocked on something
-    outside itself, so fail it and stop the runner for a human to look at."""
-    reason = _reason_with_counterpart_context(reason, config["epic"], blocked_by_epic)
-    epic["blocked_reason"] = with_retry_hint(reason)
+                       blocked_by_epic: str | None, reorder_failure: str, log_path: Path,
+                       *, ended_waiting: bool = False) -> None:
+    """Nothing could be fixed automatically: stop resuming the epic, record why, and stop the
+    runner for a human to look at.
+
+    What this is allowed to CLAIM depends on what the session actually said. When it named a
+    `blocked_by_epic` and the reorder was refused, "very likely blocked on something outside this
+    epic" is that session's own report and repeating it is fair. When it named nothing, the
+    sentence went out anyway — and on EPIC-02 it was simply untrue: that epic was blocked on
+    nothing, its rounds just kept ending before they recorded anything. Note that the very next
+    line of the same message already conceded it, verbatim: "Could not fix this automatically by
+    reordering: the session didn't name a specific epic it's blocked on." The runner admitted it
+    had no evidence one line under the claim, and the claim is the part a human reads first — it
+    sends them hunting a dependency that does not exist. So the unnamed case now states only what
+    is known, and the cut-short case states what Tempa itself did.
+
+    `ended_waiting` says the round closed on a promise to come back whose object Tempa terminated
+    (see `_ended_waiting_on_killed_work`). `reason` stays the session's words alone everywhere
+    they are offered as such, so every line that calls them "its own last explanation" still tells
+    the truth; only what is STORED is Tempa's account with those words quoted inside it."""
+    if ended_waiting:
+        epic["ended_waiting_halts"] = epic.get("ended_waiting_halts", 0) + 1
+        halt_text = _waiting_close_notice(reason, epic["ended_waiting_halts"])
+    else:
+        halt_text = reason or _no_closing_words(log_path)
+    halt_text = _reason_with_counterpart_context(halt_text, config["epic"], blocked_by_epic)
+    epic["blocked_reason"] = with_retry_hint(halt_text)
     epic["status"] = "failed"
     save_config(config)
-    log(
-        f"Session [{session_label}] made no progress for {epic['no_progress_rounds']} "
-        "resumed session(s) in a row — it's very likely blocked on something outside "
-        "this epic rather than still genuinely working. Marking it failed instead of "
-        f"continuing to resume it. Its own last explanation:\n{reason}\n"
-        f"Could not fix this automatically by reordering: {reorder_failure}.\n"
-        "Resolve the blocker, then run `tempa implement --reset-failed`."
-    )
+    if ended_waiting:
+        log(f"Session [{session_label}] completed no feature in "
+            f"{epic['no_progress_rounds']} resumed session(s) in a row, and ended by saying it "
+            "would come back with a result once something it had started in the background "
+            "finished. It could not: a session here is one headless CLI run, so the turn that "
+            "said it ended the run, and the container teardown terminated what was left running. "
+            "That is not evidence this epic is blocked — it is evidence its rounds keep ending "
+            "before they record anything, and it has already been given a spare round for it. "
+            f"Marking it failed rather than resuming it into the same shape.\n{halt_text}")
+        title = f"{session_label} keeps ending its rounds waiting on work Tempa had to terminate"
+        guidance = ("Read what Tempa recorded below before retrying — it says what happened and "
+                    "what to check. Then run Continue Implementation.")
+    elif blocked_by_epic is None:
+        log(f"Session [{session_label}] completed no feature in "
+            f"{epic['no_progress_rounds']} resumed session(s) in a row and never named an epic "
+            "it is blocked on, so there is nothing to reorder and nothing here establishes that "
+            "the blocker is outside this epic at all. Marking it failed rather than resuming it "
+            f"indefinitely. Its own last explanation:\n{reason}\n"
+            "Resolve whatever that turns out to be, then run `tempa implement --reset-failed`.")
+        title = (f"{session_label} made no progress across {epic['no_progress_rounds']} rounds "
+                 "— no blocker named")
+        guidance = ("Nothing here says what it is blocked on. Read the reason below, resolve "
+                    "whatever it turns out to be, then run `tempa implement --reset-failed`.")
+    else:
+        log(
+            f"Session [{session_label}] made no progress for {epic['no_progress_rounds']} "
+            "resumed session(s) in a row — it's very likely blocked on something outside "
+            "this epic rather than still genuinely working. Marking it failed instead of "
+            f"continuing to resume it. Its own last explanation:\n{reason}\n"
+            f"Could not fix this automatically by reordering: {reorder_failure}.\n"
+            "Resolve the blocker, then run `tempa implement --reset-failed`."
+        )
+        title = f"{session_label} made no progress and is likely blocked"
+        guidance = ("Review the reason below, resolve the blocker, then run "
+                    "`tempa implement --reset-failed`.")
     notify_attention(
         AttentionEventType.IMPLEMENTATION_FAILED,
         "Implementation",
-        f"{session_label} made no progress and is likely blocked",
-        "Review the reason below, resolve the blocker, then run "
-        "`tempa implement --reset-failed`.",
+        title,
+        guidance,
         epic=session_label,
         log_path=log_path,
-        details={"reason": reason, "no_progress_rounds": epic["no_progress_rounds"],
-                  "reorder_failure": reorder_failure},
+        details={"reason": halt_text, "no_progress_rounds": epic["no_progress_rounds"],
+                 "reorder_failure": reorder_failure,
+                 "ended_waiting_halts": epic.get("ended_waiting_halts", 0)},
     )
     _state.stop_event.set()
 
@@ -338,6 +590,7 @@ def _handle_stalled_round(config: dict, index: int, session_label: str, complete
     limit = config.get("implement_no_progress_rounds", 2)
     stalled = _update_no_progress_tracking(epic, completed_before, limit)
     reason = _last_meaningful_log_lines(log_path)
+    ended_waiting = _ended_waiting_on_killed_work()
     # `no_progress_rounds` is 0 here iff the round just completed a feature, in which case
     # _update_no_progress_tracking has already dropped the previous note and this round has
     # nothing to explain — writing one back would resurrect it a line after it was cleared.
@@ -349,22 +602,48 @@ def _handle_stalled_round(config: dict, index: int, session_label: str, complete
         # starts over. Four consecutive rounds were once spent re-deriving the same conclusion,
         # each ending in a longer restatement of it than the last.
         epic["last_round_note"] = reason
+        # The note travels with what KIND of thing it is. Same text, two meanings, and the prompt
+        # can frame only one of them: a conclusion about the code is a claim the next round should
+        # check, while a promise to come back is an intention whose object Tempa has already
+        # destroyed. Handing the second over under the first's framing is not a wording problem —
+        # round 2 of the incident was handed round 1's "I'm now waiting for the full
+        # Configuration.Tests suite... I'll report back once it completes." as a CLAIM TO CHECK,
+        # under the instruction to check it against the code as it stands now
+        # (process_20260818_150522.txt:760). It did exactly that: it re-ran the suite, for twelve
+        # minutes, in the background, and ended the same way.
+        if ended_waiting:
+            epic["last_round_note_kind"] = LAST_ROUND_NOTE_UNFINISHED_CHECK
+        else:
+            epic.pop("last_round_note_kind", None)
     if not stalled:
         save_config(config)
         return
-    epic["blocked_reason"] = reason
+    epic["blocked_reason"] = reason or _no_closing_words(log_path)
     blocked_by_epic = epic.get("blocked_by_epic")
     reorder_failure = (
         _try_reorder_for_dependency(config, index, blocked_by_epic)
         if blocked_by_epic else "the session didn't name a specific epic it's blocked on"
     )
+    rounds = epic.get("no_progress_rounds", 0)
     if reorder_failure is None:
-        _requeue_reordered_epic(config, epic, session_label, blocked_by_epic, reason, limit, log_path)
-    elif _epic_genuinely_complete(epic):
-        _requeue_for_qa_after_desync(config, epic, session_label, reason, limit, log_path)
-    else:
-        _fail_blocked_epic(config, epic, session_label, reason, blocked_by_epic,
-                           reorder_failure, log_path)
+        _requeue_reordered_epic(config, epic, session_label, blocked_by_epic, reason, rounds, log_path)
+        return
+    if _epic_genuinely_complete(epic):
+        _requeue_for_qa_after_desync(config, epic, session_label, reason, rounds, log_path)
+        return
+    # Last, deliberately: both repairs above need no human and must keep firing on the round they
+    # always have. Only the verdict that costs a human gets deferred by the grace.
+    if ended_waiting and _bank_cut_short_grace(epic):
+        save_config(config)
+        log(f"Session [{session_label}] completed no feature for {rounds} resumed session(s) in "
+            "a row, but this round ended by saying it would come back with a result once "
+            "something it had started finished — and Tempa's own cleanup terminated what it had "
+            "left running, so no such result was ever going to arrive. That is a round Tempa cut "
+            "short, not evidence this epic is blocked, so it gets one more before the count is "
+            "allowed to matter. The next one counts whatever happens.")
+        return
+    _fail_blocked_epic(config, epic, session_label, reason, blocked_by_epic,
+                       reorder_failure, log_path, ended_waiting=ended_waiting)
 
 
 def apply_session_outcome(

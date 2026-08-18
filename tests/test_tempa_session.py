@@ -11,6 +11,7 @@ parameter rather than spawning one, so it's exercised here against fakes."""
 
 from __future__ import annotations
 
+import io
 import json
 import threading
 import time
@@ -19,6 +20,7 @@ from unittest.mock import Mock
 import pytest
 
 import tempa_backend as tb
+import tempa_process_group as tpg
 import tempa_session as ts
 
 
@@ -33,6 +35,8 @@ def reset_runner_state():
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
     ts._state.background_tasks_terminated_hit = False
+    ts._state.reclaimed_process_count = 0
+    ts._state.last_agent_message = ""
     ts._state.stop_event.clear()
     yield
     ts._state.usage_limit_hit = False
@@ -41,6 +45,8 @@ def reset_runner_state():
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
     ts._state.background_tasks_terminated_hit = False
+    ts._state.reclaimed_process_count = 0
+    ts._state.last_agent_message = ""
     ts._state.stop_event.clear()
 
 
@@ -801,3 +807,99 @@ def test_apply_done_signal_disarms_on_any_later_output():
     assert not done_event.is_set()
 
 
+# ---------------------------------------------------------------------------
+# _log_reclaimed / _remember_agent_message / the background-ceiling diagnostic
+#
+# What the container teardown killed is the only ground truth Tempa has for "the backend left
+# work running and Tempa terminated it" — the CLI's own marker does not cover a shell started
+# with the Bash tool's run_in_background, which is the shape that failed EPIC-02 on 2026-08-18.
+# ---------------------------------------------------------------------------
+
+def test_log_reclaimed_records_what_it_killed_for_the_outcome_layer():
+    ts._log_reclaimed(38, tpg.NullProcessGroup(), "EPIC-02", io.StringIO())
+    assert ts._state.reclaimed_process_count == 38
+
+
+def test_log_reclaimed_records_a_clean_session_as_nothing_reclaimed():
+    """Pins that the _state write precedes the silence check: 0 is a fact the outcome layer
+    needs exactly as much as 38 is, and skipping it would leave the previous session's count
+    standing on an epic that reclaimed nothing."""
+    ts._state.reclaimed_process_count = 38
+    ts._log_reclaimed(0, tpg.NullProcessGroup(), "EPIC-02", io.StringIO())
+    assert ts._state.reclaimed_process_count == 0
+
+
+def test_the_reclaim_message_carries_the_marker_the_outcome_layer_looks_for():
+    """Modelled on the _CLAUDE_BG_TERMINATED guards above: a marker that drifts out of the
+    message it is supposed to match has no other symptom. The index bound is what stops a
+    session that cats a Tempa log from truncating its own explanation at the quoted copy."""
+    log_file = io.StringIO()
+    ts._log_reclaimed(38, tpg.NullProcessGroup(), "EPIC-02", log_file)
+
+    line = next(ln for ln in log_file.getvalue().splitlines() if ln.strip())
+    assert 0 <= line.find(ts.RECLAIMED_LINE_MARKER) <= 80
+
+
+def test_the_agents_closing_words_do_not_carry_its_tool_call_json():
+    """One assistant event can carry a text block AND a tool_use block, joined with a newline —
+    so a readable that merely STARTS with prose used to be stored whole. Seen live in
+    session_EPIC-02_20260818_162124.txt, where the stored closing message would have included
+    the run_in_background call that caused the incident."""
+    ts._remember_agent_message(
+        'Getting the full failure list.\n[Tool: Bash] {"command": "dotnet test", "run_in_background": true}'
+    )
+    assert ts._state.last_agent_message == "Getting the full failure list."
+
+
+def test_a_tool_only_readable_does_not_overwrite_the_closing_words():
+    ts._remember_agent_message("I've finished all three features.")
+    ts._remember_agent_message('[Tool: Bash] {"command": "echo idle"}')
+    assert ts._state.last_agent_message == "I've finished all three features."
+
+
+def test_a_background_marker_inside_a_successful_result_event_is_still_recognised():
+    """Guards the raw_line-not-marker_text change. _failure_marker_text's narrowing exists to
+    stop application text faking an auth failure, and it makes this marker ineligible the moment
+    the CLI puts it inside a result event with exitCode 0. This handler terminates nothing and
+    sets no stop_event, so it can safely see the whole line."""
+    raw = ('{"type":"result","exitCode":0,"result":"Background tasks still running after 600s; '
+           'terminating."}')
+    assert ts._handle_background_terminated(raw, "EPIC-02", tb.CLAUDE) is True
+    assert ts._state.background_tasks_terminated_hit is True
+
+
+def test_a_ceiling_that_disagrees_with_the_setting_is_warned_about(monkeypatch, capsys):
+    """backend_background_wait_sec reaches the CLI as an environment default only, through a
+    variable name the vendor owns. Nothing else in the runner could ever notice that it stopped
+    being read - and every ceiling message in the incident workspace reported Claude Code's own
+    600s default, never Tempa's configured value.
+
+    load_config is patched directly rather than written to disk: the file-wide `_no_real_wait`
+    fixture above already replaces ts.load_config with a stub, so a config.json roundtrip would
+    never reach this code and the test would pass for the wrong reason."""
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 3600})
+
+    ts._warn_if_ceiling_disagrees("Background tasks still running after 600s; terminating.", "EPIC-02")
+
+    out = capsys.readouterr().out
+    assert "600s" in out and "3600s" in out
+    assert "not reaching the CLI" in out
+
+
+def test_a_ceiling_that_matches_the_setting_says_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 600})
+
+    ts._warn_if_ceiling_disagrees("Background tasks still running after 600s; terminating.", "EPIC-02")
+
+    assert "not reaching the CLI" not in capsys.readouterr().out
+
+
+def test_a_line_with_no_ceiling_count_is_not_second_guessed(monkeypatch, capsys):
+    """The marker itself stays seconds-free so a configured ceiling other than the default keeps
+    matching (tests/test_tempa_backend.py guards exactly that), so this helper has to tolerate a
+    line the regex finds nothing in."""
+    monkeypatch.setattr(ts, "load_config", lambda: {"backend_background_wait_sec": 3600})
+
+    ts._warn_if_ceiling_disagrees("Background tasks still running; terminating.", "EPIC-02")
+
+    assert "not reaching the CLI" not in capsys.readouterr().out

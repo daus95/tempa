@@ -44,6 +44,12 @@ ACTIVE_WORKSPACE_POINTER = SCRIPT_DIR / ".active-workspace"
 # purely as scratch space so commands like `set-model`/`test` still work pre-`init`.
 TEMPA_SUBDIR_NAME = ".tempa"
 
+# The value stored in an epic's "last_round_note_kind" when its note is not a conclusion about
+# the code but an intention the round never got to act on. Lives here rather than in either
+# module that uses it: tempa_session_outcome writes it, tempa_prompts reads it, and both already
+# import this module.
+LAST_ROUND_NOTE_UNFINISHED_CHECK = "unfinished_check"
+
 
 def get_active_workspace_root() -> Path | None:
     """Return the active workspace's absolute root path, or None if none is active."""
