@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-18
+
 ### Fixed
 
 - **An epic is no longer failed over work Tempa itself terminated.** A session did 182 turns of QA
@@ -1570,7 +1572,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/daus95/tempa/compare/v0.8.0...v0.9.0
 [0.6.8]: https://github.com/daus95/tempa/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/daus95/tempa/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/daus95/tempa/compare/v0.6.5...v0.6.6
