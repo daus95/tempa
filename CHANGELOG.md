@@ -8,6 +8,13 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Clarified the Home page's "close working folder" button.** It previously showed only a bare
+  X icon relying on a hover tooltip, easy to mistake for dismissing the panel rather than
+  unlinking the workspace. It now carries a visible "Close" label alongside the icon, styled as
+  a bordered pill consistent with the rest of the workspace panel.
+
 ### Fixed
 
 - **Fixed six self-contradictions in the POS example PRD.**
