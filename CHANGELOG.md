@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- **Clarified the "critical findings" readiness check on the Clarification page.** The checklist
+  item and hint above Continue/Finalize Clarification previously read "Most recent evaluation
+  still shows N critical finding(s)" even after every finding had been answered and the
+  Unanswered table was empty — confusing, since that count is carried over from the last
+  evaluation run and isn't updated by answering findings. Both now say the findings "haven't
+  been re-checked yet" and that answering them doesn't update the count, so it's clear a fresh
+  Continue Clarification run is what re-evaluates them.
+
 ## [0.10.0] - 2026-08-19
 
 ### Added

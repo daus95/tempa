@@ -57,9 +57,10 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
       label: st.critical === 0
         ? "Most recent evaluation shows 0 critical findings"
         : st.allowFinalizeWithCritical
-          ? `Most recent evaluation still shows ${st.critical} critical finding(s) — allowed via ` +
-            "the Settings override"
-          : `Most recent evaluation still shows ${st.critical} critical finding(s)` },
+          ? `${st.critical} critical finding(s) from your last evaluation haven't been re-checked ` +
+            "yet — allowed via the Settings override"
+          : `${st.critical} critical finding(s) from your last evaluation haven't been re-checked ` +
+            "yet — answering them doesn't update this count" },
     { ok: true, label: finalizeBacklogLabel(hasUnanswered) },
   ]);
   // Disabled while a run is in progress OR the checklist above isn't fully satisfied yet
@@ -90,8 +91,8 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
     finalizeGateHint.classList.remove("hidden");
   } else if (st.critical > 0) {
     finalizeGateHint.textContent =
-      `You still need to run Continue Clarification — the last evaluation showed ${st.critical} ` +
-      "critical finding(s).";
+      `You still need to run Continue Clarification — the last evaluation found ${st.critical} ` +
+      "critical finding(s), and your answers haven't been re-evaluated yet.";
     finalizeGateHint.classList.remove("hidden");
   } else {
     finalizeGateHint.textContent =
