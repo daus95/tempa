@@ -9,7 +9,7 @@ const appEl = document.querySelector(".app"),
   specPeekPath = $("specPeekPath"), specPeekOpenBtn = $("specPeekOpenBtn"),
   specPeekCloseBtn = $("specPeekCloseBtn");
 const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specViewer"), specEditor = $("specEditor"),
-  toolbarEl = $("toolbar"), filepathEl = $("filepath"), specSeg = $("specSeg"),
+  toolbarEl = $("toolbar"), toolbarBackBtn = $("toolbarBackBtn"), filepathEl = $("filepath"), specSeg = $("specSeg"),
   viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"), followAllBtn = $("followAllBtn"),
   clarifySummary = $("clarifySummary"), clarifyBody = $("clarifyBody"),
   clarifyUnansweredTbody = $("clarifyUnansweredTbody"), clarifyAnsweredTbody = $("clarifyAnsweredTbody"),
