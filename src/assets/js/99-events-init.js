@@ -84,6 +84,8 @@ $("refreshBtn").addEventListener("click", async () => {
 
 sidebarToggleBtn.addEventListener("click", toggleSidebar);
 
+toolbarBackBtn.addEventListener("click", () => selectTop(state.activeTop));
+
 let toastTimer = null;
 function toast(msg, isErr) {
   const el = $("toast");

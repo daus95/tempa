@@ -8,6 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **A Back button in the toolbar when a Clarification or Specification file is open.** Opening
+  a clarification file — from the Clarification Overview table, the sidebar's Clarification
+  file list, or the Home page's "files needing clarification" list — left no way back to the
+  Clarification Overview page short of clicking "Clarification" in the sidebar tree, which
+  wasn't an obvious "go back" affordance. A Back arrow now sits at the start of the toolbar
+  whenever a file is open (both Clarification and Specification), returning to that section's
+  overview and still prompting to discard unsaved changes first, same as before.
+
 ### Changed
 
 - **Clarified the Home page's "close working folder" button.** It previously showed only a bare
