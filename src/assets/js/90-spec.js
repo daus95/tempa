@@ -39,6 +39,7 @@ function renderSpecViewer() {
   specViewer.innerHTML = state.isMarkdown
     ? renderMarkdown(text)
     : "<pre><code>" + escapeHtml(text) + "</code></pre>";
+  if (state.isMarkdown) renderMermaidDiagrams(specViewer);   // async, not awaited (12-mermaid.js)
 }
 
 function setSpecMode(mode) {

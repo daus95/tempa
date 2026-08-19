@@ -77,6 +77,7 @@ function renderVerifyDetail(data) {
     verifyDetailStatus.classList.add("hidden");
     verifyDetailBody.classList.remove("hidden");
     verifyDetailBody.innerHTML = renderMarkdown(data.content.replace(VERIFY_RESULT_MARKER_RE, ""));
+    renderMermaidDiagrams(verifyDetailBody);                 // async, not awaited (12-mermaid.js)
   } else {
     verifyDetailBody.classList.add("hidden");
     verifyDetailStatus.classList.remove("hidden");

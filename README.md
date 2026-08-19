@@ -304,7 +304,8 @@ Click **Add File** or **Add Folder** to upload your PRD/spec documents straight 
 browser (they land in the same `sources.prd` folder `tempa init` created). Uploaded files
 appear under **Specification** in the left sidebar — click one to **View** it as rendered
 markdown, or switch to **Edit** and **Save** to change it right there, no separate editor
-needed. Right-click a file or folder in the sidebar for **Rename** / **Delete**. You can upload
+needed. ```mermaid blocks are drawn as actual diagrams in the viewer (with a **Show source**
+toggle), so an ERD or a state machine in your PRD reads like one. Right-click a file or folder in the sidebar for **Rename** / **Delete**. You can upload
 more than one file — Tempa reads all of them together during clarification and planning.
 
 Only upload the **new** specification you want implemented here — not old/already-implemented

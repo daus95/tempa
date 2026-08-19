@@ -21,3 +21,8 @@ indent_size = 2
 # Matches the eol=crlf entries in .gitattributes (Windows-only launchers).
 [{tempa.cmd,"Open Dashboard.cmd"}]
 end_of_line = crlf
+
+# Vendored third-party assets are kept byte-for-byte as published.
+[src/assets/vendor/**]
+insert_final_newline = false
+trim_trailing_whitespace = false

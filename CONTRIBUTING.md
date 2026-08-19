@@ -1,7 +1,9 @@
 # Contributing to Tempa
 
-Thanks for considering a contribution. Tempa is a small, dependency-free Python project —
-contributing to it should be just as low-friction.
+Thanks for considering a contribution. Tempa is a small Python project with no Python
+dependencies — the standard library and nothing else — and contributing to it should be
+just as low-friction. (The one third-party file in the tree is the mermaid bundle the
+dashboard uses to draw diagrams, vendored under `src/assets/vendor/`.)
 
 ## Getting the code
 
@@ -35,7 +37,8 @@ Sanity-check your setup with:
   editing these over changing prompt strings inline in Python.
 - `src/assets/` — the dashboard's HTML/CSS, plus `assets/js/` (the front-end script, split
   into ordered parts that are concatenated into one inline `<script>` — see
-  [docs/architecture.md](docs/architecture.md#assets-srcassets-srcprompt)).
+  [docs/architecture.md](docs/architecture.md#assets-srcassets-srcprompt)) and
+  `assets/vendor/` (third-party front-end code, served on its own route rather than inlined).
 - `docs/` — reference docs for each subsystem (config, folders, prompts, models, logging).
 
 If you add a module, follow the existing `tempa_*.py` / `dashboard_*.py` naming split so it's

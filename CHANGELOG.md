@@ -12,6 +12,20 @@ once the first tagged release is cut.
 
 ### Added
 
+- **Diagrams in a spec are now shown as diagrams, not as their source.** A ```mermaid block
+  in a markdown file rendered as a wall of `stateDiagram-v2` / `erDiagram` text in the
+  Specification pane — readable only by mentally running the layout yourself, which rather
+  defeats the point of a PRD that leans on ER diagrams and state machines. Those blocks now
+  render, everywhere the dashboard shows markdown: the Specification viewer, the spec drawer
+  the Clarification pane opens beside a finding, the QA-report/log modal and a verification
+  report. Each diagram carries a "Show source" toggle, and a diagram that doesn't parse (a
+  half-finished edit, say) leaves its code block exactly where it was with a one-line note
+  above it, so a broken diagram never costs you the rest of the document. The renderer is
+  mermaid 11.16.1, vendored into `src/assets/vendor/` (MIT, ~3.5 MB — the release zip grows by
+  about 1 MB) and served from Tempa's own port on its own route, fetched only when a document
+  actually contains a diagram: the dashboard still contacts no other host and still works with
+  no network at all.
+
 - **A clarification finding's spec references are now links, and open the spec beside it.**
   Deciding a finding means reading what it cites, and a `**Where:**` line like
   `M07-FR-03 Group A aggregation rule; BR-07.2` was inert text — the ids are real, but
