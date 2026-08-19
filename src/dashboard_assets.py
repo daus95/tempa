@@ -61,6 +61,7 @@ JS_PARTS = (
     "90-spec.js",
     "92-spec-context-menu.js",
     "94-clarify-answers.js",
+    "96-spec-peek.js",
     "99-events-init.js",
 )
 

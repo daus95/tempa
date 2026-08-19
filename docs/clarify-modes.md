@@ -122,6 +122,33 @@ The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers wri
 - **I'll write my own answer** — enables a text area (5+ rows) to type your own answer,
   overriding the recommendation.
 
+### Reading the spec a finding cites
+
+Requirement/rule ids, `§`-section references and file paths mentioned anywhere in a finding
+are rendered as links. Clicking one opens a drawer from the right showing that specification
+file, scrolled to and briefly highlighting the exact table row, bullet or heading that
+defines the id. The drawer is modal — the page behind it dims and stops responding while it
+is open — and closing it (**✕**, **Escape**, or a click outside it) leaves the Clarification
+page exactly as it was, unsaved answers included. It is read-only; **Open in Specification**
+switches to the full editor. Drag its left edge to resize it.
+
+References are resolved against the PRD **as it stands right now**, not as it stood when the
+finding was written, so links keep working on clarification files from earlier rounds and the
+line they point at is never stale. Two things deliberately don't become links:
+
+- an id the PRD never *defines* — one only mentioned in passing, and, importantly, a
+  finding's reference to an **earlier round's finding** (`R8 M2`), which shares the shape of
+  a requirement id but is not one;
+- an id defined in two different files, where guessing which one was meant would be worse
+  than plain text.
+
+Since resolution is by definition site, an id has to be written the way the PRD writes it —
+which is what `clarification.md` instructs, along with naming the spec file at the start of
+each **Where:** line so a finding that cites no id still links somewhere.
+
+The left navigation collapses to an icon rail (the button beside **Refresh**, or
+**Ctrl/Cmd+B**) when you want the extra width for reading.
+
 Clicking **Save answers** offers three choices: **Save** (the default) writes every answer —
 across every open tab/file, not just the one currently visible — back into each clarification
 file's `**Your answer:**` section (between `<!-- clarify:answer-start -->` /

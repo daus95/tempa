@@ -12,6 +12,16 @@ document.addEventListener("keydown", (e) => {
     if (state.currentKind === "spec") saveSpecFile();
     else if (state.currentKind === "clarify") saveClarifyFile();
   }
+  // Ctrl/Cmd+B — the binding VS Code uses for the same panel, which is the mental model this
+  // explorer copies. preventDefault is required, not cosmetic: it is Firefox's bookmarks
+  // sidebar. Ctrl+B is not a text-editing binding in a plain <textarea>, so no field guard.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    toggleSidebar();
+  }
+  // Guarded on its own overlay, exactly like the two modal Escape handlers in 30-modals.js,
+  // so Escape inside a confirm dialog can't also close the drawer underneath it.
+  if (e.key === "Escape" && !specPeekOverlay.classList.contains("hidden")) closeSpecPeek();
 });
 window.addEventListener("beforeunload", (e) => {
   if (state.specDirty || state.clarifyDirty) { e.preventDefault(); e.returnValue = ""; }
@@ -46,22 +56,33 @@ $("refreshBtn").addEventListener("click", async () => {
 });
 
 // splitter drag-to-resize
+// The width is published as a custom property rather than an inline style, so
+// `.sidebar.collapsed { width: 44px }` can beat it on specificity — an inline width could
+// only be overridden with !important. It also means re-expanding restores the dragged width
+// for free, since collapsing never overwrites the property.
 (function () {
-  const splitter = $("splitter"), sidebar = $("sidebar");
+  const splitter = $("splitter");
   let dragging = false;
   splitter.addEventListener("mousedown", (e) => {
     dragging = true; splitter.classList.add("dragging");
+    document.body.classList.add("resizing");
     document.body.style.userSelect = "none"; e.preventDefault();
   });
   window.addEventListener("mousemove", (e) => {
     if (!dragging) return;
     const w = Math.max(200, Math.min(e.clientX, window.innerWidth * 0.7));
-    sidebar.style.width = w + "px";
+    state.sidebarWidth = w;
+    document.documentElement.style.setProperty("--sidebar-w", w + "px");
   });
   window.addEventListener("mouseup", () => {
-    dragging = false; splitter.classList.remove("dragging"); document.body.style.userSelect = "";
+    if (!dragging) return;
+    dragging = false; splitter.classList.remove("dragging");
+    document.body.classList.remove("resizing"); document.body.style.userSelect = "";
+    uiPrefSet("sidebarWidth", state.sidebarWidth);
   });
 })();
+
+sidebarToggleBtn.addEventListener("click", toggleSidebar);
 
 let toastTimer = null;
 function toast(msg, isErr) {
@@ -100,6 +121,11 @@ async function downloadZip(url, filename, successMsg) {
 // ---------------------------------------------------------------------------
 // Initial paint
 // ---------------------------------------------------------------------------
+// Applied synchronously, before the first paint, so restoring a collapsed explorer doesn't
+// animate its way in from 300px on load.
+document.documentElement.style.setProperty("--sidebar-w", state.sidebarWidth + "px");
+document.documentElement.style.setProperty("--peek-w", state.specPeek.width + "px");
+setSidebarCollapsed(state.sidebarCollapsed);
 renderSidebar();
 renderBackendStatus();
 if (INITIAL_VIEW === "specification") {

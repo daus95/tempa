@@ -308,6 +308,7 @@ function renderLeafSection(key, icon, label, disabled, running) {
   row.className = "row top" + (state.activeTop === key ? " selected" : "") + (disabled ? " disabled" : "");
   row.innerHTML = `<span class="twist hidden"></span><span class="icon">${icon}</span><span class="label">${label}</span>` +
     (running ? `<span class="row-status-spin">${iconSvg("loader-circle", "icon-spin")}</span>` : "");
+  row.title = label;              // the label is hidden in the collapsed icon rail
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop(key);
@@ -339,6 +340,7 @@ function renderSpecSection() {
   row.className = "row top" + (state.activeTop === "specification" && state.specShowingOverview ? " selected" : "") +
     (disabled ? " disabled" : "");
   row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("folder")}</span><span class="label">Specification</span>`;
+  row.title = "Specification";    // the label is hidden in the collapsed icon rail
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop("specification");
@@ -428,6 +430,7 @@ function renderClarifySection() {
   row.innerHTML = `<span class="twist">${iconSvg("chevron-right")}</span><span class="icon">${iconSvg("circle-help")}</span><span class="label">Clarification</span>` +
     (state.clarifyRun.running ? `<span class="row-status-spin">${iconSvg("loader-circle", "icon-spin")}</span>` : "") +
     (count ? `<span class="badge-count">${count}</span>` : "");
+  row.title = count ? `Clarification (${count} unanswered)` : "Clarification";
   row.addEventListener("click", () => {
     if (disabled) { toast("Select a working folder first.", true); return; }
     selectTop("clarification");

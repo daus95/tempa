@@ -65,7 +65,11 @@ def _attr(s: str) -> str:
     return html_lib.escape(s, quote=True)
 
 
-def _render_item_html(item: ClarificationItem) -> str:
+def _identity(html: str) -> str:
+    return html
+
+
+def _render_item_html(item: ClarificationItem, linkify=_identity) -> str:
     key = _attr(item.key)
     has_recommendation = bool(item.recommendation)
     # "Follow the recommendation" round-trips as checked only for answers saved through
@@ -99,7 +103,7 @@ def _render_item_html(item: ClarificationItem) -> str:
 
     recommendation_html = (
         f'<div class="field recommendation"><h4>Recommendation</h4>'
-        f'<div class="md">{render_markdown(item.recommendation)}</div></div>'
+        f'<div class="md">{linkify(render_markdown(item.recommendation))}</div></div>'
         if has_recommendation else ""
     )
 
@@ -107,10 +111,10 @@ def _render_item_html(item: ClarificationItem) -> str:
 <section class="item sev-{item.severity}" data-key="{key}">
   <header>
     <span class="badge {item.severity}">{SEVERITY_LABELS.get(item.severity, item.severity)}</span>
-    <h3>{_md_inline(item.title)}</h3>
+    <h3>{linkify(_md_inline(item.title))}</h3>
   </header>
-  <div class="field"><h4>Where</h4><div class="md">{render_markdown(item.where)}</div></div>
-  <div class="field"><h4>Question</h4><div class="md">{render_markdown(item.question)}</div></div>
+  <div class="field"><h4>Where</h4><div class="md">{linkify(render_markdown(item.where))}</div></div>
+  <div class="field"><h4>Question</h4><div class="md">{linkify(render_markdown(item.question))}</div></div>
   {recommendation_html}
   <div class="answer-block">
     <div class="selector">
@@ -123,13 +127,16 @@ def _render_item_html(item: ClarificationItem) -> str:
 """.strip()
 
 
-def _render_blocks_html(blocks: list[tuple[str, object]]) -> str:
+def _render_blocks_html(blocks: list[tuple[str, object]], linkify=_identity) -> str:
+    """`linkify` turns spec references in the finished HTML into links back to the PRD (see
+    dashboard_spec_refs.make_linkifier). It defaults to a no-op so every caller that has no
+    PRD folder to resolve against — and every existing test — gets byte-identical output."""
     parts: list[str] = []
     for kind, payload in blocks:
         if kind == "text":
-            rendered = render_markdown(payload)  # type: ignore[arg-type]
+            rendered = linkify(render_markdown(payload))  # type: ignore[arg-type]
             if rendered:
                 parts.append(f'<div class="doc-text">{rendered}</div>')
         else:
-            parts.append(_render_item_html(payload))  # type: ignore[arg-type]
+            parts.append(_render_item_html(payload, linkify))  # type: ignore[arg-type]
     return "\n".join(parts)

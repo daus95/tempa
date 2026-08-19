@@ -23,7 +23,7 @@ For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write 
 <!-- clarify:item id="<unique-id>" severity="critical|major|minor" -->
 ### <short title for the finding>
 
-**Where:** — the section/location in the PRD the finding refers to
+**Where:** — `<path/to/file.md>` — the section/location in that PRD file the finding refers to
 
 <one short paragraph: what the spec actually says there that is wrong, conflicting, or missing>
 
@@ -43,7 +43,7 @@ For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write 
 Writing style — a finding is read in a review UI, not in a report, so keep every part short, plain, and to the point:
 - SHORT PARAGRAPHS, NEVER A WALL OF TEXT. Every paragraph is at most 3 sentences (~50 words). If a part needs more than that, split it into another paragraph — do not keep extending one.
 - BLANK LINE BETWEEN PARAGRAPHS. Separate every paragraph with one truly empty line, and put a blank line before and after each `**Where:**` / `**Question:**` / `**Recommendation:**` label. Consecutive lines with no blank line between them are rendered as a single block of text, which is exactly what makes findings unreadable.
-- Where: keep the location itself to one line (just the section/step names). Then the two paragraphs above — what's wrong, then what it breaks. Quote at most a short phrase from the PRD to pin it down; do not reproduce whole passages, do not narrate your reasoning, and do not walk through worked numeric examples unless one number IS the contradiction.
+- Where: start the line with the PRD file's path relative to `${sources.prd}`, in backticks (comma-separate them if the finding genuinely spans more than one file), then keep the location itself to one line (just the section/step names). Write every requirement, rule or decision id exactly as the PRD itself writes it — the review UI turns those into links straight to the line that defines them, and a reworded or abbreviated id won't resolve. Then the two paragraphs above — what's wrong, then what it breaks. Quote at most a short phrase from the PRD to pin it down; do not reproduce whole passages, do not narrate your reasoning, and do not walk through worked numeric examples unless one number IS the contradiction.
 - Question: exactly one question, one sentence. If it is a choice between options, put the one sentence first and then list the options as bullets (`- Option A — ...`), one line each.
 - Recommendation: lead with the resolution itself in one sentence — the concrete text or rule to adopt. If a reason is needed, add it as a second short paragraph, not as a clause bolted onto the first.
 - Cut anything that does not change what the reader has to decide: no restating the title, no summarizing the PRD, no "as noted above", no hedging.
