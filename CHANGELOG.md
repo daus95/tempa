@@ -18,6 +18,24 @@ once the first tagged release is cut.
   whenever a file is open (both Clarification and Specification), returning to that section's
   overview and still prompting to discard unsaved changes first, same as before.
 
+### Fixed
+
+- **Fixed six self-contradictions in the POS example PRD.**
+  `examples/02-web-app-with-db/PRD.md` ships as a reference PRD that is meant to keep the first
+  clarification round short, but it disagreed with itself: the discount could be a percentage or
+  a fixed amount while `Sale` had a single `discount` column to hold it; "total due" drove both
+  the change calculation and the paid-amount validation without ever being defined; the Cashier
+  had "POS/checkout access only" in the business process yet a Dashboard in the UI section, and
+  was promised a per-*shift* history with no Shift entity anywhere in the data model; the void
+  step was "same-day" in its heading only; Stock In recorded a supplier and a receipt price that
+  `StockMovement` had no column for; and the receipt "prints" despite a non-goal ruling printers
+  out of scope. All six are now resolved in the document — totals arithmetic spelled out, the
+  discount modelled as type/value/amount, a per-role Dashboard, the same-day void rule stated in
+  the step itself, and supplier + unit cost added to `StockMovement` — with the ERD, the
+  validation list and the acceptance criteria updated to match. The tech stack, which hedged
+  every choice with "or an equivalent", is now pinned: React + Vite, Node.js/Express,
+  PostgreSQL + Prisma, and JWT rather than "session or JWT".
+
 ## [0.10.1] - 2026-08-19
 
 ### Changed
