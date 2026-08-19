@@ -8,6 +8,8 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-19
+
 ### Added
 
 - **A clarification finding's spec references are now links, and open the spec beside it.**
@@ -34,7 +36,6 @@ once the first tagged release is cut.
   Refresh, or Ctrl/Cmd+B), giving the findings and the spec drawer the width they need. The
   rail keeps every top-level section one click away and still shows the unanswered-findings
   count. The collapsed state and both panel widths are remembered for the session.
-
 - **Dashboard Home page now shows recent working folders and can create a new one.** The
   empty state (no working folder selected yet) previously offered only "Select Working
   Folder", forcing a re-navigation through the native picker even for a project you had
@@ -1608,7 +1609,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/daus95/tempa/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/daus95/tempa/compare/v0.8.0...v0.9.0
 [0.6.8]: https://github.com/daus95/tempa/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/daus95/tempa/compare/v0.6.6...v0.6.7
