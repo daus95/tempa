@@ -78,3 +78,34 @@ def test_forward_only_legacy_duplicated_text_without_mode_renders_as_own_answer(
     assert 'value="own" checked' in html
     assert 'value="recommendation" checked' not in html
     assert ">do the thing<" in html
+
+
+# ---------------------------------------------------------------------------
+# The `linkify` hook (see dashboard_spec_refs.make_linkifier)
+# ---------------------------------------------------------------------------
+
+def _shout(html):
+    """A stand-in linkifier — deliberately not the real one, so these tests pin the wiring
+    (which fields get passed through the hook) rather than the resolution rules, which
+    test_dashboard_spec_refs.py owns."""
+    return html + "<!--L-->"
+
+
+def test_default_output_is_byte_identical_without_a_linkifier():
+    """The no-regression guard for every clarification file already on disk: the hook
+    defaults to identity, so rendering must be unchanged for callers that pass nothing."""
+    item = _item(existing_answer="typed", recommendation="do the thing")
+    assert dcr._render_item_html(item) == dcr._render_item_html(item, dcr._identity)
+    blocks = [("text", "intro"), ("item", item)]
+    assert dcr._render_blocks_html(blocks) == dcr._render_blocks_html(blocks, dcr._identity)
+
+
+def test_every_finding_field_passes_through_the_linkifier():
+    """Where/Question/Recommendation and the title all cite the spec, so all four are hooked."""
+    html = dcr._render_item_html(_item(), _shout)
+    assert html.count("<!--L-->") == 4
+
+
+def test_prose_between_findings_is_linkified_too():
+    html = dcr._render_blocks_html([("text", "intro prose")], _shout)
+    assert "<!--L-->" in html

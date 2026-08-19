@@ -2,6 +2,12 @@
 // App state + DOM refs
 // ---------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
+const appEl = document.querySelector(".app"),
+  sidebarEl = $("sidebar"), sidebarToggleBtn = $("sidebarToggleBtn"),
+  specPeekOverlay = $("specPeekOverlay"), specPeekBox = $("specPeekBox"),
+  specPeekResize = $("specPeekResize"), specPeekBody = $("specPeekBody"),
+  specPeekPath = $("specPeekPath"), specPeekOpenBtn = $("specPeekOpenBtn"),
+  specPeekCloseBtn = $("specPeekCloseBtn");
 const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specViewer"), specEditor = $("specEditor"),
   toolbarEl = $("toolbar"), filepathEl = $("filepath"), specSeg = $("specSeg"),
   viewBtn = $("viewBtn"), editBtn = $("editBtn"), saveBtn = $("saveBtn"), followAllBtn = $("followAllBtn"),
@@ -167,6 +173,12 @@ const state = {
   // refreshClarifyList, and the refresh button) or the card below goes stale after a run.
   clarifyPendingOverlay: INITIAL_CLARIFY_PENDING_OVERLAY || { files: 0, findings: 0, chars: 0 },
   clarifyOverlayWarnThreshold: INITIAL_CLARIFY_OVERLAY_WARN_THRESHOLD || 25,
+  sidebarWidth: uiPrefGet("sidebarWidth", 300),
+  sidebarCollapsed: uiPrefGet("sidebarCollapsed", false),
+  // The referenced-specification drawer. `open` is per-session on purpose: it is a dialog,
+  // not part of the page layout, so a reload starts with it closed rather than refetching a
+  // file nobody asked for. Only `width` is persisted.
+  specPeek: { open: false, width: uiPrefGet("specPeekWidth", 480), path: null },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,

@@ -25,6 +25,7 @@ from dashboard_config import (
     _load_dashboard_config,
 )
 from dashboard_spec import _resolve_within
+from dashboard_spec_refs import make_linkifier
 
 Response = tuple[int, dict]
 
@@ -65,9 +66,14 @@ def apply_answers_to_file(path: Path, payload: list[dict]) -> tuple[int, int]:
     return file_answer_status(path)
 
 
-def read_file(clar_dir: Path, rel: str) -> Response:
+def read_file(clar_dir: Path, rel: str, prd_dir: Path | None = None) -> Response:
     """One clarification file rendered for the pane: its findings as HTML, plus the
-    severity summary and answered/total counts shown above them."""
+    severity summary and answered/total counts shown above them.
+
+    `prd_dir` is what makes the spec references inside a finding clickable — it is resolved
+    against the PRD as it stands right now, so the line a link points at is never stale.
+    Optional because a caller without a PRD folder should still get a readable file, just
+    without links."""
     target = _resolve_within(clar_dir, rel)
     if target is None or not target.is_file():
         return 404, {"ok": False, "error": "File not found."}
@@ -93,7 +99,7 @@ def read_file(clar_dir: Path, rel: str) -> Response:
     )
     return 200, {
         "ok": True, "path": rel, "name": target.name,
-        "summary": summary, "html": _render_blocks_html(blocks),
+        "summary": summary, "html": _render_blocks_html(blocks, make_linkifier(prd_dir)),
         "answered": answered, "total": len(items),
     }
 

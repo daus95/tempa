@@ -34,8 +34,21 @@
   .app { display: flex; height: 100vh; }
 
   /* ---- sidebar (explorer) ---- */
-  .sidebar { width: 300px; min-width: 200px; max-width: 70vw; display: flex;
-    flex-direction: column; background: var(--panel); border-right: 1px solid var(--border); }
+  /* The width lives in a custom property, not an inline style, so .sidebar.collapsed below
+     can beat it on specificity — nothing but !important beats an inline width.
+     `min-width: 0` is load-bearing and must not be dropped: this is a flex item, and the
+     flexbox default `min-width: auto` resolves to the content's min-content size (~300px
+     here), which silently pins the sidebar at its full width and makes the 44px rail do
+     nothing at all. The old explicit `min-width: 200px` masked that; 0 is what actually
+     lets it shrink. The 200px floor for dragging now lives in the drag clamp in
+     99-events-init.js, which is the only thing that can widen the sidebar. */
+  .sidebar { width: var(--sidebar-w, 300px); min-width: 0; max-width: 70vw; display: flex;
+    overflow: hidden; flex-direction: column; background: var(--panel);
+    border-right: 1px solid var(--border); transition: width .15s ease; }
+  body.resizing .sidebar { transition: none; }
+  .sidebar-toggle { flex: none; border: none; background: transparent; color: var(--muted);
+    padding: 4px 6px; border-radius: 6px; line-height: 0; }
+  .sidebar-toggle:hover { background: var(--hover); color: var(--text); }
   .sidebar-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
     border-bottom: 1px solid var(--border); font-weight: 600; }
   .sidebar-head .brand-icon { flex: none; width: 22px; height: 22px; }
@@ -73,6 +86,26 @@
   .node.open > .children { display: block; }
   .node.open > .row > .twist { transform: rotate(90deg); }
   .empty-note { padding: 6px 10px 6px 30px; color: var(--muted); font-size: 12.5px; }
+
+  /* ---- collapsed explorer (icon rail) ----
+     Purely presentational: renderSidebar() rebuilds the whole tree on every call and knows
+     nothing about the rail, so there is no state here that can drift out of sync.
+     MUST stay below `.node.open > .children` — that rule and the one hiding .children here
+     have equal specificity, so source order is what decides which wins. */
+  .sidebar.collapsed { width: 44px; }
+  .sidebar.collapsed .sidebar-head { flex-direction: column; gap: 8px; padding: 10px 4px; }
+  .sidebar.collapsed .sidebar-head .title, .sidebar.collapsed #refreshBtn { display: none; }
+  .sidebar.collapsed .tree { padding: 6px 2px; overflow: hidden; }
+  .sidebar.collapsed .tree-bottom { padding: 4px 2px; }
+  .sidebar.collapsed .row { position: relative; justify-content: center; padding: 8px 0; }
+  .sidebar.collapsed .row .label, .sidebar.collapsed .row .twist,
+  .sidebar.collapsed .row .file-status, .sidebar.collapsed .row .row-menu-btn,
+  .sidebar.collapsed .row .row-status-spin,
+  .sidebar.collapsed .children, .sidebar.collapsed .empty-note { display: none; }
+  /* The unanswered-findings count is the one thing the rail must not swallow. */
+  .sidebar.collapsed .row .badge-count { position: absolute; top: 0; right: 0;
+    font-size: 9px; padding: 0 4px; }
+  .sidebar.collapsed + .splitter { display: none; }
 
   /* ---- row context menu (Specification file/folder rename/delete) ---- */
   .row-context-menu { position: fixed; z-index: 100; background: var(--panel);
@@ -691,3 +724,45 @@
   .log-file-modal-body .markdown-body { padding: 14px 20px; }
   .log-file-modal-body .log-file-modal-truncated { padding: 8px 16px; color: var(--major);
     font-size: 0.8rem; border-bottom: 1px solid var(--border); }
+
+  /* ---- spec references + the referenced-specification drawer ----
+     A finding cites requirements by id ("M07-FR-03"); dashboard_spec_refs.py resolves those
+     against the PRD at render time and emits them as a.spec-ref carrying the file and line. */
+  a.spec-ref { color: var(--accent); text-decoration: none; cursor: pointer;
+    border-bottom: 1px dotted currentColor; }
+  a.spec-ref:hover { background: var(--accent-soft); border-radius: 3px; }
+  a.spec-ref code { background: none; padding: 0; }
+
+  /* Same overlay contract as .log-file-modal-overlay — a fixed sheet that swallows every
+     pointer event outside the box — but pinned to the right edge and full height. The scrim
+     is lighter than the modals' 0.45 on purpose: the finding underneath stays readable while
+     the drawer holds the interaction. */
+  .spec-peek-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.28);
+    display: flex; justify-content: flex-end; z-index: 200; }
+  .spec-peek-box { position: relative; width: var(--peek-w, 480px);
+    max-width: calc(100vw - 40px); height: 100%; background: var(--panel);
+    border-left: 1px solid var(--border-strong); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
+    display: flex; flex-direction: column; overflow: hidden;
+    animation: spec-peek-in .18s ease-out; }
+  @keyframes spec-peek-in { from { transform: translateX(100%); } to { transform: none; } }
+  body.resizing .spec-peek-box { animation: none; }
+  .spec-peek-resize { position: absolute; left: 0; top: 0; bottom: 0; width: 6px;
+    cursor: col-resize; z-index: 1; }
+  .spec-peek-resize:hover, .spec-peek-resize.dragging { background: var(--accent-soft); }
+  .spec-peek-head { flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 9px 8px 9px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  .spec-peek-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 12.5px; }
+  .spec-peek-head button { border: none; background: transparent; color: var(--muted);
+    padding: 4px 6px; border-radius: 6px; line-height: 0; }
+  .spec-peek-head button:hover { background: var(--hover); color: var(--text); }
+  /* position:relative is load-bearing — scrollToSrcLine measures hit.offsetTop against the
+     nearest positioned ancestor. max-width:none overrides .markdown-body's 860px, which
+     would otherwise leave dead space once the drawer is dragged wider than that. */
+  .spec-peek-body { flex: 1; overflow: auto; position: relative;
+    padding: 12px 20px 60px; max-width: none; }
+  .spec-peek-body pre { white-space: pre-wrap; word-break: break-word; }
+  .src-line-hit { border-radius: 6px; animation: src-line-flash 1.8s ease-out 1; }
+  @keyframes src-line-flash {
+    from { background: var(--accent-soft); } to { background: transparent; }
+  }

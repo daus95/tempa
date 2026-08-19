@@ -182,7 +182,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_clarify_file(self) -> None:
         self._send_json(*dashboard_api_clarify.read_file(
-            self.server.clar_dir, self.query.get("path", [""])[0]))
+            self.server.clar_dir, self.query.get("path", [""])[0], self.server.prd_dir))
 
     def _handle_log_file(self) -> None:
         self._send_json(*dashboard_api_status.read_log_file(self.query.get("name", [""])[0]))

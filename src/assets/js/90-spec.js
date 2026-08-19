@@ -99,6 +99,8 @@ async function saveSpecFile() {
     const data = await res.json();
     if (!data.ok) { toast(data.error || "Save failed.", true); updateToolbar(); return; }
     state.specDirty = false;
+    // The spec drawer caches whole files; this one just changed underneath it.
+    SPEC_PEEK_CACHE.delete(state.selectedSpecPath);
     updateToolbar();
     if (state.specMode === "view") renderSpecViewer();
     toast("Saved " + state.selectedSpecPath);
@@ -129,6 +131,9 @@ function renderSpecOverview() {
 }
 
 async function refreshSpecTree() {
+  // Runs after every clarify/implement run and after Refresh — i.e. after anything that can
+  // have rewritten the PRD, which is exactly when the drawer's cached copies go stale.
+  SPEC_PEEK_CACHE.clear();
   try {
     const res = await fetch("/api/tree");
     const data = await res.json();

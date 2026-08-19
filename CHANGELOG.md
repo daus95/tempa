@@ -10,6 +10,31 @@ once the first tagged release is cut.
 
 ### Added
 
+- **A clarification finding's spec references are now links, and open the spec beside it.**
+  Deciding a finding means reading what it cites, and a `**Where:**` line like
+  `M07-FR-03 Group A aggregation rule; BR-07.2` was inert text — the ids are real, but
+  nothing recorded where they live, so answering meant leaving the finding, hunting through
+  the Specification tree by eye, and navigating back having lost your place in a card you
+  were part-way through answering. Requirement/rule ids, `§`-section references and file
+  paths inside a finding now resolve to a specification file and line, and clicking one
+  slides in a drawer showing that file scrolled to — and briefly highlighting — the exact
+  table row, bullet or heading that defines it. The drawer is modal: the page behind it dims
+  and stops responding while it is open, and closing it (✕, Escape, or a click on the
+  backdrop) returns the Clarification page exactly as it was. It is read-only, with an
+  "Open in Specification" button for editing, and its width is draggable.
+  References are resolved against the PRD **at render time**, not when the finding was
+  written, which is what makes this work on clarification rounds already on disk and keeps
+  the line numbers from ever going stale. Only ids the PRD actually *defines* — in a
+  heading, a requirement table's id column, or a bold lead-in — are linked, which is what
+  keeps a finding's references to *earlier findings* (`R8 M2`) as plain text without
+  hard-coding any project's id vocabulary; an id defined in two different files is left
+  unlinked rather than guessing. `clarification.md` now also asks new findings to name the
+  spec file in their Where line, so a finding that cites no id at all still gets a link.
+- **The dashboard's left navigation can be collapsed to an icon rail** (the button beside
+  Refresh, or Ctrl/Cmd+B), giving the findings and the spec drawer the width they need. The
+  rail keeps every top-level section one click away and still shows the unanswered-findings
+  count. The collapsed state and both panel widths are remembered for the session.
+
 - **Dashboard Home page now shows recent working folders and can create a new one.** The
   empty state (no working folder selected yet) previously offered only "Select Working
   Folder", forcing a re-navigation through the native picker even for a project you had

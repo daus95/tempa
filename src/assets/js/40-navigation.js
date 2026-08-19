@@ -48,6 +48,23 @@ function confirmDiscardIfDirty() {
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar collapse (icon rail)
+// ---------------------------------------------------------------------------
+// Collapsing to a 44px rail rather than hiding the explorer outright, because the toolbar —
+// the obvious home for a "show it again" button — is itself hidden on every overview pane
+// (see updateToolbar). The rail keeps that control in one fixed place, and every top-level
+// destination stays one click away since each row already renders an icon.
+function setSidebarCollapsed(on) {
+  state.sidebarCollapsed = on;
+  sidebarEl.classList.toggle("collapsed", on);
+  sidebarToggleBtn.title = (on ? "Show" : "Hide") + " explorer (Ctrl+B)";
+  sidebarToggleBtn.setAttribute("aria-expanded", String(!on));
+  uiPrefSet("sidebarCollapsed", on);
+}
+
+function toggleSidebar() { setSidebarCollapsed(!state.sidebarCollapsed); }
+
+// ---------------------------------------------------------------------------
 // Sidebar (top-level sections + nested trees)
 // ---------------------------------------------------------------------------
 function specIconFor(node) {
