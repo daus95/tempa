@@ -228,13 +228,6 @@
     background: var(--bg); cursor: pointer; font-size: 0.85rem; }
   .home-step2-file-item:hover { background: var(--border-strong); }
   .home-step2-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .home-danger-zone { max-width: 720px; margin: 32px auto 0; padding-top: 20px;
-    border-top: 1px solid var(--border); text-align: center; }
-  .home-clear-btn { background: var(--panel); color: var(--danger); border-color: var(--danger);
-    font-weight: 600; padding: 8px 18px; }
-  .home-clear-btn:hover:not(:disabled) { background: var(--danger); color: #fff; }
-  .home-clear-btn:disabled { opacity: 0.5; cursor: default; }
-  .home-danger-zone .home-step-desc { margin-top: 8px; }
 
   /* ---- shared tab bar (Implementation Status/Log, Clarification Overview/Log) ---- */
   .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong);
@@ -569,6 +562,12 @@
   .settings-group { max-width: 720px; margin: 0 auto 24px; border: 1px solid var(--border-strong);
     border-radius: 10px; padding: 18px 22px; background: var(--panel); }
   .settings-group h3 { margin: 0 0 16px; font-size: 1rem; }
+  .settings-group-danger { border-color: var(--danger); }
+  .settings-group-danger h3 { color: var(--danger); }
+  .settings-danger-btn { background: var(--panel); color: var(--danger); border-color: var(--danger);
+    font-weight: 600; padding: 8px 18px; }
+  .settings-danger-btn:hover:not(:disabled) { background: var(--danger); color: #fff; }
+  .settings-danger-btn:disabled { opacity: 0.5; cursor: default; }
   .settings-field { margin-bottom: 18px; }
   .settings-field:last-child { margin-bottom: 0; }
   .settings-field label { display: block; font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; }

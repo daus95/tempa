@@ -25,6 +25,12 @@ once the first tagged release is cut.
   unlinking the workspace. It now carries a visible "Close" label alongside the icon, styled as
   a bordered pill consistent with the rest of the workspace panel.
 
+- **Moved "Clear All" off the Home page to Settings → Maintenance → Danger Zone.** It previously
+  sat directly beneath the Start Implementation button, one step below buttons that get clicked
+  repeatedly during a normal run — an easy target for a stray click on a destructive,
+  unrecoverable action. It's now under its own red-bordered "Danger Zone" group in Maintenance,
+  alongside Restart Server. Behavior (including the confirmation dialog) is unchanged.
+
 ### Fixed
 
 - **Fixed six self-contradictions in the POS example PRD.**

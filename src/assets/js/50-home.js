@@ -278,29 +278,6 @@ homeStartImplementBtn.addEventListener("click", async () => {
   startImplementRun();
 });
 
-homeClearAllBtn.addEventListener("click", async () => {
-  const ok = await confirmModal(
-    "Are you sure you want to delete ALL data (plan, QA, log, and clarification results)?\n" +
-    "Specification files will NOT be deleted.\n\nThis action CANNOT be undone.",
-    { title: "Clear All Data", okLabel: "Clear All", danger: true });
-  if (!ok) return;
-  homeClearAllBtn.disabled = true;
-  try {
-    const res = await fetch("/api/clear", { method: "POST" });
-    const data = await res.json();
-    if (!data.ok) { toast(data.error || "Clear failed.", true); return; }
-    toast("All data cleared successfully.");
-    await refreshClarifyList();
-    state.epics = [];
-    state.implementStarted = false;
-    renderHomeWorkflow();
-  } catch (e) {
-    toast("Network error while clearing.", true);
-  } finally {
-    homeClearAllBtn.disabled = false;
-  }
-});
-
 function renderLeafSection(key, icon, label, disabled, running) {
   const wrap = document.createElement("div");
   wrap.className = "node";

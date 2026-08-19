@@ -178,12 +178,6 @@
             </div>
             <div class="home-step-status" id="homeStep3Status"></div>
           </div>
-          <div class="home-danger-zone">
-            <button type="button" class="home-clear-btn" id="homeClearAllBtn">
-              <span><svg class="icon-svg"><use href="#i-trash-2"></use></svg></span><span>Clear All</span>
-            </button>
-            <p class="home-step-desc">Delete all plan, QA, log, and clarification results (specification files will not be deleted). This action cannot be undone.</p>
-          </div>
         </div>
       </div>
       <div id="specPane" class="pane hidden">
@@ -651,6 +645,14 @@
               </button>
             </div>
             <p class="settings-save-status" id="settingsRestartStatus"></p>
+          </div>
+          <div class="settings-group settings-group-danger">
+            <h3>Danger Zone</h3>
+            <p class="settings-field-desc">Delete all plan, QA, log, and clarification results for this workspace (specification files will not be deleted). This action cannot be undone.</p>
+            <button type="button" class="settings-danger-btn" id="settingsClearAllBtn">
+              <span><svg class="icon-svg"><use href="#i-trash-2"></use></svg></span><span>Clear All</span>
+            </button>
+            <p class="settings-save-status" id="settingsClearAllStatus"></p>
           </div>
         </div>
         <div class="settings-actions">
