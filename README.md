@@ -507,9 +507,9 @@ epic left in the `failed` state back to `pending` first (the same thing
 would make every click halt on the spot, since `implement` refuses to work past one. See
 [docs/start-implementation.md](docs/start-implementation.md).
 
-**Clear All**, at the bottom of Home, deletes all plan/QA/log/clarification results
-(your specification files are never touched) — useful for restarting the clarification or
-implementation loop from scratch. This cannot be undone.
+**Clear All**, under Settings → Maintenance → Danger Zone, deletes all plan/QA/log/clarification
+results (your specification files are never touched) — useful for restarting the clarification
+or implementation loop from scratch. This cannot be undone.
 
 The **✕** next to the working-folder path (top of Home) detaches the current project (same
 as `tempa close-folder` on the CLI) — no files are deleted, it just drops the link so you can

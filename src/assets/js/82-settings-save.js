@@ -174,6 +174,39 @@ settingsRestartBtn.addEventListener("click", async () => {
   }
 });
 
+settingsClearAllBtn.addEventListener("click", async () => {
+  const ok = await confirmModal(
+    "Are you sure you want to delete ALL data (plan, QA, log, and clarification results)?\n" +
+    "Specification files will NOT be deleted.\n\nThis action CANNOT be undone.",
+    { title: "Clear All Data", okLabel: "Clear All", danger: true });
+  if (!ok) return;
+  settingsClearAllBtn.disabled = true;
+  settingsClearAllStatus.textContent = "Clearing…";
+  settingsClearAllStatus.classList.remove("err");
+  try {
+    const res = await fetch("/api/clear", { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) {
+      settingsClearAllStatus.textContent = data.error || "Clear failed.";
+      settingsClearAllStatus.classList.add("err");
+      toast(data.error || "Clear failed.", true);
+      return;
+    }
+    settingsClearAllStatus.textContent = "All data cleared successfully.";
+    toast("All data cleared successfully.");
+    await refreshClarifyList();
+    state.epics = [];
+    state.implementStarted = false;
+    renderHomeWorkflow();
+  } catch (e) {
+    settingsClearAllStatus.textContent = "Network error while clearing.";
+    settingsClearAllStatus.classList.add("err");
+    toast("Network error while clearing.", true);
+  } finally {
+    settingsClearAllBtn.disabled = false;
+  }
+});
+
 // Doubles as the dirty-check snapshot (see recomputeSettingsDirty): this object *is* the
 // definition of "what a Save would write", so comparing it against the config the form was
 // last filled from is exactly the right test for whether anything is pending.
