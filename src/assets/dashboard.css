@@ -194,9 +194,11 @@
   .home-workspace-path { color: var(--accent); cursor: pointer; font-family: ui-monospace, Consolas, monospace;
     font-size: 0.85rem; overflow-wrap: anywhere; flex: 1 1 auto; }
   .home-workspace-path:hover { text-decoration: underline; }
-  .home-workspace-close { flex: none; border: none; background: transparent; color: var(--muted);
-    font-size: 1rem; line-height: 1; cursor: pointer; padding: 3px 8px; border-radius: 6px; }
-  .home-workspace-close:hover { background: var(--danger); color: #fff; }
+  .home-workspace-close { flex: none; display: flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong);
+    background: transparent; color: var(--muted); font-size: 0.78rem; font-weight: 600; line-height: 1;
+    cursor: pointer; padding: 5px 10px; border-radius: 6px; }
+  .home-workspace-close .icon-svg { width: 13px; height: 13px; }
+  .home-workspace-close:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
   .home-backend-status { max-width: 720px; margin: -8px auto 18px; padding: 12px 18px;
     border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel); }
   .home-backend-status-label { color: var(--muted); font-weight: 600; font-size: 0.85rem; margin-bottom: 6px; }
