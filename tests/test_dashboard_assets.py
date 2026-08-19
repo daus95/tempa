@@ -125,6 +125,9 @@ def test_every_js_part_is_listed_and_every_listed_part_exists():
     a part that exists but isn't listed silently never loads."""
     on_disk = {p.name for p in (dashboard_assets.ASSET_DIR / "js").glob("*.js")}
     assert on_disk == set(dashboard_assets.JS_PARTS)
+    # The vendored mermaid bundle lives in assets/vendor/ precisely so it stays out of this
+    # set: it is served from its own route, never concatenated into the inline script.
+    assert "mermaid.min.js" not in dashboard_assets.JS_PARTS
     assert dashboard_assets.JS_PARTS[0] == "00-initial-data.js"    # declares INITIAL_*
     assert dashboard_assets.JS_PARTS[-1] == "99-events-init.js"    # runs the first paint
 
@@ -141,3 +144,72 @@ def test_the_concatenated_script_parses_as_valid_javascript(tmp_path):
     bundle.write_text(dashboard_assets._dashboard_js(), encoding="utf-8")
     result = subprocess.run([node, "--check", str(bundle)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# The vendored mermaid bundle (assets/vendor/, served by dashboard_server._serve_mermaid).
+#
+# Nothing here can execute mermaid or assert an SVG came out of it — that is what the manual
+# pass in the PR is for. What these pin down is the part that CAN rot silently: that the
+# bundle is present and whole, that it is still the self-contained UMD build (the ESM one
+# would work until the first offline diagram, then break), that it never leaks into the page,
+# and that the URL the page asks for is the one the server answers.
+# ---------------------------------------------------------------------------
+def _mermaid_text() -> str:
+    return dashboard_assets.mermaid_bundle().decode("utf-8", "replace")
+
+
+def test_the_vendored_mermaid_bundle_is_present_and_whole():
+    bundle = dashboard_assets.mermaid_bundle()
+    assert bundle is not None, "src/assets/vendor/mermaid.min.js is missing"
+    # A truncated download, an LFS pointer and a CDN error page all land far outside this band.
+    assert 2_000_000 < len(bundle) < 8_000_000
+
+
+def test_the_vendored_bundle_is_the_self_contained_umd_build():
+    """The ESM build is a small loader that import()s dozens of sibling chunks — it would
+    look fine here and break the first time someone opened a diagram offline."""
+    text = _mermaid_text()
+    assert "sourceMappingURL" not in text
+    assert re.search(r"\bimport\s*\(", text) is None
+    for diagram in ("erDiagram", "stateDiagram", "sequenceDiagram"):
+        assert diagram in text, f"{diagram} support is missing from the bundle"
+
+
+def test_the_mermaid_bundle_is_not_inlined_into_the_page():
+    """The whole reason it has a route: the page must stay small enough to re-send on every
+    load, which is what Cache-Control: no-store makes it do."""
+    page = dashboard_assets._page_template()
+    assert _mermaid_text()[:400] not in page
+    assert len(page) < 1_000_000
+
+
+def test_every_url_the_page_fetches_at_runtime_is_same_origin():
+    """Tightens the offline contract. The page now DOES load a script at runtime, so "no
+    <script src=> in the HTML" is no longer the whole story: every URL the JS fetches — via
+    fetch() or by assigning to a .src — has to be a path on this same server, never a host.
+    (The two https:// links in the Settings help text are hrefs a person clicks, not fetches,
+    which is exactly why this looks at the fetch sites rather than at every URL in the file.)"""
+    js = dashboard_assets._dashboard_js()
+    fetched = re.findall(r"""fetch\(\s*["']([^"']+)["']""", js)
+    fetched += re.findall(r"""\.src\s*=\s*["']([^"']+)["']""", js)
+    # ...including the ones assigned through a constant, which is how the mermaid URL is held.
+    fetched += re.findall(r"""_SRC\s*=\s*["']([^"']+)["']""", js)
+    assert fetched, "no fetch sites found — this test has stopped looking at the right thing"
+    for url in fetched:
+        assert url.startswith("/"), f"{url} is not a same-origin path"
+
+
+def test_the_page_asks_for_the_mermaid_url_the_server_serves():
+    """The route, the version and the cache-buster are declared in two places; this is what
+    catches them drifting apart (a stale ?v= serves the old, immutable-cached bundle)."""
+    js = dashboard_assets._dashboard_js()
+    assert dashboard_assets.MERMAID_ROUTE + "?v=" + dashboard_assets.MERMAID_VERSION in js
+
+
+def test_the_diagram_styles_and_the_script_agree_on_their_class_names():
+    """Nothing else spans that boundary: renaming a class in one file alone would only show
+    up as an unstyled diagram in a browser."""
+    css, js = _stylesheet(), dashboard_assets._dashboard_js()
+    for name in ("mermaid-diagram", "mermaid-source", "mermaid-error"):
+        assert name in css and name in js

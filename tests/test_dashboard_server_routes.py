@@ -23,6 +23,7 @@ import pytest
 
 import dashboard_api_settings
 import dashboard_api_status
+import dashboard_assets
 import dashboard_runs
 import dashboard_server
 import dashboard_verify
@@ -76,6 +77,17 @@ class _Client:
 
     def get(self, path: str) -> tuple[int, object]:
         return self._request("GET", path)
+
+    def get_raw(self, path: str) -> tuple[int, dict, bytes]:
+        """Status, headers and undecoded body — for the one route whose bytes and whose
+        caching headers are the point (the vendored mermaid bundle)."""
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=10)
+        try:
+            conn.request("GET", path)
+            response = conn.getresponse()
+            return response.status, dict(response.getheaders()), response.read()
+        finally:
+            conn.close()
 
     def post(self, path: str, payload=None, raw: bytes | None = None) -> tuple[int, object]:
         if raw is not None:
@@ -152,6 +164,43 @@ def test_guide_pages_are_served(dash):
         status, body = dash.get(route)
         assert status == 200
         assert "<html" in body.lower()
+
+
+def test_the_mermaid_bundle_is_served_from_this_server(dash):
+    """The dashboard renders ```mermaid blocks as diagrams by fetching this at runtime, so
+    the bundle has to come off Tempa's own port — that is what keeps the page offline-safe."""
+    status, headers, body = dash.get_raw(
+        dashboard_assets.MERMAID_ROUTE + "?v=" + dashboard_assets.MERMAID_VERSION)
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/javascript")
+    assert int(headers["Content-Length"]) == len(body)
+    assert body == dashboard_assets.mermaid_bundle()
+
+
+def test_the_mermaid_bundle_is_the_one_cacheable_response(dash):
+    """3.5 MB of bytes that never change for a given ?v=, unlike every other route here,
+    which answers with live state and must not be cached at all."""
+    _, headers, _ = dash.get_raw(dashboard_assets.MERMAID_ROUTE)
+    assert headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    _, index_headers, _ = dash.get_raw("/")
+    assert index_headers["Cache-Control"] == "no-store"
+
+
+def test_the_mermaid_route_is_not_a_static_file_server(dash):
+    """It is one fixed route, not a directory: nothing in the request names a file, so there
+    is nothing to traverse out of."""
+    assert dash.get("/assets/dashboard.css") == (404, "Not found")
+    assert dash.get("/assets/../dashboard_server.py") == (404, "Not found")
+    assert (dashboard_server._DashboardHandler.GET_ROUTES[dashboard_assets.MERMAID_ROUTE]
+            == "_serve_mermaid")
+
+
+def test_a_missing_mermaid_bundle_degrades_to_404(dash, monkeypatch):
+    """An install stripped of the vendored file shows mermaid blocks as the plain code they
+    are today — the route must not 500 the page's lazy fetch."""
+    monkeypatch.setattr(dashboard_assets, "mermaid_bundle", lambda: None)
+    monkeypatch.setattr(dashboard_server, "mermaid_bundle", lambda: None)
+    assert dash.get(dashboard_assets.MERMAID_ROUTE) == (404, "Not found")
 
 
 # ---------------------------------------------------------------------------

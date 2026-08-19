@@ -77,6 +77,10 @@ async function openSpecPeek(path, line, token) {
   // Same file already on screen: re-scroll only. Re-fetching would blank and reflow the
   // drawer for no reason, which reads as a flicker when following two refs into one file.
   if (state.specPeek.path === path) {
+    // `data` isn't in scope here — it's declared below, on the fetch/cache path this branch
+    // is skipping. The cache is what already holds the payload for the file on screen.
+    const cached = SPEC_PEEK_CACHE.get(path);
+    if (cached && cached.text && cached.markdown) renderMermaidDiagrams(specPeekBody);  // async (12-mermaid.js)
     scrollToSrcLine(specPeekBody, line, token);
     return;
   }

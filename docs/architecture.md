@@ -73,7 +73,7 @@ functions directly in-process.
 | `dashboard_api_status.py` | The read-only/polled endpoints: `/api/tree`'s first-paint payload, both live run-status payloads, the log and QA-report viewers, the update check, and `backend_status()` (see [cli-availability.md](cli-availability.md)). |
 | `dashboard_api_settings.py` | Settings pane: reading config.json for the form, and validating + saving it back. The validation is plain functions over the payload, so every rule (and its user-facing message) is testable without HTTP. Architecture Principles and the SMTP test live here too. |
 | `dashboard_api_workspace.py` | Home page's working-folder controls and the Settings maintenance actions — select/open/detach a workspace, Clear Everything, apply an update, restart the server. Each shells out to `tempa.py <command>` rather than doing the work in-process (see [The CLI/dashboard boundary](#the-clidashboard-boundary)). |
-| `dashboard_assets.py` | Reads `assets/dashboard.{html,css}`, the `assets/js/*.js` parts (concatenated in `JS_PARTS` order), and the two guide `.html` files from disk once (`lru_cache`), and inlines CSS/JS into a self-contained document — no external requests from the page. |
+| `dashboard_assets.py` | Reads `assets/dashboard.{html,css}`, the `assets/js/*.js` parts (concatenated in `JS_PARTS` order), and the two guide `.html` files from disk once (`lru_cache`), and inlines CSS/JS into a self-contained document. The page never contacts another host; the one asset it fetches at runtime is the vendored mermaid bundle (`MERMAID_ROUTE`/`mermaid_bundle()`), served by this same server and only for documents that contain a diagram. |
 | `dashboard_config.py` | Thin read-only wrappers over `tempa_config` for dashboard-specific checks (workspace initialized/closable, etc.) — other `dashboard_*` modules still import `tempa_config` directly for the rest. |
 | `dashboard_spec.py` | Builds the Specification file tree and the path-traversal guard (`_resolve_within`) — ported from the former standalone `spec_ui.py`. |
 | `dashboard_clarify_parse.py` | Parses a clarification result file into findings (via the `clarify:item`/`clarify:answer` HTML-comment markers), computes the finalize/implement readiness state, and derives the pending-resolution overlay (`pending_resolutions` / `pending_overlay_stats`) shared by the dashboard and the clarification prompt. Ported from the former standalone `clarify_ui.py`. |
@@ -100,6 +100,16 @@ are positional: `00-initial-data.js` declares the `INITIAL_*` constants `render_
 substitutes into, so it must come first, and `99-events-init.js` is the only part that *runs*
 anything at load (the first paint), so it must come last. Everything in between is grouped by
 pane. Adding a part means adding it to `JS_PARTS` too.
+
+`assets/vendor/` is the one place third-party front-end code lives (today: mermaid, which turns
+```mermaid fences in a spec into diagrams). It is deliberately **not** under `assets/js/`: those
+files are concatenated into the inline `<script>`, and mermaid is ~3.5 MB — inlining it would put
+that on every page load for a feature only some documents use. It gets its own route instead
+(`dashboard_assets.MERMAID_ROUTE` -> `dashboard_server._serve_mermaid`), and `assets/js/12-mermaid.js`
+fetches it lazily, from this same server, the first time a rendered document actually contains a
+diagram. That keeps the offline guarantee intact — the invariant is *never another host*, not
+*never a request*; the page already `fetch()`es `/api/*` constantly. Provenance, the pinned
+version and the upgrade steps are in `assets/vendor/README.md`.
 
 ## The CLI/dashboard boundary
 
@@ -244,6 +254,14 @@ returning `(status, payload)` — no HTTP objects, so it can be tested directly)
 single-page app): follow the `principles_guide_page()`/`spec_guide_page()` pattern in
 `dashboard_assets.py` — a static `.html` file in `src/assets/` with the dashboard's CSS inlined at
 request time — and give it a route in `GET_ROUTES` like the two existing ones.
+
+**Adding a vendored front-end asset** (third-party JS/CSS the page needs): put the file in
+`src/assets/vendor/` — never `assets/js/`, which is concatenated into the inline script — with its
+license and provenance recorded in `assets/vendor/README.md`, a `-text -diff` entry in
+`.gitattributes` so a Windows checkout can't rewrite its bytes, an `lru_cache`d reader in
+`dashboard_assets.py` shaped like `mermaid_bundle()`, and one route + `_serve_*` adapter that sends
+it with a long `cache_control` (it is immutable, unlike every other response here). The page must
+load it lazily and from a same-origin path, so the dashboard keeps working with no network.
 
 **Adding a new background run kicked off from the dashboard:** see
 [The CLI/dashboard boundary](#the-clidashboard-boundary) above — it goes through

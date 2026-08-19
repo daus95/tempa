@@ -23,7 +23,7 @@ import dashboard_api_status
 import dashboard_api_workspace
 import dashboard_zip
 import tempa_config
-from dashboard_assets import principles_guide_page, spec_guide_page
+from dashboard_assets import MERMAID_ROUTE, mermaid_bundle, principles_guide_page, spec_guide_page
 from dashboard_clarify_parse import (
     _clarify_files_overview,
     _implement_readiness_status,
@@ -86,11 +86,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:  # silence per-request logging
         pass
 
-    def _send(self, status: int, content_type: str, body: bytes, *, filename: str | None = None) -> None:
+    def _send(self, status: int, content_type: str, body: bytes, *, filename: str | None = None,
+              cache_control: str = "no-store") -> None:
+        # no-store is the right default for every route here: they all answer with live state
+        # off disk. The vendored mermaid bundle is the one exception (immutable bytes, 3.5 MB
+        # of them), so it passes its own cache_control rather than this being a per-response
+        # guess.
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         if filename:
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
@@ -111,6 +116,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/": "_serve_index",
         "/architecture-principles": "_serve_principles_guide",
         "/spec-guide": "_serve_spec_guide",
+        MERMAID_ROUTE: "_serve_mermaid",
         "/api/tree": "_handle_tree",
         "/api/spec/file": "_handle_spec_file",
         "/api/spec/download-zip": "_handle_spec_download_zip",
@@ -150,6 +156,20 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_spec_guide(self) -> None:
         self._send(200, "text/html; charset=utf-8", spec_guide_page().encode("utf-8"))
+
+    def _serve_mermaid(self) -> None:
+        """The vendored mermaid bundle, fetched lazily by the page the first time a rendered
+        markdown document contains a ```mermaid block. A fixed route that takes no path
+        component from the request — this is deliberately not a static-file server, so there
+        is nothing here to traverse out of. Unlike every other response it is cacheable: the
+        bytes for a given ?v= never change, and 3.5 MB is worth not re-sending on every
+        View/Edit round trip."""
+        bundle = mermaid_bundle()
+        if bundle is None:
+            self._send(404, "text/plain; charset=utf-8", b"Not found")
+            return
+        self._send(200, "text/javascript; charset=utf-8", bundle,
+                   cache_control="public, max-age=31536000, immutable")
 
     def _handle_tree(self) -> None:
         self._send_json(*dashboard_api_status.tree_payload(

@@ -3,3 +3,8 @@ tempa.cmd text eol=crlf
 "Open Dashboard.command" text eol=lf
 "Open Dashboard.sh" text eol=lf
 "Open Dashboard.cmd" text eol=crlf
+
+# Vendored third-party bundle, kept byte-for-byte as published (src/assets/vendor/README.md):
+# -text so a Windows checkout never rewrites line endings inside a 3.5 MB one-liner (which
+# would invalidate the recorded sha256), -diff so `git diff`/`git log -p` don't dump it.
+src/assets/vendor/mermaid.min.js -text -diff linguist-vendored

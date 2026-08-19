@@ -1,7 +1,9 @@
 """Load and compose the dashboard's static front-end assets (assets/dashboard.{html,css,js}).
 
-Keeps the page a single self-contained document (no external fetches): the CSS and JS are read
-from disk and inlined into the HTML shell, then the per-request data placeholders are filled in.
+Keeps the page a single self-contained document: the CSS and JS are read from disk and inlined
+into the HTML shell, then the per-request data placeholders are filled in. The page never
+contacts another host; the one asset it does fetch at runtime is the vendored mermaid bundle
+below, served by this same server (see MERMAID_ROUTE).
 Assets are located relative to this file so they resolve whether dashboard_ui is imported,
 spawned as a subprocess, or the whole folder is dropped somewhere on PATH."""
 
@@ -29,6 +31,31 @@ from dashboard_config import (
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 
+# The one third-party front-end asset Tempa vendors (see assets/vendor/README.md). Unlike
+# dashboard.css and the assets/js/ parts it is NOT inlined into the page: at ~3.5 MB it would
+# be paid on every page load, by every document, for a feature only some markdown files use.
+# It gets its own route instead, and the page fetches it lazily the first time a rendered
+# document actually contains a ```mermaid block (see assets/js/12-mermaid.js). Still no other
+# host involved — this server serves it, so the dashboard keeps working with no network.
+# The version travels in the URL's QUERY STRING rather than the filename: that keeps the
+# response safely cacheable forever while leaving the file overwritable in place by
+# `tempa update` (a versioned filename would strand a 3.5 MB orphan on every upgrade).
+MERMAID_VERSION = "11.16.1"
+MERMAID_ROUTE = "/assets/mermaid.min.js"
+
+
+@lru_cache(maxsize=1)
+def mermaid_bundle() -> bytes | None:
+    """The vendored mermaid UMD bundle (read once, cached), or None if it isn't there.
+
+    None rather than an exception so an install missing the file degrades to showing mermaid
+    blocks as the plain code they are rendered as today, instead of 500-ing the route."""
+    try:
+        return (ASSET_DIR / "vendor" / "mermaid.min.js").read_bytes()
+    except OSError:
+        return None
+
+
 # The dashboard's front-end script, split across assets/js/ purely so no single source file
 # has to hold all 3,500 lines of it. They are CONCATENATED IN THIS ORDER into one inline
 # <script>, so every part shares one script scope exactly as the single file did: no ES
@@ -43,6 +70,7 @@ ASSET_DIR = Path(__file__).resolve().parent / "assets"
 JS_PARTS = (
     "00-initial-data.js",
     "10-markdown.js",
+    "12-mermaid.js",
     "20-dom-state.js",
     "30-modals.js",
     "40-navigation.js",
@@ -173,5 +201,7 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
     )
 
 
-# The page is a single self-contained document: no external CSS/JS/fonts, and a
-# small hand-written markdown renderer in JS (below) so it works fully offline.
+# The page is a single self-contained document: no CSS/JS/fonts from another host, and a
+# small hand-written markdown renderer in JS so it works fully offline. The sole runtime
+# fetch is the vendored mermaid bundle above, from this same server, and only for documents
+# that actually contain a diagram.

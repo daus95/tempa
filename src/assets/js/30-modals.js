@@ -108,6 +108,7 @@ async function openFileViewerModal(url, title, { markdown = false } = {}) {
     logFileModalBody.innerHTML = truncatedNote + (markdown
       ? `<div class="markdown-body">${renderMarkdown(data.content)}</div>`
       : `<pre>${escapeHtml(data.content)}</pre>`);
+    if (markdown) renderMermaidDiagrams(logFileModalBody);   // async, not awaited (12-mermaid.js)
   } catch (e) {
     logFileModalBody.innerHTML = '<div class="log-file-modal-status">Network error opening file.</div>';
   }

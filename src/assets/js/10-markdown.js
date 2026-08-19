@@ -1,5 +1,8 @@
 // ---------------------------------------------------------------------------
 // Minimal, dependency-free Markdown renderer for the Specification pane (offline-safe).
+// It emits strings only. Anything that has to become live DOM — today just the ```mermaid
+// blocks it renders as <pre><code class="language-mermaid"> — is a separate pass over the
+// result; see 12-mermaid.js.
 // ---------------------------------------------------------------------------
 function escapeHtml(s) {
   // Escapes quotes too (not just &/</>) so this is also safe to interpolate into a
@@ -122,7 +125,9 @@ function renderMarkdown(src, opts) {
         if (cm && cm[2][0] === fence && cm[2].length >= flen) { i++; break; }
         buf.push(lines[i]); i++;
       }
-      push('<pre><code' + (lang ? ` class="language-${lang}"` : "") +
+      // The language becomes a class attribute that 12-mermaid.js keys off, so it is escaped
+      // like any other untrusted text out of the file rather than interpolated raw.
+      push('<pre><code' + (lang ? ` class="language-${escapeHtml(lang)}"` : "") +
         ">" + escapeHtml(buf.join("\n")) + "</code></pre>", start);
       continue;
     }
