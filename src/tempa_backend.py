@@ -119,6 +119,11 @@ class Backend:
     # Tempa cannot tell a harness-side kill apart from a session that genuinely had nothing
     # left to do — see tempa_session._is_background_terminated_text.
     background_terminated_markers: tuple[str, ...] = ()
+    # The command that (re)installs this CLI, quoted verbatim at the user when a spawn shows
+    # the install is broken rather than missing — see tempa_session._report_broken_install.
+    # `resolve_exe` cannot catch that case: it finds the launcher on PATH and is satisfied,
+    # while the executable that launcher points at is gone.
+    install_command: str = ""
 
 
 def resolve_exe(backend: Backend) -> str | None:
@@ -291,6 +296,7 @@ CLAUDE = Backend(
     #    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely."
     # Matched without the seconds count, which varies with the configured ceiling.
     background_terminated_markers=("background tasks still running after",),
+    install_command="npm install -g @anthropic-ai/claude-code",
 )
 
 
@@ -377,6 +383,7 @@ COPILOT = Backend(
     overloaded_markers=(),
     friendly_auth_error_message=_copilot_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: COPILOT_EFFORT_LEVELS,
+    install_command="npm install -g @github/copilot",
 )
 
 
@@ -454,6 +461,7 @@ CODEX = Backend(
     overloaded_markers=(),
     friendly_auth_error_message=_codex_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CODEX_MODEL_REASONING_LEVELS.get(model.strip().lower(), CODEX_DEFAULT_EFFORT_LEVELS),
+    install_command="npm install -g @openai/codex",
 )
 
 

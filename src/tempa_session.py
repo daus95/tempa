@@ -711,6 +711,76 @@ def _log_reclaimed(reclaimed: int, group: NullProcessGroup, label: str, log_file
         log_file.flush()
 
 
+# What the OS shell prints, and the exit code it uses, when the launcher on PATH resolves but
+# the executable it points at does not exist. On Windows a CLI installed by npm is a `.cmd`
+# shim that CALLs a real `.exe`; when a half-finished auto-update renames that `.exe` out of
+# the way and fails to put the replacement back (seen live on 2026-08-25: the claude-code
+# package's bin/ held nothing but `claude.exe.old.1787658950080`), the shim still resolves,
+# still spawns, and cmd.exe exits 9009 with this line on stderr. `resolve_exe` cannot see any
+# of that — it found a launcher on PATH and is satisfied.
+_BROKEN_INSTALL_MARKERS = (
+    "is not recognized as an internal or external command",
+    "the system cannot find the path specified",
+)
+# cmd.exe's "command not found" (9009) and the POSIX shell's (127).
+_EXE_NOT_FOUND_EXIT_CODES = (9009, 127)
+
+
+def _is_broken_install_text(text: str) -> bool:
+    """True if the given CLI output text is the shell reporting that the executable behind the
+    backend's launcher is missing."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _BROKEN_INSTALL_MARKERS)
+
+
+def _report_broken_install(backend: Backend, label: str, log_file) -> None:
+    """Say plainly that the CLI is installed-but-broken, and how to repair it.
+
+    Without this the failure has no readable symptom at all: the shim exits before printing
+    anything a JSON parser recognises, so every layer above sees an empty log and a bare exit
+    code. Two clarification rounds on 2026-08-25 reached the user as nothing but
+    "[agent-runner error] [Errno 22] Invalid argument" — a message about a pipe, for a problem
+    that was a missing file."""
+    fix = f" Reinstall it with `{backend.install_command}`." if backend.install_command else ""
+    message = (
+        f"[{label}] {backend.label} is installed but broken: the launcher on PATH resolved, but "
+        f"the executable it points at is missing, so the CLI exited immediately without running "
+        f"anything.{fix} A half-finished auto-update is the usual cause — it renames the old "
+        "executable out of the way and then fails to put the new one in place."
+    )
+    log(message)
+    with contextlib.suppress(Exception):
+        log_file.write(f"\n{message}\n")
+        log_file.flush()
+
+
+def _feed_stdin(process: subprocess.Popen, stdin_text: str, label: str) -> None:
+    """Pipe the prompt into the CLI's stdin, tolerating a CLI that has already exited.
+
+    A backend that dies before reading its stdin leaves nothing on the other end of the pipe.
+    Windows reports that write as OSError EINVAL — "[Errno 22] Invalid argument" — rather than
+    the BrokenPipeError POSIX raises, so it is not the error anyone guards for, and unguarded
+    it propagated out of `_stream_backend_process` entirely: the read loop below never ran, so
+    the CLI's own account of what went wrong was never taken off stdout, and the log the user
+    was pointed at was empty.
+
+    Swallowing it is right precisely because the broken pipe is never the actual problem — the
+    process being gone is, and that process's own output and exit code say why. Let the read
+    loop and `_wait_for_backend_exit` report that instead of this.
+    """
+    try:
+        if stdin_text:
+            process.stdin.write(stdin_text)
+        process.stdin.close()
+    except OSError as e:
+        log(f"[{label}] the backend CLI closed its input before the prompt could be sent ({e}) "
+            "— it exited early. Reading its output to find out why.", to_console=False)
+        with contextlib.suppress(Exception):
+            process.stdin.close()
+
+
 def _stream_contained_process(
     backend: Backend,
     process: subprocess.Popen,
@@ -724,9 +794,7 @@ def _stream_contained_process(
     """The read loop itself, split out only so `_stream_backend_process` stays a legible
     spawn/contain/teardown shape. Everything here is what that function did inline before
     containment was added."""
-    if stdin_text:
-        process.stdin.write(stdin_text)
-    process.stdin.close()
+    _feed_stdin(process, stdin_text, label)
 
     done_event = threading.Event()
     threading.Thread(
@@ -734,6 +802,7 @@ def _stream_contained_process(
         kwargs={"group": group}, daemon=True,
     ).start()
 
+    broken_install = False
     for raw_line in _read_process_stdout(process):
         row_count[0] += 1
         line = raw_line.strip()
@@ -743,6 +812,10 @@ def _stream_contained_process(
                 data = json.loads(line)
 
         marker_text = _failure_marker_text(raw_line, data)
+        # `marker_text`, not `raw_line`: a session whose own Bash tool runs a command that
+        # does not exist prints this same wording back inside a JSON event, and that is the
+        # agent working, not Tempa's spawn failing. The narrowing keeps it ineligible.
+        broken_install = broken_install or _is_broken_install_text(marker_text)
         if _handle_usage_limit(marker_text, process, label, backend):
             log_file.write(raw_line)
             log_file.flush()
@@ -776,7 +849,13 @@ def _stream_contained_process(
             log_file.write(raw_line)
             log_file.flush()
 
-    return _wait_for_backend_exit(process, group, label)
+    exit_code = _wait_for_backend_exit(process, group, label)
+    # The exit code alone is not enough: a session is free to end on any code it likes, and
+    # 127 is an ordinary one. Requiring that the CLI never produced a single line is what
+    # makes it proof — a launcher whose executable is missing cannot have produced any.
+    if broken_install or (exit_code in _EXE_NOT_FOUND_EXIT_CODES and row_count[0] == 0):
+        _report_broken_install(backend, label, log_file)
+    return exit_code
 
 
 def _run_backend_session(
