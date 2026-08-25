@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import tempa_config
+from dashboard_clarify_overlap import overlaps_for_file
 from dashboard_clarify_parse import (
     _clarify_files_overview,
     _clarify_finalize_status,
@@ -18,7 +19,7 @@ from dashboard_clarify_parse import (
     file_answer_status,
     parse_file,
 )
-from dashboard_clarify_render import _render_blocks_html
+from dashboard_clarify_render import _render_blocks_html, render_finding_peek_html
 from dashboard_config import (
     _load_clarify_applied_hashes,
     _load_clarify_file_timings,
@@ -73,7 +74,12 @@ def read_file(clar_dir: Path, rel: str, prd_dir: Path | None = None) -> Response
     `prd_dir` is what makes the spec references inside a finding clickable — it is resolved
     against the PRD as it stands right now, so the line a link points at is never stale.
     Optional because a caller without a PRD folder should still get a readable file, just
-    without links."""
+    without links.
+
+    Findings are also cross-checked against every earlier round in `clar_dir` for surfaces
+    that were already decided, and each match is rendered above that finding's answer
+    controls (see dashboard_clarify_overlap) — the cheapest moment to notice that accepting
+    this recommendation would reword a decision somebody already made."""
     target = _resolve_within(clar_dir, rel)
     if target is None or not target.is_file():
         return 404, {"ok": False, "error": "File not found."}
@@ -99,10 +105,42 @@ def read_file(clar_dir: Path, rel: str, prd_dir: Path | None = None) -> Response
     )
     return 200, {
         "ok": True, "path": rel, "name": target.name,
-        "summary": summary, "html": _render_blocks_html(blocks, make_linkifier(prd_dir)),
+        "summary": summary,
+        "html": _render_blocks_html(
+            blocks, make_linkifier(prd_dir),
+            overlaps_for_file(clar_dir, target, _load_clarify_applied_hashes())),
         "answered": answered, "total": len(items),
     }
 
+
+def read_finding(clar_dir: Path, rel: str, item_id: str) -> Response:
+    """One finding from another round, rendered read-only for the peek drawer — what a
+    "Decided elsewhere" link opens (see dashboard_clarify_overlap for where those come from).
+
+    Kept separate from read_file rather than made a mode of it: this returns one finding with
+    no answer controls and a **Decided** block, and it must never be mistaken for the file the
+    pane is editing. `name` is what the drawer's header shows.
+
+    Spec references inside it are deliberately NOT linkified. The drawer is already showing
+    this finding because the reader followed a link into it; a second link that replaced the
+    drawer's content would lose the very thing they opened it to compare against.
+    """
+    target = _resolve_within(clar_dir, rel)
+    if target is None or not target.is_file():
+        return 404, {"ok": False, "error": "File not found."}
+    try:
+        text = target.read_text(encoding="utf-8")
+    except OSError as e:
+        return 500, {"ok": False, "error": f"Could not read file: {e}"}
+    items, _ = parse_file(target, text, 0)
+    item = next((it for it in items if it.raw_id == item_id), None)
+    if item is None:
+        return 404, {"ok": False, "error": f"Finding {item_id} is no longer in this file."}
+    return 200, {
+        "ok": True, "path": rel, "id": item.raw_id,
+        "name": f"{item.raw_id} — {target.name}",
+        "html": render_finding_peek_html(item),
+    }
 
 def save_answers(clar_dir: Path, payload: dict | list | None, finalize_running: bool) -> Response:
     """Save hand-written answers into one clarification file.

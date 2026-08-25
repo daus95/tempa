@@ -344,8 +344,68 @@ def test_clarify_file_without_items_says_so(dash):
     assert (body["answered"], body["total"]) == (0, 0)
 
 
+def test_clarify_file_flags_a_surface_an_earlier_round_already_decided(dash):
+    """The end-to-end wiring of dashboard_clarify_overlap into the pane. The rule itself is
+    covered by test_dashboard_clarify_overlap.py; this pins that the route feeds it."""
+    def _named(item_id, severity, answer, recommendation):
+        return (
+            f'<!-- clarify:item id="{item_id}" severity="{severity}" -->\n'
+            f"### Title {item_id}\n**Where:** somewhere\n**Question:** what?\n"
+            f"**Recommendation:** {recommendation}\n"
+            f'**Your answer:** <!-- clarify:answer-start -->\n{answer}\n<!-- clarify:answer-end -->\n'
+            f"<!-- clarify:enditem -->\n"
+        )
+
+    (dash.clar_dir / "clarification-20260101-000000.md").write_text(
+        _named("C3", "critical", "Reactivate it.", "A void sets `is_active` = true."),
+        encoding="utf-8")
+    (dash.clar_dir / "clarification-20260102-000000.md").write_text(
+        _named("M2", "major", "", "Only Archive/Unarchive changes `is_active`."),
+        encoding="utf-8")
+
+    status, body = dash.get("/api/clarify/file?path=clarification-20260102-000000.md")
+
+    assert status == 200
+    assert '<div class="field overlap">' in body["html"]
+    assert "<code>is_active</code>" in body["html"]
+    assert "clarification-20260101-000000.md" in body["html"]
+
+
 def test_clarify_file_missing_is_404(dash):
     assert dash.get("/api/clarify/file?path=nope.md") == (
+        404, {"ok": False, "error": "File not found."})
+
+
+# ---------------------------------------------------------------------------
+# GET /api/clarify/finding — the "Decided elsewhere" peek drawer
+# ---------------------------------------------------------------------------
+def test_clarify_finding_returns_one_finding_read_only(dash):
+    path = dash.clar_dir / "clarification-20260101-000000.md"
+    path.write_text(_item("C3", "critical", "Reactivate it.") + _item("M1", "minor", ""),
+                    encoding="utf-8")
+
+    status, body = dash.get(
+        "/api/clarify/finding?path=clarification-20260101-000000.md&id=C3")
+
+    assert status == 200
+    assert body["ok"] is True and body["id"] == "C3"
+    assert body["name"] == "C3 — clarification-20260101-000000.md"
+    assert "Title C3" in body["html"] and "Reactivate it." in body["html"]
+    assert "Title M1" not in body["html"]
+    assert "<textarea" not in body["html"]
+
+
+def test_clarify_finding_unknown_id_is_404(dash):
+    path = dash.clar_dir / "clarification-20260101-000000.md"
+    path.write_text(_item("C3", "critical", "Reactivate it."), encoding="utf-8")
+    status, body = dash.get(
+        "/api/clarify/finding?path=clarification-20260101-000000.md&id=NOPE")
+    assert status == 404
+    assert "NOPE" in body["error"]
+
+
+def test_clarify_finding_missing_file_is_404(dash):
+    assert dash.get("/api/clarify/finding?path=nope.md&id=C1") == (
         404, {"ok": False, "error": "File not found."})
 
 

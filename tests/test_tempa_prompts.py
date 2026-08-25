@@ -604,6 +604,30 @@ def _real_template(name: str) -> str:
         encoding="utf-8")
 
 
+def test_real_clarification_template_keeps_the_recommendation_checks():
+    # A recommendation is normally accepted verbatim ("Follow the recommendation"), so its text
+    # becomes the PRD's text. Without these four checks each round's answers add unreviewed
+    # surface, and the next round spends itself on holes the previous round's answers opened.
+    template = _real_template("clarification")
+    assert "=== BEFORE YOU WRITE A RECOMMENDATION DOWN ===" in template
+    for check in (
+        "ANSWER YOUR OWN QUESTION, AND NOTHING ELSE",
+        "THE REASON PARAGRAPH IS SPECIFICATION TOO",
+        "COLLISION CHECK",
+        "CLOSE WHAT YOU ADD",
+    ):
+        assert check in template
+
+
+def test_real_apply_template_narrows_cross_file_supersede():
+    # Read widely, "the later file supersedes the earlier one" lets a sweeping clause in one
+    # round's reason paragraph silently revoke an earlier round's decision that nothing
+    # re-decided — the exact shape that costs a whole extra clarification round to find.
+    template = _real_template("apply_clarification")
+    assert "wins only on the point it actually decides" in template
+    assert "narrowest reading that keeps both decisions true" in template
+
+
 @pytest.mark.parametrize("name", ["qa", "qa_continuation"])
 def test_real_qa_templates_carry_the_previous_findings_placeholder(name):
     # Without it each QA round forms a fresh opinion of the epic, flags a different subset of

@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import dashboard_clarify_render as dcr
+from dashboard_clarify_overlap import DecidedElsewhere
 from dashboard_clarify_parse import ClarificationItem
 
 
@@ -109,3 +110,102 @@ def test_every_finding_field_passes_through_the_linkifier():
 def test_prose_between_findings_is_linkified_too():
     html = dcr._render_blocks_html([("text", "intro prose")], _shout)
     assert "<!--L-->" in html
+
+
+# ---------------------------------------------------------------------------
+# The "decided elsewhere" note (dashboard_clarify_overlap feeds it)
+# ---------------------------------------------------------------------------
+
+def _source(raw_id="C3", decided=True, applied=True, surfaces=("is_active",)):
+    return DecidedElsewhere(
+        file_name="clarification-20260826-023338.md", raw_id=raw_id,
+        title="Voiding a sale pushes stock onto an archived product",
+        decided=decided, applied=applied, surfaces=surfaces,
+    )
+
+
+def test_no_overlaps_renders_byte_identically_to_before_the_note_existed():
+    """Most findings share no surface with an earlier round, and their card must be
+    untouched — the note is an exception, not a new permanent field."""
+    item = _item()
+    assert dcr._render_item_html(item) == dcr._render_item_html(item, dcr._identity, [])
+    assert "field overlap" not in dcr._render_item_html(item, dcr._identity, None)
+
+
+def test_the_note_names_the_shared_surface_and_the_finding_that_decided_it():
+    html = dcr._render_item_html(_item(), dcr._identity, [_source()])
+    assert '<div class="field overlap">' in html
+    assert "<code>is_active</code>" in html
+    assert "<strong>C3</strong>" in html
+    assert "clarification-20260826-023338.md" in html
+
+
+def test_the_note_sits_between_the_recommendation_and_the_answer_controls():
+    """It is a prompt to re-read the recommendation just above it before choosing below it;
+    anywhere else in the card and it is read before there is anything to check."""
+    html = dcr._render_item_html(_item(), dcr._identity, [_source()])
+    assert html.index("field recommendation") < html.index("field overlap") < html.index("answer-block")
+
+
+def test_each_source_is_labelled_with_what_state_it_is_in():
+    """The three states carry different risks, so the note may not blur them: an unapplied
+    decision contradicts something no document shows yet, an applied one is already in the PRD
+    this round was evaluated against, and an unanswered one is not a decision at all."""
+    def note(**kw):
+        return dcr._render_item_html(_item(), dcr._identity, [_source(**kw)])
+
+    assert "not yet answered" in note(decided=False)
+    assert "decided, not yet in the PRD" in note(decided=True, applied=False)
+    assert "already in the PRD" in note(decided=True, applied=True)
+    assert "not yet answered" not in note(decided=True, applied=True)
+
+
+def test_overlaps_reach_the_right_finding_by_id():
+    item = _item()  # raw_id "1"
+    blocks = [("item", item)]
+    assert "field overlap" in dcr._render_blocks_html(blocks, dcr._identity, {"1": [_source()]})
+    assert "field overlap" not in dcr._render_blocks_html(blocks, dcr._identity, {"9": [_source()]})
+
+
+def test_a_source_id_from_the_file_is_escaped():
+    html = dcr._render_item_html(_item(), dcr._identity, [_source(raw_id="<img>")])
+    assert "<img>" not in html
+    assert "&lt;img&gt;" in html
+
+
+def test_the_source_is_a_link_the_peek_drawer_can_open():
+    """assets/js/96-spec-peek.js dispatches on these two data attributes; without them the
+    note names a finding the reader then has to go and find by hand."""
+    html = dcr._render_item_html(_item(), dcr._identity, [_source()])
+    assert 'class="clarify-ref"' in html
+    assert 'data-clarify-path="clarification-20260826-023338.md"' in html
+    assert 'data-clarify-id="C3"' in html
+
+
+# ---------------------------------------------------------------------------
+# render_finding_peek_html — one finding, read-only, in the drawer
+# ---------------------------------------------------------------------------
+
+def test_the_peeked_finding_carries_no_answer_controls():
+    """It is somebody else's finding, opened to be read against the one being answered — a
+    radio or textarea here would look editable and would be collected by nothing."""
+    html = dcr.render_finding_peek_html(_item(existing_answer="typed"))
+    assert "<textarea" not in html
+    assert "type=\"radio\"" not in html
+
+
+def test_the_peeked_finding_shows_what_was_decided():
+    html = dcr.render_finding_peek_html(_item(existing_answer="Reactivate the product."))
+    assert "Decided" in html
+    assert "Reactivate the product." in html
+
+
+def test_a_followed_recommendation_says_so_rather_than_rendering_blank():
+    """"Follow the recommendation" stores an empty body on disk, so the Decided block has no
+    text of its own to show — an empty box would read as "nobody answered this"."""
+    html = dcr.render_finding_peek_html(_item(answer_mode="recommendation"))
+    assert "Followed the recommendation above." in html
+
+
+def test_an_unanswered_peeked_finding_says_so():
+    assert "Not answered yet." in dcr.render_finding_peek_html(_item())

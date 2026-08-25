@@ -429,6 +429,20 @@
   .field .md > :first-child { margin-top: 0; }
   .field .md > :last-child { margin-bottom: 0; }
   .field.recommendation { background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
+  /* "Decided elsewhere" — an earlier finding already names one of the surfaces this
+     recommendation reaches for. Sits between the recommendation and the answer controls so
+     it is the last thing read before "Follow the recommendation". */
+  .field.overlap {
+    border-left: 3px solid var(--major); background: var(--accent-soft);
+    border-radius: 0 6px 6px 0; padding: 8px 10px;
+  }
+  .field.overlap ul { margin: 0; padding-left: 18px; }
+  .field.overlap li { line-height: 1.6; }
+  .field.overlap li + li { margin-top: 2px; }
+  .field.overlap code { font-size: 0.88em; }
+  .field.overlap .state { color: var(--muted); font-size: 0.88em; }
+  .field.overlap .state .pending { color: var(--major); }
+  .field.overlap p { margin: 8px 0 0; font-size: 0.86rem; color: var(--muted); line-height: 1.5; }
   .answer-block { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
   .selector { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 8px; font-size: 0.92rem; }
   .selector label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -752,6 +766,19 @@
     border-bottom: 1px dotted currentColor; }
   a.spec-ref:hover { background: var(--accent-soft); border-radius: 3px; }
   a.spec-ref code { background: none; padding: 0; }
+  /* The same affordance for a "Decided elsewhere" reference, which opens the earlier finding
+     in that same drawer (dashboard_clarify_overlap.py -> assets/js/96-spec-peek.js). */
+  a.clarify-ref { color: var(--accent); text-decoration: none; cursor: pointer;
+    border-bottom: 1px dotted currentColor; }
+  a.clarify-ref:hover { background: var(--accent-soft); border-radius: 3px; }
+  a.clarify-ref strong { font-weight: 700; }
+
+  /* One finding shown read-only in the drawer. It reuses .item, so only the differences are
+     here: no answer controls to separate from, and the recorded answer is the point. */
+  .spec-peek-body .item.peek-finding { margin: 0; max-width: none; }
+  .field.decided { background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
+  .field.decided .pending { color: var(--major); }
+  .field.decided p { margin: 0; }
 
   /* Same overlay contract as .log-file-modal-overlay — a fixed sheet that swallows every
      pointer event outside the box — but pinned to the right edge and full height. The scrim

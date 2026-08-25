@@ -336,7 +336,10 @@ database) — upload them here via **Add File**/**Add Folder**, or copy them str
 **Start Clarification** runs one evaluation pass and lists every finding (critical/major/
 minor), grouped by file, under **Clarification** in the sidebar. Open a file to answer its
 findings inline: for each finding, choose **Follow the recommendation** or **I'll write my
-own answer** (a text box appears), then **Save**. Once clarification has run at least once,
+own answer** (a text box appears), then **Save**. A finding that names a field, entity or
+message an earlier round already named carries a **Decided elsewhere** note pointing at it —
+click the finding id to read that decision in a side drawer and check the two agree before
+accepting. Once clarification has run at least once,
 the button relabels to **Continue Clarification** (with a hint explaining what's still
 blocking it, if anything is) for the rest of this loop. While a run is in progress the button
 swaps to **Stop Now** — click it (after a confirmation prompt) to cancel it early, the same

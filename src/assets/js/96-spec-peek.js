@@ -1,10 +1,15 @@
 // ---------------------------------------------------------------------------
-// Clarification: the referenced-specification drawer
+// Clarification: the reference drawer
 // ---------------------------------------------------------------------------
-// A finding cites requirements by id ("M07-FR-03 Group A aggregation rule; BR-07.2"), and
-// deciding it means reading what those say. dashboard_spec_refs.py resolves each id to a
-// file and line and emits it as `a.spec-ref`; clicking one opens the spec right here instead
-// of sending the reader off to the Specification pane and back.
+// Two kinds of reference open it, because both are things a reader has to see WITHOUT leaving
+// the file they are part-way through answering:
+//
+//   - a spec reference. A finding cites requirements by id ("M07-FR-03 Group A aggregation
+//     rule; BR-07.2"), and deciding it means reading what those say. dashboard_spec_refs.py
+//     resolves each id to a file and line and emits it as `a.spec-ref`.
+//   - a "Decided elsewhere" reference. dashboard_clarify_overlap.py finds the earlier finding
+//     that already decided a surface this one names, and emits it as `a.clarify-ref`; the
+//     drawer then shows that finding read-only, its recorded answer included.
 //
 // The drawer is modal — a fixed overlay swallows every pointer event outside it, and `.app`
 // is marked inert so Tab can't reach the findings behind it either. Closing it restores the
@@ -31,6 +36,8 @@ function setSpecPeekOpen(on) {
     return;
   }
   state.specPeek.path = null;
+  state.specPeek.kind = null;
+  state.specPeek.clarifyPath = null;
   specPeekBody.innerHTML = "";
   if (specPeekReturnFocus && document.contains(specPeekReturnFocus)) specPeekReturnFocus.focus();
   specPeekReturnFocus = null;
@@ -71,9 +78,20 @@ function specPeekPlaceholder(message) {
   return '<div class="placeholder-pane">' + escapeHtml(message) + "</div>";
 }
 
+// The header's open-elsewhere button leads out of the drawer to whichever pane owns what it
+// is showing, so its tooltip has to say which.
+function setPeekOpenButtonMode(kind) {
+  const label = kind === "clarify" ? "Open this clarification file" : "Open in Specification";
+  specPeekOpenBtn.title = label;
+  specPeekOpenBtn.setAttribute("aria-label", label);
+}
+
 async function openSpecPeek(path, line, token) {
   if (!state.specPeek.open) specPeekReturnFocus = document.activeElement;
   setSpecPeekOpen(true);
+  state.specPeek.kind = "spec";
+  state.specPeek.clarifyPath = null;
+  setPeekOpenButtonMode("spec");
   // Same file already on screen: re-scroll only. Re-fetching would blank and reflow the
   // drawer for no reason, which reads as a flicker when following two refs into one file.
   if (state.specPeek.path === path) {
@@ -120,9 +138,53 @@ async function openSpecPeek(path, line, token) {
   scrollToSrcLine(specPeekBody, line, token);
 }
 
+// A "Decided elsewhere" note links the finding that already decided a surface this one
+// reaches for (dashboard_clarify_overlap.py). It opens in this same drawer rather than in the
+// Clarification pane on purpose: comparing the two decisions is the entire point of the note,
+// and navigating there would take the reader off the file they are part-way through answering.
+async function openClarifyPeek(path, id) {
+  if (!state.specPeek.open) specPeekReturnFocus = document.activeElement;
+  setSpecPeekOpen(true);
+  state.specPeek.kind = "clarify";
+  state.specPeek.path = null;               // the spec-file cache key; a finding owns none
+  state.specPeek.clarifyPath = path;
+  setPeekOpenButtonMode("clarify");
+  specPeekPath.textContent = id ? id + " — " + path : path;
+  specPeekPath.title = path;
+  // Same seq guard as the spec path, for the same reason: two notes clicked in quick
+  // succession must not let the slower fetch decide what the drawer claims to be showing.
+  const seq = ++specPeekSeq;
+  specPeekBody.innerHTML = specPeekPlaceholder("Loading…");
+  let data;
+  try {
+    const res = await fetch("/api/clarify/finding?path=" + encodeURIComponent(path) +
+      "&id=" + encodeURIComponent(id));
+    data = await res.json();
+  } catch (e) {
+    if (seq === specPeekSeq) {
+      specPeekBody.innerHTML = specPeekPlaceholder("Network error opening this finding.");
+    }
+    return;
+  }
+  if (seq !== specPeekSeq) return;          // a later click already owns the drawer
+  if (!data.ok) {
+    specPeekBody.innerHTML = specPeekPlaceholder(data.error || "Could not open this finding.");
+    return;
+  }
+  specPeekPath.textContent = data.name || path;
+  specPeekBody.innerHTML = data.html || "";
+}
+
 // Delegated, and registered once: #clarifyBody itself survives every innerHTML rebuild in
-// openClarifyFile/syncClarifyLockState, its children do not.
+// openClarifyFile/syncClarifyLockState, its children do not. Both kinds of reference a
+// finding can carry are handled here, since both open the same drawer.
 clarifyBody.addEventListener("click", (e) => {
+  const clarifyRef = e.target.closest("a.clarify-ref");
+  if (clarifyRef && clarifyRef.dataset.clarifyPath) {
+    e.preventDefault();
+    openClarifyPeek(clarifyRef.dataset.clarifyPath, clarifyRef.dataset.clarifyId || "");
+    return;
+  }
   const ref = e.target.closest("a.spec-ref");
   if (!ref || !ref.dataset.specPath) return;
   e.preventDefault();                       // never a navigation, despite the href="#"
@@ -137,6 +199,15 @@ specPeekOverlay.addEventListener("click", (e) => {
 // Reuses openSpecFile as-is, including its confirmDiscardIfDirty() prompt — the same one
 // selectTop() already shows when leaving a clarification file with unsaved answers.
 specPeekOpenBtn.addEventListener("click", () => {
+  if (state.specPeek.kind === "clarify") {
+    const path = state.specPeek.clarifyPath;
+    if (!path) return;
+    closeSpecPeek();
+    // Also confirmDiscardIfDirty()'d, inside openClarifyFile — leaving the file being answered
+    // for another one loses unsaved answers exactly the way leaving it for a spec file does.
+    openClarifyFile({ path: path });
+    return;
+  }
   const path = state.specPeek.path;
   if (!path) return;
   closeSpecPeek();

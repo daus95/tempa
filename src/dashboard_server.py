@@ -123,6 +123,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/epic/spec": "_handle_epic_spec_file",
         "/api/epic/download-zip": "_handle_epic_download_zip",
         "/api/clarify/file": "_handle_clarify_file",
+        "/api/clarify/finding": "_handle_clarify_finding",
         "/api/clarify/run": "_handle_clarify_run_status",
         "/api/implement/run": "_handle_implement_run_status",
         "/api/config": "_handle_config_get",
@@ -203,6 +204,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def _handle_clarify_file(self) -> None:
         self._send_json(*dashboard_api_clarify.read_file(
             self.server.clar_dir, self.query.get("path", [""])[0], self.server.prd_dir))
+
+    def _handle_clarify_finding(self) -> None:
+        self._send_json(*dashboard_api_clarify.read_finding(
+            self.server.clar_dir, self.query.get("path", [""])[0],
+            self.query.get("id", [""])[0]))
 
     def _handle_log_file(self) -> None:
         self._send_json(*dashboard_api_status.read_log_file(self.query.get("name", [""])[0]))

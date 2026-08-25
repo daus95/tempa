@@ -470,8 +470,8 @@ def test_get_commit_after_qa_pass_ignores_non_bool_value():
 # finalize checkpoint settings
 # ---------------------------------------------------------------------------
 
-def test_get_finalize_checkpoint_rounds_defaults_to_five():
-    assert tempa_config.get_finalize_checkpoint_rounds({}) == 5
+def test_get_finalize_checkpoint_rounds_defaults_to_three():
+    assert tempa_config.get_finalize_checkpoint_rounds({}) == 3
 
 
 def test_get_finalize_checkpoint_rounds_explicit_null_means_disabled():
@@ -481,12 +481,12 @@ def test_get_finalize_checkpoint_rounds_explicit_null_means_disabled():
 
 
 def test_get_finalize_checkpoint_rounds_respects_a_positive_value():
-    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": 3}) == 3
+    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": 4}) == 4
 
 
-@pytest.mark.parametrize("value", [0, -1, "5", 2.5, True])
+@pytest.mark.parametrize("value", [0, -1, "3", 2.5, True])
 def test_get_finalize_checkpoint_rounds_falls_back_on_junk(value):
-    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": value}) == 5
+    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": value}) == 3
 
 
 def test_get_finalize_checkpoint_commit_defaults_true():
