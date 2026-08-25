@@ -307,6 +307,13 @@ function fillSettingsForm(config) {
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;
   settingsFinalizeNoProgressRounds.value = config.finalize_no_progress_rounds ?? 5;
+  // null (checkpoints off) has to render as blank, not as the string "null" — same
+  // nullable handling max_session_run gets above.
+  settingsFinalizeCheckpointRounds.value =
+    config.finalize_checkpoint_rounds == null ? "" : config.finalize_checkpoint_rounds;
+  settingsFinalizeCheckpointBackup.checked = config.finalize_checkpoint_backup !== false;
+  settingsFinalizeCheckpointDir.value = config.finalize_checkpoint_backup_dir ?? "prd-backup";
+  settingsFinalizeCheckpointCommit.checked = config.finalize_checkpoint_commit !== false;
   settingsQaLoopStrikes.value = config.qa_loop_strikes ?? 2;
   settingsMaxQaFailRounds.value = config.max_qa_fail_rounds ?? 6;
   settingsCommitAfterQaPass.checked = config.commit_after_qa_pass !== false;

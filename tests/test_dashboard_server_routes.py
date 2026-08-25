@@ -428,6 +428,8 @@ def test_config_get_returns_every_settings_field(dash):
     assert set(body["config"]) == {
         "models", "backends", "reasoning_efforts", "features_per_session", "max_session_run",
         "max_clarification_run", "finalize_no_progress_rounds", "allow_finalize_with_critical",
+        "finalize_checkpoint_rounds", "finalize_checkpoint_backup",
+        "finalize_checkpoint_backup_dir", "finalize_checkpoint_commit",
         "commit_after_qa_pass", "terminate_leftover_processes",
         "implementation_start_requirement", "notifications",
         "usage_limit_retry_wait_sec", "usage_limit_heartbeat_sec",
@@ -726,6 +728,10 @@ def _config_payload(**overrides) -> dict:
         "max_session_run": 30,
         "max_clarification_run": 20,
         "finalize_no_progress_rounds": 5,
+        "finalize_checkpoint_rounds": 5,
+        "finalize_checkpoint_backup": True,
+        "finalize_checkpoint_backup_dir": "prd-backup",
+        "finalize_checkpoint_commit": True,
         "qa_loop_strikes": 2,
         "max_qa_fail_rounds": 6,
         "usage_limit_retry_wait_sec": 1800,
@@ -1162,3 +1168,101 @@ def test_a_rejected_decision_records_nothing(dash):
     dash.post("/api/implement/decision",
               {"epic": "EPIC-04", "feature": "F9", "mode": "follow"})
     assert tempa_decisions.pending_answers() == []
+
+
+# ---------------------------------------------------------------------------
+# Finalize checkpoint settings
+# ---------------------------------------------------------------------------
+
+def test_config_save_persists_the_checkpoint_settings(dash):
+    status, body = dash.post("/api/config/save", _config_payload(
+        finalize_checkpoint_rounds=3,
+        finalize_checkpoint_backup=False,
+        finalize_checkpoint_backup_dir="snapshots",
+        finalize_checkpoint_commit=False,
+    ))
+    assert status == 200
+    saved = tempa_config.load_config()
+    assert saved["finalize_checkpoint_rounds"] == 3
+    assert saved["finalize_checkpoint_backup"] is False
+    assert saved["finalize_checkpoint_backup_dir"] == "snapshots"
+    assert saved["finalize_checkpoint_commit"] is False
+    assert body["config"]["finalize_checkpoint_backup_dir"] == "snapshots"
+
+
+def test_config_save_blank_checkpoint_rounds_means_no_checkpoints(dash):
+    status, body = dash.post("/api/config/save", _config_payload(finalize_checkpoint_rounds=""))
+    assert status == 200
+    assert body["config"]["finalize_checkpoint_rounds"] is None
+    assert tempa_config.load_config()["finalize_checkpoint_rounds"] is None
+
+
+@pytest.mark.parametrize("value", [0, -2, "x"])
+def test_config_save_rejects_a_junk_checkpoint_interval(dash, value):
+    status, body = dash.post("/api/config/save", _config_payload(finalize_checkpoint_rounds=value))
+    assert status == 400
+    assert body["error"] == "Checkpoint Every N Rounds must be empty or a positive whole number."
+
+
+def test_config_save_blank_backup_folder_falls_back_to_the_default(dash):
+    status, body = dash.post("/api/config/save", _config_payload(
+        finalize_checkpoint_backup_dir="   "))
+    assert status == 200
+    assert body["config"]["finalize_checkpoint_backup_dir"] == "prd-backup"
+
+
+def test_config_save_rejects_a_backup_folder_inside_the_prd_folder(dash):
+    """Every snapshot would archive the ones before it, so each ZIP roughly doubles."""
+    inside = str(tempa_config.resolve_prd_dir(tempa_config.load_config()) / "backups")
+    status, body = dash.post("/api/config/save", _config_payload(
+        finalize_checkpoint_backup_dir=inside))
+    assert status == 400
+    assert "inside the PRD folder" in body["error"]
+
+
+def test_config_save_rejects_a_non_string_backup_folder(dash):
+    status, body = dash.post("/api/config/save", _config_payload(finalize_checkpoint_backup_dir=7))
+    assert status == 400
+    assert body["error"] == "Backup Folder must be a folder path."
+
+
+def test_config_save_leaves_the_checkpoint_settings_alone_when_the_fields_are_absent(dash):
+    """A dashboard tab left open across the upgrade that added these fields omits them. It
+    must not be able to turn the workspace's only clarification rollback points off, nor blank
+    the folder they're written to, with a save that reports "Saved."."""
+    dash.post("/api/config/save", _config_payload(
+        finalize_checkpoint_rounds=4,
+        finalize_checkpoint_backup_dir="snapshots",
+    ))
+    payload = _config_payload()
+    for key in ("finalize_checkpoint_rounds", "finalize_checkpoint_backup",
+                "finalize_checkpoint_backup_dir", "finalize_checkpoint_commit"):
+        payload.pop(key)
+
+    status, _ = dash.post("/api/config/save", payload)
+
+    assert status == 200
+    saved = tempa_config.load_config()
+    assert saved["finalize_checkpoint_rounds"] == 4
+    assert saved["finalize_checkpoint_backup_dir"] == "snapshots"
+    assert saved["finalize_checkpoint_backup"] is True
+    assert saved["finalize_checkpoint_commit"] is True
+
+
+def test_pick_backup_folder_returns_the_chosen_path(dash, monkeypatch):
+    monkeypatch.setattr(dashboard_server, "_pick_folder_dialog", lambda: "C:\\chosen")
+    assert dash.post("/api/settings/pick-backup-folder", None) == (
+        200, {"ok": True, "path": "C:\\chosen"})
+
+
+def test_pick_backup_folder_reports_a_cancel_as_ok_false(dash, monkeypatch):
+    monkeypatch.setattr(dashboard_server, "_pick_folder_dialog", lambda: None)
+    assert dash.post("/api/settings/pick-backup-folder", None) == (
+        200, {"ok": False, "cancelled": True})
+
+
+def test_pick_backup_folder_when_no_picker_is_available(dash, monkeypatch):
+    monkeypatch.setattr(dashboard_server, "_pick_folder_dialog", None)
+    status, body = dash.post("/api/settings/pick-backup-folder", None)
+    assert status == 200 and body["ok"] is False
+    assert "isn't available on this platform" in body["error"]

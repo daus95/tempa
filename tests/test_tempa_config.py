@@ -467,6 +467,70 @@ def test_get_commit_after_qa_pass_ignores_non_bool_value():
 
 
 # ---------------------------------------------------------------------------
+# finalize checkpoint settings
+# ---------------------------------------------------------------------------
+
+def test_get_finalize_checkpoint_rounds_defaults_to_five():
+    assert tempa_config.get_finalize_checkpoint_rounds({}) == 5
+
+
+def test_get_finalize_checkpoint_rounds_explicit_null_means_disabled():
+    """Unlike a missing key (a config written before this setting existed), an explicit null
+    is the Settings form's blank field and has to mean "never checkpoint"."""
+    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": None}) is None
+
+
+def test_get_finalize_checkpoint_rounds_respects_a_positive_value():
+    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": 3}) == 3
+
+
+@pytest.mark.parametrize("value", [0, -1, "5", 2.5, True])
+def test_get_finalize_checkpoint_rounds_falls_back_on_junk(value):
+    assert tempa_config.get_finalize_checkpoint_rounds({"finalize_checkpoint_rounds": value}) == 5
+
+
+def test_get_finalize_checkpoint_backup_defaults_true():
+    assert tempa_config.get_finalize_checkpoint_backup({}) is True
+
+
+def test_get_finalize_checkpoint_backup_respects_false():
+    assert tempa_config.get_finalize_checkpoint_backup({"finalize_checkpoint_backup": False}) is False
+
+
+def test_get_finalize_checkpoint_backup_ignores_non_bool_value():
+    assert tempa_config.get_finalize_checkpoint_backup({"finalize_checkpoint_backup": "nope"}) is True
+
+
+def test_get_finalize_checkpoint_commit_defaults_true():
+    assert tempa_config.get_finalize_checkpoint_commit({}) is True
+
+
+def test_get_finalize_checkpoint_commit_respects_false():
+    assert tempa_config.get_finalize_checkpoint_commit({"finalize_checkpoint_commit": False}) is False
+
+
+def test_get_finalize_checkpoint_commit_ignores_non_bool_value():
+    assert tempa_config.get_finalize_checkpoint_commit({"finalize_checkpoint_commit": "nope"}) is True
+
+
+def test_get_finalize_checkpoint_backup_dir_defaults_to_prd_backup():
+    assert tempa_config.get_finalize_checkpoint_backup_dir({}) == "prd-backup"
+
+
+def test_get_finalize_checkpoint_backup_dir_strips_whitespace():
+    config = {"finalize_checkpoint_backup_dir": "  snapshots  "}
+    assert tempa_config.get_finalize_checkpoint_backup_dir(config) == "snapshots"
+
+
+@pytest.mark.parametrize("value", ["", "   ", None, 5, []])
+def test_get_finalize_checkpoint_backup_dir_falls_back_on_blank_or_junk(value):
+    """Never return "" — resolve_source_path passes an empty value straight through, and the
+    caller would then write archives into whatever the current directory happens to be."""
+    config = {"finalize_checkpoint_backup_dir": value}
+    assert tempa_config.get_finalize_checkpoint_backup_dir(config) == "prd-backup"
+
+
+# ---------------------------------------------------------------------------
 # get_terminate_leftover_processes
 # ---------------------------------------------------------------------------
 

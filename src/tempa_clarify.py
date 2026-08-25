@@ -23,20 +23,26 @@ from dashboard_clarify_parse import (
 )
 from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
+from tempa_backup import backup_prd_zip
 from tempa_config import (
     clear_graceful_stop,
     get_backend,
     get_clarify_apply_session_id,
     get_clarify_session_id,
+    get_finalize_checkpoint_backup,
+    get_finalize_checkpoint_commit,
+    get_finalize_checkpoint_rounds,
     get_finalize_no_progress_rounds,
     get_model,
     get_reasoning_effort,
     get_sources,
+    get_workspace,
     graceful_stop_requested,
     load_config,
     save_config,
 )
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
+from tempa_git import commit_workspace_changes
 from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
@@ -51,6 +57,11 @@ from tempa_session_runners import run_apply_clarification_session, run_clarifica
 # run_clarify_finalize). A compaction is followed by a verification round; if that round
 # finds new critical/major issues the run answers them and compacts again — this is the
 # bound that keeps that from turning into an unattended apply/evaluate ping-pong.
+#
+# Periodic checkpoint applies (_run_checkpoint) deliberately do NOT count against this. They
+# are scheduled by a round counter rather than triggered by a verification coming back dirty,
+# so they measure a different thing entirely — and charging them here would mean a run with
+# checkpoints every 5 rounds could never reach its 20th round.
 MAX_COMPACTIONS = 2
 
 
@@ -389,9 +400,10 @@ def _prepare_finalize_backlog(config: dict, clar_dir: Path) -> None:
     (no agent call — the same "follow the recommendation" resolution the dashboard button
     writes). That's all: the backlog is NOT applied to the PRD here. Everything answered
     enters the loop as part of the pending overlay (see _pending_overlay), which every
-    evaluate pass carries, and the loop compacts the whole lot into the PRD in one apply at
-    the very end. A pre-loop apply would just be an extra full agent session writing text
-    that the rounds after it are about to revise anyway.
+    evaluate pass carries, and the loop writes the whole lot into the PRD at the closing
+    compaction (plus any periodic checkpoints along the way — see _run_checkpoint). A
+    pre-loop apply would just be an extra full agent session writing text that the rounds
+    after it are about to revise anyway.
 
     Nothing here can fail — there is no session to run — so unlike the apply-based version
     this replaced, the finalize run has no pre-loop failure path to handle."""
@@ -503,6 +515,7 @@ def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compact
             "PRD/spec. Clarify (finalize) done.")
         if minor > 0:
             log(f"Still {minor} minor finding(s) — considered acceptable.")
+        _finalize_success_backup()
         sys.exit(0)
 
     compactions += 1
@@ -553,12 +566,16 @@ def _track_finalize_convergence(critical: int, major: int, prev_total: int | Non
     own (e.g. every remaining finding genuinely needs a human decision) — exit 1 instead of
     burning up to max_clarification_run rounds of full-PRD re-evaluation for no benefit.
 
+    `prev_total is None` means there is no comparable baseline yet, so this round is not
+    judged. That skips ONE comparison and deliberately does not clear the counter — a caller
+    that means "forget everything so far" says so by resetting no_progress_rounds itself, the
+    way the compaction does. Keeping the two separate is what stops a future caller from
+    silently disabling the guard by reaching for the baseline reset alone.
+
     Returns the updated (prev_total, no_progress_rounds) when the loop may continue."""
     total = critical + major
-    if prev_total is not None and total >= prev_total:
-        no_progress_rounds += 1
-    else:
-        no_progress_rounds = 0
+    if prev_total is not None:
+        no_progress_rounds = no_progress_rounds + 1 if total >= prev_total else 0
     if no_progress_rounds >= no_progress_limit:
         log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
             f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
@@ -575,7 +592,8 @@ def _track_finalize_convergence(critical: int, major: int, prev_total: int | Non
 
 def _auto_answer_finalize_round(clar_dir: Path, run_number: int, critical: int, major: int) -> None:
     """Answer what this round found — never apply here. The answers join the pending overlay
-    and are carried into the next evaluation; the PRD isn't touched until the compaction.
+    and are carried into the next evaluation; the PRD isn't touched until the next checkpoint
+    (_run_checkpoint) or the closing compaction, whichever comes first.
     Exits 1 if the auto-answer session failed."""
     config = load_config()
     applied_hashes = config.get("clarify_applied_hashes", {}) or {}
@@ -604,15 +622,105 @@ def _auto_answer_finalize_round(clar_dir: Path, run_number: int, critical: int, 
             "recommendation.")
 
 
+def _snapshot_and_commit(config: dict, label: str, commit_message: str) -> None:
+    """Back the PRD up as a ZIP, then commit the workspace — the two durability halves a
+    checkpoint and a successful finalize run share.
+
+    Backup BEFORE commit, deliberately: commit_workspace_changes runs `git add -A` over the
+    whole workspace root, so a ZIP written first is part of the commit it belongs to.
+
+    Neither step can fail the run. Both helpers return (outcome, detail) and never raise, and
+    this only logs what they say — the same treatment the QA-pass commit gets in
+    tempa_session_runners. Killing an unattended finalize run that has spent hours of agent
+    time because a disk filled up, or because git has no user.email configured, would destroy
+    far more than the snapshot was protecting."""
+    if get_finalize_checkpoint_backup(config):
+        outcome, detail = backup_prd_zip(config, label)
+        log(f"PRD backup {outcome}: {detail}")
+    if get_finalize_checkpoint_commit(config):
+        outcome, detail = commit_workspace_changes(
+            get_workspace(config).get("root", ""), commit_message)
+        log(f"Checkpoint commit {outcome}: {detail}")
+
+
+def _finalize_success_backup() -> None:
+    """Snapshot and commit the PRD as the final, ready-to-implement version, right before a
+    `clarify --finalize` run exits successfully.
+
+    Runs on BOTH success exits (a clean verification round, and the "everything is already
+    applied" exit inside _compact_resolutions_into_documents), and runs regardless of
+    finalize_checkpoint_rounds — a run short enough never to checkpoint, or one with
+    checkpoints switched off entirely, still ends with a PRD worth keeping. Only the
+    backup/commit toggles gate it."""
+    _snapshot_and_commit(
+        load_config(), "final",
+        "tempa: clarification finalized — PRD ready for implementation")
+
+
+def _run_checkpoint(clar_dir: Path, run_number: int) -> None:
+    """Periodic mid-loop save point (config.json's finalize_checkpoint_rounds): write the
+    answers accumulated so far into the PRD/spec, snapshot the PRD as a ZIP, and commit.
+
+    Deliberately NOT routed through _compact_resolutions_into_documents. That function exits 0
+    on an empty backlog — correct at the end of a run, fatal in the middle of one — and spends
+    the MAX_COMPACTIONS budget, which bounds only the "verification came back dirty" rewrite
+    loop. A checkpoint is a save point, not a rewrite attempt, so it goes straight to
+    _run_apply_step and never touches that budget."""
+    config = load_config()
+    applied_hashes = config.get("clarify_applied_hashes", {}) or {}
+    unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
+    if not unanswered_files and not unapplied_files:
+        log(f"Checkpoint at round {run_number}: every recorded answer is already in the "
+            "PRD/spec — nothing to save.")
+        return
+
+    header = (f"CHECKPOINT — round {run_number} — apply, back up, commit — "
+              f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    _banner(header)
+    log(header, to_console=False)
+    log(f"Writing {len(unanswered_files) + len(unapplied_files)} pending file(s) of "
+        "resolutions into the PRD/spec documents...")
+
+    # Resume the most recent clarify session, which here is the AUTO-ANSWER session that just
+    # ran (run_clarification_session records its id for every clarify-stage session, and
+    # auto-answer runs on the clarify_apply backend). Unlike the compaction's case — where the
+    # resumed session is the evaluate pass — that session is the one that just worked out the
+    # very answers this apply has to write, so its context is exactly what's needed. Checked
+    # against the clarify_apply backend because that's the CLI that will attempt the --resume.
+    resume_sid = get_clarify_session_id(config, get_backend(config, "clarify_apply"))
+    _exit_if_graceful_stop("writing this checkpoint's answers into the PRD/spec")
+    if not _run_apply_step(config, resume_session_id=resume_sid):
+        log(f"Checkpoint apply at round {run_number} failed — stopping the loop.")
+        notify_attention(
+            AttentionEventType.CLARIFICATION_FAILED, "Clarification",
+            f"Clarification checkpoint apply round {run_number} failed",
+            "Review the apply session log and resolve the failure before continuing.",
+            details={"round": run_number},
+        )
+        sys.exit(1)
+
+    # Re-read: the apply rewrote clarify_applied_hashes and last_clarification_action.
+    _snapshot_and_commit(load_config(), f"round{run_number}",
+                         f"tempa: clarification checkpoint — round {run_number}")
+
+
 def run_clarify_finalize(skip_minor: bool = False) -> None:
     """Unattended clarification: loop evaluate -> auto-answer until an evaluation reports no
     critical/major findings, then write every accumulated answer into the PRD/spec in ONE
     apply pass ("compaction"), then run one more evaluation to verify the updated documents.
 
-    No apply runs inside the loop. Each evaluate carries every answer recorded so far as the
+    No apply runs *per round*. Each evaluate carries every answer recorded so far as the
     pending overlay (_pending_overlay), so the agent judges the spec as it will read once
     those decisions are applied — which is what makes a per-round PRD rewrite unnecessary.
     One apply at the end replaces N of them.
+
+    What that costs is durability: a long run holds hours of agent work in an overlay the PRD
+    has never seen, with no restorable point until the very last step. `finalize_checkpoint_rounds`
+    (default 5) buys some of it back — every N answering rounds the loop stops to apply, snapshot
+    the PRD as a ZIP, and commit (_run_checkpoint). That is a trade for recoverability, not for
+    evaluation quality: the overlay already made those applies unnecessary for correctness. Set
+    it to null to get the pure one-apply-at-the-end behavior. A successful run always ends with
+    one final snapshot and commit (_finalize_success_backup), whatever the cadence.
 
     The closing verification round is not optional bookkeeping: apply is an agent rewriting
     prose, so the only way to know the PRD itself (with no overlay in front of it) is clean
@@ -642,17 +750,29 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
 
     max_run = config.get("max_clarification_run", 20)
     no_progress_limit = get_finalize_no_progress_rounds(config)
+    # Snapshotted at run start alongside max_run and no_progress_limit, and for the same
+    # reason: it is loop cadence, and "checkpoint every 5" means nothing definite if the loop
+    # re-reads it every round. Saving a new value mid-run warns about exactly that — see
+    # _FINALIZE_SNAPSHOT_LIMITS in dashboard_runs.py. The backup/commit toggles below are
+    # per-action switches instead, and _snapshot_and_commit reads those fresh every time.
+    checkpoint_rounds = get_finalize_checkpoint_rounds(config)
     run_number = 0
     no_progress_rounds = 0
     prev_total = None  # critical+major from the previous round, for the convergence guard
     compactions = 0
+    # Answering rounds whose results are still only in the overlay. Counted rather than
+    # derived from run_number % checkpoint_rounds: what a checkpoint is for is "N rounds of
+    # answers have piled up since anything was last written", and modulo would instead fire
+    # a full apply session right after a compaction had already emptied the overlay.
+    rounds_since_checkpoint = 0
     # "evaluate" while findings are still being found and answered; "verify" for the round
     # that checks the PRD right after a compaction (same prompt, but with an empty overlay
     # in front of it, since applying just emptied it).
     phase = "evaluate"
 
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-            f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | max_runs={max_run}")
+            f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | "
+            f"max_runs={max_run} | checkpoints={checkpoint_rounds or 'off'}")
 
     # Same reasoning as tempa_implement.main(): a stop is a request aimed at THIS run, so
     # a sentinel left behind by a previous one must not stop this one before it starts.
@@ -686,6 +806,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
                     "recorded resolution. Clarify (finalize) done.")
                 if minor > 0:
                     log(f"Still {minor} minor finding(s) — considered acceptable.")
+                _finalize_success_backup()
                 sys.exit(0)
 
             compactions = _compact_resolutions_into_documents(
@@ -696,6 +817,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             # against it would trip the convergence guard on the very first verification.
             prev_total = None
             no_progress_rounds = 0
+            # The compaction just wrote the whole overlay — nothing has piled up since.
+            rounds_since_checkpoint = 0
             phase = "verify"
             log("Resolutions written into the PRD/spec. Running a verification evaluation "
                 "against the updated documents...")
@@ -705,6 +828,22 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             critical, major, prev_total, no_progress_rounds, no_progress_limit, max_run)
         _auto_answer_finalize_round(clar_dir, run_number, critical, major)
         phase = "evaluate"
+        rounds_since_checkpoint += 1
+        if checkpoint_rounds and rounds_since_checkpoint >= checkpoint_rounds:
+            _run_checkpoint(clar_dir, run_number)
+            rounds_since_checkpoint = 0
+            # prev_total is deliberately LEFT ALONE, unlike after a compaction. The overlay
+            # means an evaluate round already counts findings as the PRD will read once the
+            # recorded answers are applied, so applying them changes nothing about what the
+            # next round measures — the counts stay comparable and the convergence guard keeps
+            # working. (The compaction resets it for a different reason: the round before one
+            # is clean by definition, so 0 -> anything would read as a round that lost ground.)
+            # Resetting here would also make the guard unreachable at a low interval, since
+            # every comparison would be the one being skipped.
+            # phase stays "evaluate". A clean next round then lands in
+            # _compact_resolutions_into_documents, which finds an empty backlog and exits 0
+            # with an accurate message BEFORE spending a compaction — so nothing is wasted by
+            # not calling it "verify".
 
     log(f"Clarify (finalize) reached the {max_run}-run limit. Stopping.")
     notify_attention(
