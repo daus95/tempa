@@ -94,8 +94,9 @@ fallout of answering a major, arriving exactly where it can be seen.
 
 A phase is settled when a round reports nothing left in it **and** that result is backed up:
 
-- by a [coverage ledger](#the-coverage-ledger) that is both complete (`unchecked="0"`) and no
-  smaller than the previous round's table — one clean round is then enough; or
+- by a [coverage ledger](#the-coverage-ledger) that accounts for every finding the previous
+  round raised, is complete (`unchecked="0"`), and is no smaller than the previous round's
+  table — one clean round is then enough; or
 - failing that, by a **second** clean round in a row.
 
 One clean round on its own is never enough. The behavior this replaces had a round report
@@ -136,8 +137,13 @@ writing any findings, the evaluation writes a ledger to a `coverage/` subfolder 
 - **Part 2 — the check table.** One row per (axis, subject) pair over the six critical axes,
   each with a verdict of `OK`, `CRITICAL`, `N/A` — or **blank**, meaning the row could not be
   decided. A row that cannot be decided is unchecked, not OK.
+- **Part 3 — the carry-over table.** One row per finding the *previous* round raised at a
+  severity this round is scoped to, each with a verdict of `RESOLVED` (naming the decision or
+  section that closes it), `STILL OPEN` (naming the id it was re-raised as this round), or
+  `WITHDRAWN` (saying what the previous round misread). Wrapped in
+  `<!-- coverage:carried -->` / `<!-- coverage:endcarried -->`, since it is read mechanically.
 - A closing `<!-- coverage:summary checks="…" ok="…" critical="…" na="…" unchecked="…" -->`
-  marker, which is the only part read mechanically.
+  marker.
 
 The findings file is then a projection of the `CRITICAL` rows.
 
@@ -157,6 +163,28 @@ coming back materially smaller than the previous round's has lost rows rather th
 having lost surface. A ledger under 85% of the previous round's row count is therefore treated
 exactly like no ledger at all: the phase falls back to needing a second clean round. The
 session log says so when it happens.
+
+### Nothing drops out silently
+
+Re-deriving the inventory every round is what keeps a round honest about the spec, but it is
+also how a finding disappears: round N raises it, round N+1 simply doesn't list that row, and
+nobody notices. This is not hypothetical — four runs of the same round over the same PRD
+produced overlapping but *different* critical sets, and their union was larger than any one of
+them.
+
+Part 3 is the answer to that, and it is the one part of the ledger that may **not** be
+re-derived. Tempa reads the previous round's findings itself, passes their ids and titles into
+the prompt, and afterwards checks that the carry-over table accounts for every one of them.
+Only the text between the `coverage:carried` markers is searched, because finding ids restart
+at `C1` each round and a bare `C1` elsewhere in the ledger is this round's own finding.
+
+An id the table never mentions counts exactly like an unchecked row: the phase does not settle
+on that round, and the session log names the ids that went missing. An inventory may
+legitimately be grouped a new way from one round to the next; a finding somebody already
+raised may not quietly stop existing.
+
+Minor findings are never carried, even when they are being looked for — they block nothing, so
+an accountability table over them would be cost with no decision behind it.
 
 Each round carries the previous ledger and must re-derive the inventory rather than trust it:
 a ledger says what was checked, not what is true, so a screen missing from it *is* the miss

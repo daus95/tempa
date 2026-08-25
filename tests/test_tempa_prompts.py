@@ -501,6 +501,25 @@ def test_an_oversized_ledger_is_truncated_with_an_instruction(tmp_path, isolate_
     assert "this ledger was truncated" in prompt
 
 
+def test_clarification_prompt_lists_the_findings_to_account_for(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${carried_findings}")
+    prompt = tp.build_clarification_prompt(_sample_config(tmp_path), carried_findings=[
+        ("C1", "critical", "Void has no screen", True),
+        ("M2", "major", "invoice_no has no generator", False),
+    ])
+    assert "- C1 (critical, answered) — Void has no screen" in prompt
+    assert "- M2 (major, unanswered) — invoice_no has no generator" in prompt
+
+
+def test_nothing_to_carry_says_so_and_asks_for_no_table(tmp_path, isolate_tempa_paths):
+    """Rather than leaving the agent to invent an empty table whose markers the parser would
+    then read as an account of nothing."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${carried_findings}")
+    prompt = tp.build_clarification_prompt(_sample_config(tmp_path))
+    assert "nothing to carry over" in prompt
+    assert "Omit Part 3's table" in prompt
+
+
 def test_build_apply_clarification_prompt(tmp_path, isolate_tempa_paths):
     _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification", "APPLY ${sources.prd} FILES:${clarification_files}")
     config = _sample_config(tmp_path)

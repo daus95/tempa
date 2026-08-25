@@ -13,3 +13,4 @@ __pycache__/
 .tempa/
 
 **/claude.md
+*.egg-info/

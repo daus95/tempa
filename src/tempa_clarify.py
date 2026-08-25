@@ -15,6 +15,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from dashboard_clarify_parse import (
     _file_started_at,
@@ -112,6 +113,33 @@ _COVERAGE_DIRNAME = "coverage"
 
 _COVERAGE_SUMMARY_RE = re.compile(r"<!--\s*coverage:summary\s+([^>]*?)-->", re.IGNORECASE)
 _COVERAGE_ATTR_RE = re.compile(r'(?P<key>[a-z_]+)\s*=\s*"(?P<value>-?\d+)"', re.IGNORECASE)
+_COVERAGE_CARRIED_RE = re.compile(
+    r"<!--\s*coverage:carried\s*-->(?P<body>.*?)<!--\s*coverage:endcarried\s*-->",
+    re.IGNORECASE | re.DOTALL)
+
+# Which of the previous round's findings a round has to account for, per severity scope. Minor
+# findings are never carried even when they are being looked for: they block nothing, so an
+# accountability table over them would be cost without a decision behind it.
+_CARRIED_SEVERITIES = {
+    "critical": ("critical",),
+    "critical_major": ("critical", "major"),
+    "all": ("critical", "major"),
+}
+
+
+class LedgerEvidence(NamedTuple):
+    """What the coverage ledger a round wrote is worth as evidence that its sweep was complete.
+
+    Bundled rather than passed as three arguments because the three are only ever read
+    together, by _ledger_confirms_sweep, and every one of them can independently sink the same
+    conclusion. The default is the honest "no ledger at all" case.
+
+    `summary` is the parsed coverage:summary marker; `previous_checks` the row count of the
+    ledger this one was judged against; `unaccounted` the ids of findings the previous round
+    raised that this ledger's carry-over table never mentions."""
+    summary: dict | None = None
+    previous_checks: int | None = None
+    unaccounted: tuple[str, ...] = ()
 
 
 def _phase_scope(phase: str, phases_on: bool, skip_minor: bool) -> str:
@@ -150,35 +178,45 @@ def _next_phase(phase: str, phases_on: bool, skip_minor: bool) -> str | None:
     return None
 
 
-def _ledger_confirms_sweep(coverage: dict | None, previous_checks: int | None) -> bool:
-    """Whether this round's coverage ledger is evidence that its sweep was exhaustive.
+def _ledger_confirms_sweep(evidence: LedgerEvidence) -> bool:
+    """Whether a round's coverage ledger is evidence that its sweep was exhaustive. Three
+    things have to hold, and each was added because the one before it turned out not to be
+    enough on its own.
 
-    `unchecked == 0` on its own is not. Two runs of the same round, over the same PRD, on the
-    same prompt and the same model, produced check tables of 113 rows and 64 — both reporting
-    zero unchecked. The marker attests that every row the agent LISTED got a verdict, never
-    that it listed every row there is, and the table's construction is still its judgement:
-    that judgement varied by 43%.
+    NOTHING WAS DROPPED. Every finding the previous round raised is accounted for in this
+    ledger's carry-over table (Part 3). Re-deriving the inventory each round is what keeps a
+    round honest about the spec, but it also lets a finding vanish by simply not being listed
+    again — four runs of the same round over the same PRD produced overlapping but different
+    critical sets, none of them complete. An inventory may legitimately be grouped a new way; a
+    finding somebody already raised may not quietly stop existing.
 
-    Size is the check available for that. Within a phase the spec only gains surface —
-    answering adds screens, fields and rules, and a re-derived inventory has to cover them —
-    so a table coming back materially smaller than the previous round's has lost rows rather
-    than the spec having lost surface. Such a round is treated exactly like one with no ledger
-    at all: it needs a second clean round behind it.
+    NOTHING WAS LEFT UNDECIDED. `unchecked == 0`, the ledger's own count of rows it could not
+    call.
 
-    A malformed marker (no `checks`, or a non-positive one) is no evidence either, for the
-    same reason: nothing in it can be compared."""
-    if not coverage or coverage.get("unchecked") != 0:
+    THE TABLE DID NOT SHRINK. Two runs of the same round — same PRD, prompt and model —
+    produced tables of 113 rows and 64, both reporting zero unchecked. The marker attests that
+    every row the agent LISTED got a verdict, never that it listed every row there is. Within a
+    phase the spec only gains surface, so a table materially smaller than the previous round's
+    has lost rows rather than the spec having lost surface.
+
+    Failing any of them makes the round exactly as good as one that wrote no ledger at all: it
+    needs a second clean round behind it. A malformed marker (no `checks`, or a non-positive
+    one) fails for the same reason as a shrunken one — nothing in it can be compared."""
+    if evidence.unaccounted:
         return False
-    checks = coverage.get("checks")
+    summary = evidence.summary
+    if not summary or summary.get("unchecked") != 0:
+        return False
+    checks = summary.get("checks")
     if not isinstance(checks, int) or checks <= 0:
         return False
-    if previous_checks is None or previous_checks <= 0:
+    if evidence.previous_checks is None or evidence.previous_checks <= 0:
         return True
-    return checks >= previous_checks * _LEDGER_SHRINK_TOLERANCE
+    return checks >= evidence.previous_checks * _LEDGER_SHRINK_TOLERANCE
 
 
-def _phase_may_advance(blocking: int, coverage: dict | None, clean_rounds: int,
-                       phases_on: bool = True, previous_checks: int | None = None) -> bool:
+def _phase_may_advance(blocking: int, evidence: LedgerEvidence, clean_rounds: int,
+                       phases_on: bool = True) -> bool:
     """Whether a phase's sweep is finished, given this round's blocking-severity count, the
     coverage ledger that round produced, and how many clean rounds in a row it has now had
     (this one included).
@@ -200,7 +238,7 @@ def _phase_may_advance(blocking: int, coverage: dict | None, clean_rounds: int,
         return False
     if not phases_on:
         return True
-    if _ledger_confirms_sweep(coverage, previous_checks):
+    if _ledger_confirms_sweep(evidence):
         return True
     return clean_rounds >= _PHASE_CLEAN_ROUNDS_WITHOUT_LEDGER
 
@@ -274,52 +312,108 @@ def _carried_ledger_checks(carried: tuple[str, str] | None) -> int | None:
     return checks if isinstance(checks, int) and checks > 0 else None
 
 
-def _round_coverage(clar_dir: Path, carried: tuple[str, str] | None) -> dict[str, int] | None:
-    """The coverage summary of the ledger the evaluate session that just ran wrote, logged as
-    it is read. None when that session wrote no ledger, or wrote one with no readable marker —
-    two cases the caller treats identically, because they mean the same thing: this round
-    produced no checkable evidence that its sweep was complete.
+def _previous_round_findings(clar_dir: Path, severity_scope: str) -> list[tuple[str, str, str, bool]]:
+    """(id, severity, title, answered) for every finding the most recent round raised at a
+    severity `severity_scope` covers — what the next round's ledger has to account for.
 
-    `carried` is the ledger handed TO that session, so a ledger with the same file name is the
-    old one still sitting there rather than a new one."""
+    Most recent by _file_started_at, which reads the round's timestamp out of the file NAME
+    rather than its mtime: answering a finding rewrites the file, and mtime would make the
+    oldest round look like the newest the moment somebody worked through its answers."""
+    files = _clarification_result_files(clar_dir)
+    if not files:
+        return []
+    latest = max(files, key=_file_started_at)
+    try:
+        body = latest.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    items, _ = parse_file(latest, body, 0)
+    wanted = _CARRIED_SEVERITIES.get(severity_scope, ("critical", "major"))
+    return [(item.raw_id, item.severity, item.title, bool(item.resolved_answer.strip()))
+            for item in items if item.severity in wanted]
+
+
+def _carryover_gaps(ledger_body: str, carried_ids: list[str]) -> list[str]:
+    """Which of `carried_ids` the ledger's carry-over table (Part 3) never mentions.
+
+    Only the block between the `coverage:carried` markers is searched, never the whole ledger:
+    finding ids restart at C1 every round, so a bare "C1" anywhere else in the file is this
+    round's own finding and would answer for the previous round's by coincidence.
+
+    A ledger with no carry-over block at all leaves every id unaccounted, which is the correct
+    reading — an absent table accounts for nothing."""
+    if not carried_ids:
+        return []
+    match = _COVERAGE_CARRIED_RE.search(ledger_body)
+    if match is None:
+        return list(carried_ids)
+    accounted = set()
+    for line in match.group("body").splitlines():
+        line = line.strip()
+        if line.startswith("|"):
+            accounted.add(line.strip("|").split("|")[0].strip())
+    return [raw_id for raw_id in carried_ids if raw_id not in accounted]
+
+
+def _ledger_evidence(clar_dir: Path, carried: tuple[str, str] | None,
+                     carried_ids: list[str]) -> LedgerEvidence:
+    """Everything about the ledger the evaluate session just wrote that bears on whether its
+    phase may be settled (_ledger_confirms_sweep), logged as it is read so an extra round
+    always has a stated reason.
+
+    `carried` is the ledger handed TO that session, so one with the same file name is the old
+    one still sitting there rather than a new one; `carried_ids` are the previous round's
+    findings that session was told to account for."""
+    previous_checks = _carried_ledger_checks(carried)
     latest = _latest_coverage_ledger(clar_dir)
     if latest is None or (carried is not None and latest[0] == carried[0]):
-        log("This round wrote no coverage ledger, so there is no record of what its critical "
-            "sweep actually checked — a clean result can't be confirmed from it.")
-        return None
+        log("This round wrote no coverage ledger, so there is no record of what its sweep "
+            "actually checked — a clean result can't be confirmed from it.")
+        return LedgerEvidence(None, previous_checks, tuple(carried_ids))
+
     summary = _parse_coverage_summary(latest[1])
     if summary is None:
         log(f"Coverage ledger {latest[0]} has no readable coverage:summary marker.")
-        return None
-    log(f"Coverage ledger {latest[0]}: "
-        + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
-    previous_checks = _carried_ledger_checks(carried)
-    if summary.get("unchecked") == 0 and not _ledger_confirms_sweep(summary, previous_checks):
+    else:
+        log(f"Coverage ledger {latest[0]}: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    gaps = _carryover_gaps(latest[1], carried_ids)
+    evidence = LedgerEvidence(summary, previous_checks, tuple(gaps))
+
+    if gaps:
+        log(f"That ledger never accounts for {len(gaps)} finding(s) the previous round raised "
+            f"({', '.join(gaps)}). A finding is closed by saying what became of it, never by "
+            "being left out of the next round's table.")
+    elif summary and summary.get("unchecked") == 0 and not _ledger_confirms_sweep(evidence):
         log(f"That ledger checks {summary.get('checks')} row(s) against the previous round's "
             f"{previous_checks} — too few to read its zero unchecked as an exhaustive sweep, "
             "since a re-derived inventory should cover at least what the last one did.")
-    return summary
+    return evidence
 
 
-def _build_evaluate_prompt(config: dict, clar_dir: Path, skip_minor: bool,
-                           severity_scope: str) -> tuple[str, tuple[str, str] | None]:
-    """The prompt for one evaluate pass, plus the coverage ledger it was handed — which the
-    caller needs afterwards to tell the ledger this round writes apart from the one it carried
-    in (see _round_coverage)."""
+def _build_evaluate_prompt(config: dict, clar_dir: Path, skip_minor: bool, severity_scope: str,
+                           ) -> tuple[str, tuple[str, str] | None, list[str]]:
+    """The prompt for one evaluate pass, plus the two things the caller has to check the
+    result against afterwards (_ledger_evidence): the coverage ledger this round was handed,
+    and the ids of the previous round's findings it was told to account for."""
     coverage_dir = _coverage_dir(clar_dir)
     coverage_dir.mkdir(parents=True, exist_ok=True)
     carried = _latest_coverage_ledger(clar_dir)
     if carried:
         log(f"Carrying the previous coverage ledger ({carried[0]}) into this evaluation.")
+    carried_findings = _previous_round_findings(clar_dir, severity_scope)
+    if carried_findings:
+        log(f"Carrying {len(carried_findings)} finding(s) from the previous round for this "
+            "round's ledger to account for one by one.")
     prompt = build_clarification_prompt(
         config, skip_minor, _log_pending_overlay(config, clar_dir),
-        severity_scope=severity_scope, coverage_dir=str(coverage_dir), previous_ledger=carried)
-    return prompt, carried
+        severity_scope=severity_scope, coverage_dir=str(coverage_dir), previous_ledger=carried,
+        carried_findings=carried_findings)
+    return prompt, carried, [raw_id for raw_id, _, _, _ in carried_findings]
 
 
 def _advance_phase(phase: str, phases_on: bool, skip_minor: bool, critical: int, blocking: int,
-                   coverage: dict | None, clean_rounds: int,
-                   previous_checks: int | None = None) -> tuple[str, int, str]:
+                   evidence: LedgerEvidence, clean_rounds: int) -> tuple[str, int, str]:
     """Where the phase machine goes after a round that reported `critical` critical findings
     and `blocking` findings in the phase's own severities. Shared by manual clarification and
     the finalize loop so the two can never drift into disagreeing about what settles a phase.
@@ -337,7 +431,7 @@ def _advance_phase(phase: str, phases_on: bool, skip_minor: bool, critical: int,
     clean_rounds = 0 if blocking else clean_rounds + 1
     if phases_on and phase != _PHASE_CRITICAL and critical:
         return _PHASE_CRITICAL, 0, "demoted"
-    if not _phase_may_advance(blocking, coverage, clean_rounds, phases_on, previous_checks):
+    if not _phase_may_advance(blocking, evidence, clean_rounds, phases_on):
         return phase, clean_rounds, "stay"
     following = _next_phase(phase, phases_on, skip_minor)
     if following is None:
@@ -505,7 +599,8 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
 
     start_ts = time.time()
     before_files = _clarification_dir_snapshot(clar_dir)
-    prompt, carried_ledger = _build_evaluate_prompt(config, clar_dir, skip_minor, severity_scope)
+    prompt, carried_ledger, carried_ids = _build_evaluate_prompt(
+        config, clar_dir, skip_minor, severity_scope)
     if not run_with_usage_limit_retry(
         lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
         "Clarification evaluation",
@@ -517,8 +612,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     if _state.auth_error_hit:
         sys.exit(3)
 
-    coverage = _round_coverage(clar_dir, carried_ledger)
-    previous_checks = _carried_ledger_checks(carried_ledger)
+    evidence = _ledger_evidence(clar_dir, carried_ledger, carried_ids)
     config = load_config()
     findings = config.get("last_clarification_findings", {})
     critical = findings.get("critical", 0)
@@ -537,7 +631,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     blocking = _phase_blocking_count(phase, critical, major, minor)
     next_phase, clean_rounds, transition = _advance_phase(
-        phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds, previous_checks)
+        phase, phases_on, skip_minor, critical, blocking, evidence, clean_rounds)
     _save_phase_state(config, next_phase, clean_rounds)
     save_config(config)
     report_files = _clarification_report_files(clar_dir, before_files)
@@ -833,11 +927,10 @@ def _exit_if_graceful_stop(about_to: str) -> None:
 
 def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, round_kind: str,
                              skip_minor: bool, severity_scope: str = "critical_major",
-                             ) -> tuple[int, int, int, dict | None, int | None]:
+                             ) -> tuple[int, int, int, LedgerEvidence]:
     """Run one evaluate pass of the finalize loop and return its (critical, major, minor)
-    finding counts, the coverage summary of the ledger it wrote, and the row count of the
-    ledger it was handed (the baseline that summary is judged against — see
-    _ledger_confirms_sweep), having already recorded the counts in config.json.
+    finding counts plus what the coverage ledger it wrote is worth as evidence
+    (_ledger_evidence), having already recorded the counts in config.json.
 
     `round_kind` is "evaluate" or "verify" (config.json's "last_finalize_phase") — which kind
     of round this is, NOT which severity phase it belongs to. `severity_scope` is the phase's
@@ -851,7 +944,8 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
     Exits the process rather than returning if the session couldn't run — 3 on an
     authentication error, 1 on any other failure, matching what a failed manual round does.
     """
-    prompt, carried_ledger = _build_evaluate_prompt(config, clar_dir, skip_minor, severity_scope)
+    prompt, carried_ledger, carried_ids = _build_evaluate_prompt(
+        config, clar_dir, skip_minor, severity_scope)
 
     start_ts = time.time()
     before_files = _clarification_dir_snapshot(clar_dir)
@@ -875,7 +969,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
         )
         sys.exit(1)
 
-    coverage = _round_coverage(clar_dir, carried_ledger)
+    evidence = _ledger_evidence(clar_dir, carried_ledger, carried_ids)
     config = load_config()
     findings = config.get("last_clarification_findings", {})
     critical = findings.get("critical", 0)
@@ -895,7 +989,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
     log(f"Round #{run_number} ({round_kind}) findings: critical={critical}, major={major}, minor={minor}")
-    return critical, major, minor, coverage, _carried_ledger_checks(carried_ledger)
+    return critical, major, minor, evidence
 
 
 def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compactions: int,
@@ -1281,14 +1375,13 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         _banner(round_header)
         log(round_header, to_console=False)
 
-        critical, major, minor, coverage, previous_checks = _finalize_evaluate_round(
+        critical, major, minor, evidence = _finalize_evaluate_round(
             load_config(), clar_dir, run_number, round_kind, skip_minor, severity_scope)
 
         blocking = _phase_blocking_count(severity_phase, critical, major, minor)
         settled_phase = severity_phase
         severity_phase, clean_rounds, transition = _advance_phase(
-            settled_phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds,
-            previous_checks)
+            settled_phase, phases_on, skip_minor, critical, blocking, evidence, clean_rounds)
         phase_config = load_config()
         _save_phase_state(phase_config, severity_phase, clean_rounds)
         save_config(phase_config)
@@ -1350,8 +1443,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             # Clean, but nothing checkable backs that up yet (_phase_may_advance). One more
             # round at the same scope confirms it, and there is nothing to answer in between.
             log(f"Nothing left in the {_phase_label(settled_phase)} this round, but no "
-                "coverage ledger complete enough to stand behind it — running one more round "
-                "at the same scope to confirm before moving on.")
+                "coverage ledger complete enough to stand behind it (see the line above) — "
+                "running one more round at the same scope to confirm before moving on.")
             round_kind = "evaluate"
             continue
 

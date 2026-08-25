@@ -683,9 +683,30 @@ def _render_previous_ledger(previous_ledger: tuple[str, str] | None) -> str:
     return f"--- {name} ---\n\n{body}"
 
 
+def _render_carried_findings(carried: list[tuple[str, str, str, bool]] | None) -> str:
+    """Render the ${carried_findings} block — the previous round's findings, which this round's
+    ledger has to account for one by one (Part 3 of prompt/clarification.md).
+
+    Each entry is (id, severity, title, answered). The answered flag is stated because it
+    changes what a RESOLVED verdict has to point at: an answered finding should be closed by a
+    decision in the overlay, while an unanswered one can only have been closed by the spec
+    already saying something the previous round missed.
+
+    None/empty renders an explicit "nothing to carry" line and tells the agent to omit the
+    table, rather than leaving it to invent an empty one whose markers the parser would then
+    read as an account of nothing."""
+    if not carried:
+        return ("(No previous round at these severities — there is nothing to carry over. "
+                "Omit Part 3's table and its markers entirely.)")
+    lines = [f"- {raw_id} ({severity}, {'answered' if answered else 'unanswered'}) — {title}"
+             for raw_id, severity, title, answered in carried]
+    return "\n".join(lines)
+
+
 def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: list | None = None,
                                severity_scope: str | None = None, coverage_dir: str = "",
-                               previous_ledger: tuple[str, str] | None = None) -> str:
+                               previous_ledger: tuple[str, str] | None = None,
+                               carried_findings: list[tuple[str, str, str, bool]] | None = None) -> str:
     """`pending` is the pending-resolution overlay: every answered clarification finding
     whose answer hasn't been written into the PRD yet (see
     dashboard_clarify_parse.pending_resolutions, computed by tempa_clarify._pending_overlay).
@@ -702,7 +723,13 @@ def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: 
 
     `coverage_dir` and `previous_ledger` drive the coverage ledger — the table the critical
     pass fills in instead of writing a free-form report (see tempa_clarify._coverage_dir /
-    _latest_coverage_ledger). `previous_ledger` is a (file_name, text) pair or None."""
+    _latest_coverage_ledger). `previous_ledger` is a (file_name, text) pair or None.
+
+    `carried_findings` is the previous round's findings (id, severity, title, answered) that
+    this round's ledger has to account for one by one. Re-deriving the inventory every round is
+    what keeps a round honest about the spec, but it also lets a finding vanish by simply not
+    being listed again — four runs of the same round over the same PRD produced overlapping but
+    different critical sets, so this is not hypothetical."""
     sources = get_sources(config)
     template = load_prompt("clarification")
     if severity_scope not in SEVERITY_SCOPES:
@@ -715,6 +742,7 @@ def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: 
         "finding_scope": SEVERITY_SCOPES[severity_scope],
         "coverage_dir": coverage_dir,
         "previous_coverage_ledger": _render_previous_ledger(previous_ledger),
+        "carried_findings": _render_carried_findings(carried_findings),
     }
     return build_prompt(template, params)
 

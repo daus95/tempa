@@ -69,6 +69,32 @@ PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of 
 
 A row you cannot decide is UNCHECKED: leave its verdict cell empty rather than guessing. An honest unchecked row tells the next round exactly where to look; a guessed OK is the miss that costs a full round.
 
+PART 3 — THE CARRY-OVER TABLE. Below is every finding the previous round raised at a severity this round is scoped to. Each one gets exactly one row here saying what became of it. Wrap the table in these two markers exactly as shown — it is read mechanically, and an id missing from it counts the same as a row nobody checked:
+
+```
+<!-- coverage:carried -->
+| prior finding | verdict | where it stands now |
+|---------------|---------|---------------------|
+| C1 | RESOLVED | the overlay's decision on it adds the Sales page and its Void action |
+| C2 | STILL OPEN | re-raised this round as C1 |
+| C3 | WITHDRAWN | §3's ERD does define it — the previous round misread that section |
+<!-- coverage:endcarried -->
+```
+
+`verdict` is exactly one of:
+
+- RESOLVED — a decision in the overlay above, or the PRD as it now reads, closes it. Name the decision or the section that does. "It looks fine now" accounts for nothing.
+- STILL OPEN — it is still true of the spec. Raise it again as a finding this round and name the id it became. A finding that is still open and is not re-raised is the single most expensive thing this table exists to prevent.
+- WITHDRAWN — it was never a finding at this severity. Say exactly what the previous round misread. Use this sparingly, and never to make the list shorter.
+
+Part 1 is re-derived every round and may legitimately come out different. Part 3 is not: an inventory can be grouped a new way, but a finding somebody already raised cannot quietly stop existing. Account for every id below, including the ones you disagree with.
+
+=== FINDINGS THE PREVIOUS ROUND RAISED ===
+
+${carried_findings}
+
+=== END FINDINGS THE PREVIOUS ROUND RAISED ===
+
 Finish the ledger with this marker, exactly once, as its LAST line. It is read mechanically, so keep the attribute names, the order and the quoting exactly as shown:
 
 ```
@@ -81,12 +107,13 @@ Write the ledger even when the round finds nothing. A round reporting zero criti
 
 ${previous_coverage_ledger}
 
-Rules for using it — follow all four:
+Rules for using it — follow all five:
 
 1. RE-DERIVE, DO NOT TRUST. Build Part 1 from the spec and the overlay again this round. A previous ledger tells you what was checked, not what is true: if it is missing a screen the spec has, that omission IS the miss you are hunting.
 2. RE-LIST EVERY ROW. This round's ledger has to be complete on its own. A row whose subject and inputs are unchanged since the previous round, and whose verdict was OK, may be carried over without re-arguing it — but it must still appear, with its verdict, or the counts mean nothing.
 3. NEW SURFACE, NEW ROWS. Everything the overlay has added since that ledger — a screen, a field, an endpoint, a rule, a state — is inventory now, and every axis that quantifies over it gets its own row. This is where a decision that added something without wiring it in becomes visible.
 4. AN UNCHECKED ROW IS THE FIRST THING TO CHECK. Any row the previous ledger left with an empty verdict is this round's highest priority.
+5. NOTHING DROPS OUT SILENTLY. Re-deriving the inventory is what keeps a round honest about the spec; it is not licence to lose a finding. Anything the previous round raised is accounted for in Part 3 above, one row each, whatever the re-derived inventory looks like.
 
 === END COVERAGE LEDGER ===
 
