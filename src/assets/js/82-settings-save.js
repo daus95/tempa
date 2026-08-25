@@ -235,8 +235,6 @@ function buildSettingsPayload() {
     max_clarification_run: settingsMaxClarificationRun.value,
     finalize_no_progress_rounds: settingsFinalizeNoProgressRounds.value,
     finalize_checkpoint_rounds: settingsFinalizeCheckpointRounds.value,
-    finalize_checkpoint_backup: settingsFinalizeCheckpointBackup.checked,
-    finalize_checkpoint_backup_dir: settingsFinalizeCheckpointDir.value,
     finalize_checkpoint_commit: settingsFinalizeCheckpointCommit.checked,
     qa_loop_strikes: settingsQaLoopStrikes.value,
     max_qa_fail_rounds: settingsMaxQaFailRounds.value,
@@ -380,23 +378,3 @@ settingsAllowFinalizeWithCritical.addEventListener("change", async () => {
 });
 
 
-// Backup Folder's native picker. Nothing is saved here — the chosen path just lands in the
-// text input, and the user still has to press Save Settings. An unavailable picker and a
-// cancel both come back 200/ok:false (see pick_backup_folder), so only a real error toasts.
-settingsFinalizeCheckpointDirBtn.addEventListener("click", async () => {
-  settingsFinalizeCheckpointDirBtn.disabled = true;
-  try {
-    const res = await fetch("/api/settings/pick-backup-folder", { method: "POST" });
-    const data = await res.json();
-    if (data.cancelled) return;
-    if (!data.ok) { toast(data.error || "Could not choose a folder.", true); return; }
-    settingsFinalizeCheckpointDir.value = data.path;
-    // Assigning .value fires neither "input" nor "change", so the delegated dirty listener
-    // never sees it — without this the picked folder wouldn't count as an unsaved change.
-    recomputeSettingsDirty();
-  } catch (e) {
-    toast("Could not choose a folder.", true);
-  } finally {
-    settingsFinalizeCheckpointDirBtn.disabled = false;
-  }
-});

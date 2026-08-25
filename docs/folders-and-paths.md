@@ -78,14 +78,6 @@ throughout the config.
 | `infra` | infrastructure scripts (e.g. docker compose) | `infra` |
 | `archive` | archive of old specs no longer in use | `archive` |
 
-One more folder can appear directly under `root`, but it isn't part of the `workspace` table
-above and isn't created by `init`: **`prd-backup/`**, where `clarify --finalize` writes the PRD
-ZIP snapshots it takes at each checkpoint and at the end of a successful run. It is created on
-demand the first time a snapshot is written, its name/location comes from
-`finalize_checkpoint_backup_dir` (relative → under `root`, absolute → as-is; see
-[config-json.md](config-json.md)), and it deliberately sits outside `.tempa/` — unlike logs and
-QA reports, these are deliverables you may want to open or hand over. Nothing prunes it.
-
 ```bash
 tempa show-folders            # check the active layout + resolved absolute paths
 
@@ -150,8 +142,30 @@ different workspace and back never loses or overwrites anything.
 | `.tempa/specs/` | new specifications to be worked on (`workspace.specs`, `sources.prd/epics/clarifications` — see above) |
 | `.tempa/graceful-stop-implement`<br>`.tempa/graceful-stop-clarify` | transient — present only while a **Stop After Current Session/Round** request is pending. Its presence *is* the request (the timestamp inside is just for whoever finds a stray one); it's how the dashboard, or a second terminal, reaches a `tempa implement` / `clarify --finalize` running as its own process. Written by the dashboard button or `--stop-graceful`, and removed when the request is honoured, cancelled, or a new run starts. Safe to delete by hand — that simply cancels the request |
 
-`tempa init <abs>` creates `<abs>/.gitignore` (or appends to it) with a `.tempa/` entry, so
-none of this is committed to the workspace's own repo.
+`tempa init <abs>` writes ignore rules into `<abs>/.gitignore` (creating the file if needed)
+so none of this is committed to the workspace's own repo — **except the PRD**, which is
+deliberately kept in it so `git log`/`git diff` show how the specification changed, which is
+what makes the `clarify --finalize` checkpoint commits worth having (see
+[clarify-modes.md](clarify-modes.md)):
+
+```gitignore
+.tempa/*
+!.tempa/specs/
+.tempa/specs/*
+!.tempa/specs/prd/
+```
+
+It unwinds a level at a time rather than writing a single `.tempa/` entry because git cannot
+re-include a path whose parent directory is excluded — a bare `.tempa/` line makes the PRD
+unreachable no matter what `!` rules follow it. Re-running `init` on a workspace created
+before this (one whose `.gitignore` still carries that bare entry) **replaces** that one line
+with the block and leaves every other line untouched; opening a folder from the dashboard
+re-runs `init`, so this happens on its own. The rules are idempotent — running `init` again
+changes nothing.
+
+`tempa_git.ensure_prd_tracked` is the single implementation, and each `clarify --finalize`
+checkpoint calls it again just before committing, so a workspace that has stayed open since
+before the rules existed still gets its PRD committed rather than silently committing nothing.
 
 `init`/`close-folder` only ever touch `.active-workspace` (see above) and the contents of
 `.tempa/` — they never read or write anything under `docs/`, `adr/`, `src/`, `infra/`, or

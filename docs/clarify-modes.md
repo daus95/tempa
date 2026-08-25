@@ -264,10 +264,10 @@ The sequence:
    overlay — because applying is an agent rewriting prose, and the only way to know the
    documents themselves are clean is to evaluate them. A clean verification ends the run
    successfully (and leaves `last_clarification_action` at `evaluate`, which is what the
-   dashboard's finalize readiness looks for), after writing one last `-final` PRD snapshot
-   and commit — the version that is ready to be implemented. That closing snapshot runs on
-   every successful finish, including a short run that never checkpointed and a run with
-   checkpoints switched off; only the backup/commit toggles below can suppress it.
+   dashboard's finalize readiness looks for), after one last commit — the version that is
+   ready to be implemented. That closing commit runs on every successful finish, including a
+   short run that never checkpointed and a run with checkpoints switched off; only the commit
+   toggle below can suppress it.
 
 ### Checkpoints
 
@@ -276,27 +276,30 @@ a long unattended run holds hours of agent work in an overlay the documents have
 with no restorable point until the very last step.
 
 `finalize_checkpoint_rounds` (default `5`, dashboard Settings → Runs tab → "Checkpoint Every
-N Rounds") buys some of that back. Every N answering rounds the loop stops and does three
-things, in this order:
+N Rounds") buys some of that back. Every N answering rounds the loop stops and does two things:
 
 1. **Apply** — one apply pass writes everything answered so far into the PRD/spec.
-2. **Back up** — a timestamped ZIP of the PRD folder, identical to what the **Download PRD**
-   button produces, into the backup folder (`finalize_checkpoint_backup`,
-   `finalize_checkpoint_backup_dir`).
-3. **Commit** — `git add -A` + `git commit` in the working folder
-   (`finalize_checkpoint_commit`). After the backup, so the ZIP is part of the commit it
-   belongs to.
+2. **Commit** — `git add -A` + `git commit` in the working folder
+   (`finalize_checkpoint_commit`), so each checkpoint is a readable diff of what that stretch
+   of rounds actually changed in the document.
+
+That second step only means anything because the PRD is kept in the repo on purpose. It lives
+under `.tempa/`, which `tempa init` git-ignores wholesale — so Tempa writes ignore rules that
+carve out an exception for `.tempa/specs/prd/` while leaving logs, QA/verify reports,
+`config.json` and the generated epic/clarification specs ignored. `init` writes them when a
+workspace is created or reopened, and each checkpoint re-checks them before committing. See
+[folders-and-paths.md](folders-and-paths.md).
 
 Set the interval to blank for no checkpoints at all — the pure one-apply-at-the-end behavior
 finalize had before. Each checkpoint costs one extra agent session, so `1` (apply after every
 round) is the most expensive setting; the trade being made is recoverability, not evaluation
 quality, since the overlay already made per-round applies unnecessary for correctness.
 
-Backing up and committing are **best-effort**: whatever they report is logged and the run
-carries on either way, because losing an unattended run's whole clarification effort over a
-full disk or a missing `user.email` would cost far more than the snapshot was protecting. A
-checkpoint whose *apply* fails does stop the run — that is a systemic problem (auth, backend,
-prompt) which would recur at the compaction anyway.
+Committing is **best-effort**: whatever it reports is logged and the run carries on either
+way, because losing an unattended run's whole clarification effort over a missing `user.email`
+would cost far more than the commit was protecting. A checkpoint whose *apply* fails does stop
+the run — that is a systemic problem (auth, backend, prompt) which would recur at the
+compaction anyway.
 
 Two interactions worth knowing:
 
@@ -308,9 +311,7 @@ Two interactions worth knowing:
   also clears it — a checkpoint never fires just to apply a single round's answers right
   after a compaction emptied the overlay.
 
-Nothing prunes old snapshots: each one is a full copy of the PRD, in the backup folder and —
-if that folder is inside the working folder — in git history too. See
-[config-json.md](config-json.md) for all four settings.
+See [config-json.md](config-json.md) for both settings.
 
 If that verification comes back **dirty**, the run doesn't fail: it re-enters the loop,
 answers the new findings, and compacts a second time. That's bounded at two compactions per
