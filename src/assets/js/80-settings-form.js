@@ -311,8 +311,6 @@ function fillSettingsForm(config) {
   // nullable handling max_session_run gets above.
   settingsFinalizeCheckpointRounds.value =
     config.finalize_checkpoint_rounds == null ? "" : config.finalize_checkpoint_rounds;
-  settingsFinalizeCheckpointBackup.checked = config.finalize_checkpoint_backup !== false;
-  settingsFinalizeCheckpointDir.value = config.finalize_checkpoint_backup_dir ?? "prd-backup";
   settingsFinalizeCheckpointCommit.checked = config.finalize_checkpoint_commit !== false;
   settingsQaLoopStrikes.value = config.qa_loop_strikes ?? 2;
   settingsMaxQaFailRounds.value = config.max_qa_fail_rounds ?? 6;

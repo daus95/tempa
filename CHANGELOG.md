@@ -10,29 +10,38 @@ once the first tagged release is cut.
 
 ### Added
 
-- **Finalized Clarification now takes periodic checkpoints — apply, back up, commit — and is on
-  by default (every 5 rounds).** Finalize deliberately keeps every answer in a pending overlay
-  and writes the whole lot into the PRD in one pass at the very end, which is cheap: the overlay
-  means each evaluation already judges the spec as it will read once those decisions are applied,
-  so a per-round rewrite buys nothing. What it costs is durability — a long unattended run holds
-  hours of agent work the documents have never seen, with no restorable point until the last
-  step, and a run that dies at round 18 of 20 leaves the PRD exactly as it started. Every
-  `finalize_checkpoint_rounds` answering rounds (default `5`), the loop now stops and applies
-  what has been answered, writes a timestamped ZIP of the PRD folder into
-  `finalize_checkpoint_backup_dir` (default `prd-backup/`, created on demand), and runs
-  `git commit` — in that order, so each ZIP is part of the commit it belongs to. A successful run
-  always ends with one more snapshot and commit labelled `final`, marking the PRD as ready to
-  implement. **This changes what an existing workspace's next finalize run does:** it will spend
-  one extra apply session every 5 rounds where it previously spent none. Set "Checkpoint Every N
-  Rounds" (Settings → Runs) to blank to get exactly the old behavior back — the closing snapshot
-  still happens, since that is the one worth keeping regardless of cadence. Backing up and
-  committing are best-effort and only ever logged: an unattended run must not die because a disk
-  filled up or git has no `user.email`. Checkpoints do not consume the run's separate two-rewrite
-  budget, which guards the "verification came back dirty" loop and nothing else. Four new
-  Settings → Runs controls ("Finalize Checkpoints"), including a native folder picker for the
-  backup folder, which may be anywhere except inside the PRD folder — every snapshot would
-  otherwise archive the ones before it. Note that nothing prunes old snapshots, and that a backup
-  folder inside the working folder means the ZIPs are committed along with the PRD.
+- **Finalized Clarification now takes periodic checkpoints — apply, then commit — and is on by
+  default (every 5 rounds).** Finalize deliberately keeps every answer in a pending overlay and
+  writes the whole lot into the PRD in one pass at the very end, which is cheap: the overlay means
+  each evaluation already judges the spec as it will read once those decisions are applied, so a
+  per-round rewrite buys nothing. What it costs is durability — a long unattended run holds hours
+  of agent work the documents have never seen, with no restorable point until the last step, and a
+  run that dies at round 18 of 20 leaves the PRD exactly as it started. Every
+  `finalize_checkpoint_rounds` answering rounds (default `5`), the loop now stops, applies what has
+  been answered, and runs `git commit`, leaving a readable diff of what that stretch of rounds
+  actually changed in the specification. A successful run always ends with one more commit marking
+  the PRD as ready to implement. **This changes what an existing workspace's next finalize run
+  does:** it will spend one extra apply session every 5 rounds where it previously spent none. Set
+  "Checkpoint Every N Rounds" (Settings → Runs) to blank to get exactly the old behavior back — the
+  closing commit still happens, since that is the one worth keeping regardless of cadence.
+  Committing is best-effort and only ever logged: an unattended run must not die because git has no
+  `user.email`. Checkpoints do not consume the run's separate two-rewrite budget, which guards the
+  "verification came back dirty" loop and nothing else. Two new Settings → Runs controls
+  ("Finalize Checkpoints").
+
+- **The PRD is now kept in the workspace's repo, so those commits capture the document itself.**
+  `tempa init` git-ignores `.tempa/` wholesale, and the PRD lives at `.tempa/specs/prd/` — so
+  `git add -A` was staging everything in the working folder *except* the specification, which is
+  the one thing a clarification checkpoint exists to record. `init` now writes rules that carve out
+  an exception for `.tempa/specs/prd/` while leaving logs, QA/verify reports, `config.json` and the
+  generated epic/clarification specs ignored as before. It unwinds the exclusion a level at a time
+  because git cannot re-include a path whose parent directory is excluded — a bare `.tempa/` entry
+  makes the PRD unreachable no matter what `!` rules follow it, which is why **an existing
+  workspace's `.gitignore` has that one line replaced** by the block, every other line left
+  untouched. That happens the next time the workspace is opened or `init` is re-run (the dashboard
+  shells out to `init` on open), and each checkpoint re-checks the rules before committing, so a
+  workspace left open since before this still gets its PRD committed. Re-running `init` is
+  idempotent.
 
 ### Fixed
 

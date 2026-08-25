@@ -460,29 +460,11 @@
           </div>
           <div class="settings-group">
             <h3>Finalize Checkpoints</h3>
-            <p class="settings-field-desc">Finalized Clarification normally keeps every answer in memory and writes them all into the PRD in one pass at the very end. A checkpoint interrupts that periodically to apply what has been answered so far, save a ZIP of the PRD, and commit — so a long unattended run leaves restorable save points behind. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> The three steps always run in that order, so the ZIP is part of the commit it belongs to. Backing up and committing are best-effort: if either fails it is logged and the run carries on, because losing hours of clarification work over a full disk or a missing git identity would cost far more than the snapshot was protecting. A successful Finalized Clarification always ends with one final ZIP and commit marking the PRD as ready to implement, whatever these settings say about cadence. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
+            <p class="settings-field-desc">Finalized Clarification normally keeps every answer in memory and writes them all into the PRD in one pass at the very end. A checkpoint interrupts that periodically to apply what has been answered so far and commit — so a long unattended run leaves restorable save points behind, each one a readable diff of what that round changed. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> The PRD lives in the Tempa-managed <code>.tempa/</code> folder, which is otherwise kept out of your repository — Tempa adds the rules that let the PRD in, so these commits capture the document itself rather than a copy of it. Committing is best-effort: if it fails it is logged and the run carries on, because losing hours of clarification work over a missing git identity would cost far more than the commit was protecting. A successful Finalized Clarification always ends with one final commit marking the PRD as ready to implement, whatever this setting says about cadence. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
             <div class="settings-field">
               <label for="settingsFinalizeCheckpointRounds">Checkpoint Every N Rounds</label>
               <p class="settings-field-desc">How many answering rounds may pile up before a checkpoint runs. Leave blank for no checkpoints at all — nothing is written until the end of the run. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Read once, when a Finalized Clarification run starts, so a change applies from the next run onward. Each checkpoint costs one extra agent session, so a low value buys more save points for more tokens; <code>1</code> applies after every single round, which is the most expensive setting here. Checkpoints don't count against the run's own two-rewrite limit. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
               <input type="number" id="settingsFinalizeCheckpointRounds" min="1" step="1" placeholder="Never">
-            </div>
-            <div class="settings-field">
-              <label class="settings-switch-row" for="settingsFinalizeCheckpointBackup">
-                <span class="settings-switch">
-                  <input type="checkbox" id="settingsFinalizeCheckpointBackup">
-                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-                </span>
-                <span>Back up the PRD at each checkpoint</span>
-              </label>
-              <p class="settings-field-desc">On by default. Writes a timestamped ZIP of the PRD folder — the same archive the Specification page's Download PRD button produces — into the backup folder below. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Skipped silently (logged, not an error) if the PRD folder doesn't exist yet or the backup folder can't be written. Nothing prunes old snapshots, so a long-lived workspace accumulates them. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
-            </div>
-            <div class="settings-field">
-              <label for="settingsFinalizeCheckpointDir">Backup Folder</label>
-              <p class="settings-field-desc">Where those ZIPs are written. A relative path is resolved inside the working folder; an absolute path is used as-is. Created if it doesn't exist. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Because the commit below stages the whole working folder, a backup folder inside it means the ZIPs are committed alongside the PRD changes. It can't be placed inside the PRD folder itself — every snapshot would then archive the ones before it. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
-              <div class="settings-inline-row">
-                <input type="text" id="settingsFinalizeCheckpointDir" placeholder="prd-backup">
-                <button type="button" id="settingsFinalizeCheckpointDirBtn" class="clarify-run-btn secondary"><svg class="icon-svg" aria-hidden="true"><use href="#i-folder-open"></use></svg> Browse…</button>
-              </div>
             </div>
             <div class="settings-field">
               <label class="settings-switch-row" for="settingsFinalizeCheckpointCommit">

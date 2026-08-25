@@ -23,13 +23,11 @@ from dashboard_clarify_parse import (
 )
 from dashboard_ui import run_dashboard
 from tempa_backend import get_backend_def
-from tempa_backup import backup_prd_zip
 from tempa_config import (
     clear_graceful_stop,
     get_backend,
     get_clarify_apply_session_id,
     get_clarify_session_id,
-    get_finalize_checkpoint_backup,
     get_finalize_checkpoint_commit,
     get_finalize_checkpoint_rounds,
     get_finalize_no_progress_rounds,
@@ -42,7 +40,7 @@ from tempa_config import (
     save_config,
 )
 from tempa_config import resolve_prd_dir as _resolve_prd_dir
-from tempa_git import commit_workspace_changes
+from tempa_git import commit_workspace_changes, ensure_prd_tracked
 from tempa_logging import _banner, _hyperlink, _init_process_log, _state, log
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import (
@@ -515,7 +513,7 @@ def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compact
             "PRD/spec. Clarify (finalize) done.")
         if minor > 0:
             log(f"Still {minor} minor finding(s) — considered acceptable.")
-        _finalize_success_backup()
+        _finalize_success_commit()
         sys.exit(0)
 
     compactions += 1
@@ -622,44 +620,50 @@ def _auto_answer_finalize_round(clar_dir: Path, run_number: int, critical: int, 
             "recommendation.")
 
 
-def _snapshot_and_commit(config: dict, label: str, commit_message: str) -> None:
-    """Back the PRD up as a ZIP, then commit the workspace — the two durability halves a
-    checkpoint and a successful finalize run share.
+def _commit_checkpoint(config: dict, commit_message: str) -> None:
+    """Commit the workspace — the durability half a checkpoint and a successful finalize run
+    share.
 
-    Backup BEFORE commit, deliberately: commit_workspace_changes runs `git add -A` over the
-    whole workspace root, so a ZIP written first is part of the commit it belongs to.
+    `ensure_prd_tracked` runs first because the PRD lives under `.tempa/`, which Tempa's own
+    `init` git-ignores: without the ignore rules it writes, `git add -A` would stage
+    everything in the working folder EXCEPT the documents this commit exists to capture.
+    Normally `init` has already done this, so the call is a no-op read; it is repeated here so
+    a workspace scaffolded before those rules existed, and left open ever since, still gets
+    its PRD committed rather than silently committing nothing.
 
     Neither step can fail the run. Both helpers return (outcome, detail) and never raise, and
     this only logs what they say — the same treatment the QA-pass commit gets in
     tempa_session_runners. Killing an unattended finalize run that has spent hours of agent
-    time because a disk filled up, or because git has no user.email configured, would destroy
-    far more than the snapshot was protecting."""
-    if get_finalize_checkpoint_backup(config):
-        outcome, detail = backup_prd_zip(config, label)
-        log(f"PRD backup {outcome}: {detail}")
-    if get_finalize_checkpoint_commit(config):
-        outcome, detail = commit_workspace_changes(
-            get_workspace(config).get("root", ""), commit_message)
-        log(f"Checkpoint commit {outcome}: {detail}")
+    time because git has no user.email configured would destroy far more than the commit was
+    protecting."""
+    if not get_finalize_checkpoint_commit(config):
+        return
+    workspace_root = get_workspace(config).get("root", "")
+    outcome, detail = ensure_prd_tracked(workspace_root)
+    # "unchanged"/"skipped" is the normal case every round after the first — not worth a line.
+    if outcome not in ("unchanged", "skipped"):
+        log(f".gitignore {outcome}: {detail}")
+    outcome, detail = commit_workspace_changes(workspace_root, commit_message)
+    log(f"Checkpoint commit {outcome}: {detail}")
 
 
-def _finalize_success_backup() -> None:
-    """Snapshot and commit the PRD as the final, ready-to-implement version, right before a
+def _finalize_success_commit() -> None:
+    """Commit the PRD as the final, ready-to-implement version, right before a
     `clarify --finalize` run exits successfully.
 
     Runs on BOTH success exits (a clean verification round, and the "everything is already
     applied" exit inside _compact_resolutions_into_documents), and runs regardless of
     finalize_checkpoint_rounds — a run short enough never to checkpoint, or one with
-    checkpoints switched off entirely, still ends with a PRD worth keeping. Only the
-    backup/commit toggles gate it."""
-    _snapshot_and_commit(
-        load_config(), "final",
+    checkpoints switched off entirely, still ends with a PRD worth committing. Only the
+    commit toggle gates it."""
+    _commit_checkpoint(
+        load_config(),
         "tempa: clarification finalized — PRD ready for implementation")
 
 
 def _run_checkpoint(clar_dir: Path, run_number: int) -> None:
     """Periodic mid-loop save point (config.json's finalize_checkpoint_rounds): write the
-    answers accumulated so far into the PRD/spec, snapshot the PRD as a ZIP, and commit.
+    answers accumulated so far into the PRD/spec, then commit.
 
     Deliberately NOT routed through _compact_resolutions_into_documents. That function exits 0
     on an empty backlog — correct at the end of a run, fatal in the middle of one — and spends
@@ -700,8 +704,8 @@ def _run_checkpoint(clar_dir: Path, run_number: int) -> None:
         sys.exit(1)
 
     # Re-read: the apply rewrote clarify_applied_hashes and last_clarification_action.
-    _snapshot_and_commit(load_config(), f"round{run_number}",
-                         f"tempa: clarification checkpoint — round {run_number}")
+    _commit_checkpoint(load_config(),
+                       f"tempa: clarification checkpoint — round {run_number}")
 
 
 def run_clarify_finalize(skip_minor: bool = False) -> None:
@@ -716,11 +720,12 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
 
     What that costs is durability: a long run holds hours of agent work in an overlay the PRD
     has never seen, with no restorable point until the very last step. `finalize_checkpoint_rounds`
-    (default 5) buys some of it back — every N answering rounds the loop stops to apply, snapshot
-    the PRD as a ZIP, and commit (_run_checkpoint). That is a trade for recoverability, not for
-    evaluation quality: the overlay already made those applies unnecessary for correctness. Set
-    it to null to get the pure one-apply-at-the-end behavior. A successful run always ends with
-    one final snapshot and commit (_finalize_success_backup), whatever the cadence.
+    (default 5) buys some of it back — every N answering rounds the loop stops to apply and commit
+    (_run_checkpoint), leaving a readable per-checkpoint diff of how the PRD actually changed.
+    That is a trade for recoverability, not for evaluation quality: the overlay already made
+    those applies unnecessary for correctness. Set it to null to get the pure
+    one-apply-at-the-end behavior. A successful run always ends with one final commit
+    (_finalize_success_commit), whatever the cadence.
 
     The closing verification round is not optional bookkeeping: apply is an agent rewriting
     prose, so the only way to know the PRD itself (with no overlay in front of it) is clean
@@ -753,8 +758,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     # Snapshotted at run start alongside max_run and no_progress_limit, and for the same
     # reason: it is loop cadence, and "checkpoint every 5" means nothing definite if the loop
     # re-reads it every round. Saving a new value mid-run warns about exactly that — see
-    # _FINALIZE_SNAPSHOT_LIMITS in dashboard_runs.py. The backup/commit toggles below are
-    # per-action switches instead, and _snapshot_and_commit reads those fresh every time.
+    # _FINALIZE_SNAPSHOT_LIMITS in dashboard_runs.py. The commit toggle is a per-action
+    # switch instead, and _commit_checkpoint reads it fresh every time.
     checkpoint_rounds = get_finalize_checkpoint_rounds(config)
     run_number = 0
     no_progress_rounds = 0
@@ -806,7 +811,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
                     "recorded resolution. Clarify (finalize) done.")
                 if minor > 0:
                     log(f"Still {minor} minor finding(s) — considered acceptable.")
-                _finalize_success_backup()
+                _finalize_success_commit()
                 sys.exit(0)
 
             compactions = _compact_resolutions_into_documents(

@@ -52,6 +52,7 @@ from tempa_decisions import (
     blocked_features,
     describe,
 )
+from tempa_git import ensure_prd_tracked
 from tempa_logging import _banner, _print_log_tail, _state, log
 from tempa_notifications import AttentionEventType, flush_pending_notifications, notify_attention
 from tempa_prompts import _resolve_template_params, build_prompt, load_prompt
@@ -374,26 +375,13 @@ def run_init(args: argparse.Namespace) -> None:
             folder.mkdir(parents=True, exist_ok=True)
             log(f"Folder created: {folder}")
 
-    # Ensure the .tempa/ folder (config.json, logs, qa, verify, specs — all Tempa-managed
-    # state, not meant to be version controlled) is git-ignored: create .gitignore if
-    # missing, append the entry if absent.
-    gitignore_path = root_path / ".gitignore"
-    tempa_entry = ".tempa/"
-    if not gitignore_path.exists():
-        with open(gitignore_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(tempa_entry + "\n")
-        log(f".gitignore created: {gitignore_path}")
-    else:
-        existing_text = gitignore_path.read_text(encoding="utf-8")
-        existing_lines = existing_text.splitlines()
-        if tempa_entry in existing_lines or ".tempa" in existing_lines:
-            log(f".gitignore already ignores '{tempa_entry}', skipping: {gitignore_path}")
-        else:
-            with open(gitignore_path, "a", encoding="utf-8", newline="\n") as f:
-                if existing_text and not existing_text.endswith("\n"):
-                    f.write("\n")
-                f.write(tempa_entry + "\n")
-            log(f"Added '{tempa_entry}' to .gitignore: {gitignore_path}")
+    # Keep Tempa's own state (config.json, logs, qa, verify, generated epic/clarification
+    # specs) out of the workspace's repo, while letting the PRD into it so its history is
+    # diffable — see ensure_prd_tracked. Re-running init on an existing workspace upgrades a
+    # `.gitignore` still carrying the old blanket `.tempa/` entry, which is how a workspace
+    # created before this reaches the new rules.
+    outcome, detail = ensure_prd_tracked(str(root_path))
+    log(f".gitignore {outcome}: {detail}")
 
     print_workspace(config)
 

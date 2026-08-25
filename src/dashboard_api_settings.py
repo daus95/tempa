@@ -12,7 +12,6 @@ and the principles document is workspace-wide configuration like the rest of it.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 import tempa_backend
 import tempa_config
@@ -63,8 +62,6 @@ def read_config(backend_status: dict) -> Response:
             "max_clarification_run": config.get("max_clarification_run"),
             "finalize_no_progress_rounds": tempa_config.get_finalize_no_progress_rounds(config),
             "finalize_checkpoint_rounds": tempa_config.get_finalize_checkpoint_rounds(config),
-            "finalize_checkpoint_backup": tempa_config.get_finalize_checkpoint_backup(config),
-            "finalize_checkpoint_backup_dir": tempa_config.get_finalize_checkpoint_backup_dir(config),
             "finalize_checkpoint_commit": tempa_config.get_finalize_checkpoint_commit(config),
             "qa_loop_strikes": tempa_config.get_qa_loop_strikes(config),
             "max_qa_fail_rounds": tempa_config.get_max_qa_fail_rounds(config),
@@ -187,63 +184,6 @@ def _validate_email(payload: dict, current_config: dict) -> tuple[str | None, di
     return None, email
 
 
-def pick_backup_folder(pick_folder_dialog) -> Response:
-    """Open the native folder picker for the Settings pane's Backup Folder field, and return
-    what was chosen without saving anything — the path is written into the form input, and the
-    user still has to press Save.
-
-    Mirrors dashboard_api_workspace.pick_parent_folder, including its status convention: an
-    unavailable picker and a user cancel are both 200 with ok:false, because neither is an
-    error — there is just nothing to fill in."""
-    if pick_folder_dialog is None:
-        return 200, {
-            "ok": False,
-            "error": "The folder picker isn't available on this platform. "
-                     "Type the backup folder path instead.",
-        }
-    try:
-        path = pick_folder_dialog()
-    except RuntimeError as e:
-        return 200, {"ok": False, "error": str(e)}
-    if path is None:
-        return 200, {"ok": False, "cancelled": True}
-    return 200, {"ok": True, "path": path}
-
-
-def _validate_backup_folder(payload: dict, current_config: dict) -> tuple[str | None, str]:
-    """The checkpoint backup folder. Relative paths are resolved under workspace.root at use
-    time (tempa_backup.backup_prd_zip), so anything is accepted here as long as it's a sane
-    string — the folder is created on demand, and requiring it to exist would reject a network
-    drive that happens to be offline right now.
-
-    A payload that doesn't mention the key keeps whatever is on disk, same rule as
-    _validate_limits: a tab left open from before this field existed must not be able to blank
-    it.
-
-    The one real rule is that the backup folder can't sit inside the PRD folder — every
-    snapshot would then archive the snapshots before it, so each ZIP would be roughly double
-    the last. tempa_backup re-checks this at runtime for hand-edited configs; this is what
-    stops anyone reaching that state through the form."""
-    if "finalize_checkpoint_backup_dir" not in payload:
-        return None, tempa_config.get_finalize_checkpoint_backup_dir(current_config)
-
-    raw = payload.get("finalize_checkpoint_backup_dir")
-    if not isinstance(raw, str):
-        return "Backup Folder must be a folder path.", ""
-    value = raw.strip()
-    if not value:
-        return None, tempa_config.DEFAULT_CONFIG["finalize_checkpoint_backup_dir"]
-    if len(value) > 500 or any(ch == "\0" or ord(ch) < 32 for ch in value):
-        return "Backup Folder isn't a valid folder path.", ""
-
-    prd_dir = tempa_config.resolve_prd_dir(current_config)
-    target = Path(tempa_config.resolve_source_path(current_config, value))
-    if target.is_absolute() and (target == prd_dir or target.is_relative_to(prd_dir)):
-        return ("The backup folder can't be inside the PRD folder — every snapshot would "
-                "archive the ones before it."), ""
-    return None, value
-
-
 def validate_settings(payload: dict | list | None, current_config: dict) -> tuple[str | None, dict]:
     """Validate a whole Settings form submission. Returns (error message, settings) — on
     the first failure, the message the form shows and an empty dict; otherwise None and
@@ -263,10 +203,6 @@ def validate_settings(payload: dict | list | None, current_config: dict) -> tupl
         return ("Start Implementation requirement must be one of: "
                 f"{', '.join(tempa_config.IMPLEMENTATION_START_REQUIREMENTS)}."), {}
 
-    error, backup_folder = _validate_backup_folder(payload, current_config)
-    if error:
-        return error, {}
-
     error, email = _validate_email(payload, current_config)
     if error:
         return error, {}
@@ -277,17 +213,13 @@ def validate_settings(payload: dict | list | None, current_config: dict) -> tupl
         "allow_finalize_with_critical": bool(payload.get("allow_finalize_with_critical")),
         "commit_after_qa_pass": bool(payload.get("commit_after_qa_pass")),
         # Defaulted rather than bare bool()'d, for the same reason as
-        # terminate_leftover_processes below: both default to on, and both fail silently when
-        # off — a finalize run just quietly stops leaving snapshots and commits behind. A tab
-        # opened before these fields existed omits them, and must not be able to turn the
-        # workspace's only rollback points off with a save that reports "Saved.".
-        "finalize_checkpoint_backup": bool(payload.get(
-            "finalize_checkpoint_backup",
-            tempa_config.DEFAULT_CONFIG["finalize_checkpoint_backup"])),
+        # terminate_leftover_processes below: it defaults to on and fails silently when off —
+        # a finalize run just quietly stops committing. A tab opened before this field existed
+        # omits it, and must not be able to turn the workspace's only clarification rollback
+        # points off with a save that reports "Saved.".
         "finalize_checkpoint_commit": bool(payload.get(
             "finalize_checkpoint_commit",
             tempa_config.DEFAULT_CONFIG["finalize_checkpoint_commit"])),
-        "finalize_checkpoint_backup_dir": backup_folder,
         # Defaulted, unlike its neighbours' bare bool(payload.get(...)) — deliberately. A
         # payload that simply omits this key (a dashboard tab left open from before the
         # upgrade, a hand-built body) must not be able to turn containment off: unlike every

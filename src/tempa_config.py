@@ -379,8 +379,6 @@ DEFAULT_CONFIG = {
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 5,
     "finalize_checkpoint_rounds": 5,
-    "finalize_checkpoint_backup": True,
-    "finalize_checkpoint_backup_dir": "prd-backup",
     "finalize_checkpoint_commit": True,
     "implement_no_progress_rounds": 2,
     "qa_loop_strikes": 2,
@@ -876,8 +874,8 @@ def get_finalize_no_progress_rounds(config: dict) -> int | float:
 def get_finalize_checkpoint_rounds(config: dict) -> int | None:
     """Return config.json's "finalize_checkpoint_rounds" — how many answering rounds of a
     `clarify --finalize` run may pile up in the pending overlay before the loop stops to
-    write them into the PRD, snapshot it, and commit (see _run_checkpoint in
-    tempa_clarify.py) — defaulting to 5.
+    write them into the PRD and commit (see _run_checkpoint in tempa_clarify.py) —
+    defaulting to 5.
 
     None means "never checkpoint", which is the behavior finalize had before checkpoints
     existed: nothing is written until the closing compaction. Unlike every other limit here
@@ -894,33 +892,13 @@ def get_finalize_checkpoint_rounds(config: dict) -> int | None:
     return value if is_number and value > 0 else DEFAULT_CONFIG["finalize_checkpoint_rounds"]
 
 
-def get_finalize_checkpoint_backup(config: dict) -> bool:
-    """Return config.json's "finalize_checkpoint_backup" (default True) — whether each
-    `clarify --finalize` checkpoint (and the end of a successful run) should write a ZIP of
-    the PRD folder into the backup folder (see tempa_backup.backup_prd_zip). An opt-out for
-    workspaces that would rather rely on the git commit alone."""
-    value = config.get("finalize_checkpoint_backup")
-    return bool(value) if isinstance(value, bool) else True
-
-
 def get_finalize_checkpoint_commit(config: dict) -> bool:
     """Return config.json's "finalize_checkpoint_commit" (default True) — whether each
-    `clarify --finalize` checkpoint (and the end of a successful run) should `git commit` the
+    `clarify --finalize` checkpoint, and the end of a successful run, should `git commit` the
     workspace (see tempa_git.commit_workspace_changes). An opt-out for workspaces where the
     user would rather commit by hand, exactly like commit_after_qa_pass above."""
     value = config.get("finalize_checkpoint_commit")
     return bool(value) if isinstance(value, bool) else True
-
-
-def get_finalize_checkpoint_backup_dir(config: dict) -> str:
-    """Return config.json's "finalize_checkpoint_backup_dir" (default "prd-backup") — where
-    checkpoint PRD ZIPs are written. Relative values are resolved under workspace.root by
-    resolve_source_path, the same rule every `sources` folder follows; an absolute path is
-    used as-is. Blank or non-string falls back to the default rather than writing archives
-    into the process's current directory."""
-    value = config.get("finalize_checkpoint_backup_dir")
-    value = value.strip() if isinstance(value, str) else ""
-    return value or DEFAULT_CONFIG["finalize_checkpoint_backup_dir"]
 
 
 def get_qa_loop_strikes(config: dict) -> int | float:
