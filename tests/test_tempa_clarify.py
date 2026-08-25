@@ -1550,12 +1550,18 @@ def test_phase_order_and_where_it_ends():
     assert tc._next_phase(tc._PHASE_MAJOR, False, True) is None
 
 
+def _summary(checks=12, unchecked=0):
+    """A parsed coverage:summary, as _parse_coverage_summary returns one."""
+    return {"checks": checks, "ok": checks - unchecked, "critical": 0, "na": 0,
+            "unchecked": unchecked}
+
+
 def test_findings_left_in_a_phase_never_settle_it():
-    assert tc._phase_may_advance(1, {"unchecked": 0}, 9) is False
+    assert tc._phase_may_advance(1, _summary(), 9) is False
 
 
 def test_a_complete_ledger_settles_a_phase_in_one_clean_round():
-    assert tc._phase_may_advance(0, {"unchecked": 0}, 1) is True
+    assert tc._phase_may_advance(0, _summary(), 1) is True
 
 
 def test_without_a_ledger_a_phase_needs_two_clean_rounds():
@@ -1566,7 +1572,47 @@ def test_without_a_ledger_a_phase_needs_two_clean_rounds():
 
 
 def test_an_unchecked_row_leaves_the_phase_unsettled():
-    assert tc._phase_may_advance(0, {"unchecked": 3}, 1) is False
+    assert tc._phase_may_advance(0, _summary(unchecked=3), 1) is False
+
+
+# --- a ledger only counts as evidence if its table is as big as last round's ---
+#
+# The pair of runs that motivated this: same PRD, same prompt, same model, tables of 113 rows
+# and 64, BOTH reporting zero unchecked. The marker says every row the agent listed got a
+# verdict, never that it listed every row there is.
+
+def test_a_shrunken_ledger_is_not_evidence_of_an_exhaustive_sweep():
+    assert tc._ledger_confirms_sweep(_summary(checks=64), 113) is False
+    assert tc._phase_may_advance(0, _summary(checks=64), 1, previous_checks=113) is False
+
+
+def test_a_ledger_that_grew_is_evidence():
+    """Which is the normal direction: answering adds screens, fields and rules, and a
+    re-derived inventory has to cover them."""
+    assert tc._ledger_confirms_sweep(_summary(checks=128), 110) is True
+
+
+def test_the_first_sweep_has_nothing_to_be_judged_against():
+    assert tc._ledger_confirms_sweep(_summary(checks=110), None) is True
+
+
+def test_a_marker_with_no_usable_row_count_is_not_evidence():
+    assert tc._ledger_confirms_sweep({"unchecked": 0}, 100) is False
+    assert tc._ledger_confirms_sweep({"checks": 0, "unchecked": 0}, 100) is False
+    assert tc._ledger_confirms_sweep(None, 100) is False
+
+
+def test_the_shrink_tolerance_leaves_room_for_regrouping():
+    """A row count moves a little when the agent groups the inventory differently; it moves a
+    lot when the inventory itself is thinner. The threshold sits between the two."""
+    assert tc._ledger_confirms_sweep(_summary(checks=85), 100) is True
+    assert tc._ledger_confirms_sweep(_summary(checks=84), 100) is False
+
+
+def test_carried_ledger_checks_reads_the_baseline_from_the_previous_file():
+    assert tc._carried_ledger_checks(("coverage-1.md", _ledger(checks=113))) == 113
+    assert tc._carried_ledger_checks(("coverage-1.md", "no marker here")) is None
+    assert tc._carried_ledger_checks(None) is None
 
 
 def test_with_phases_off_one_clean_round_still_ends_the_run():
@@ -1580,13 +1626,13 @@ def test_advance_phase_transitions():
     # Findings remain -> stay, and the clean streak resets.
     assert tc._advance_phase(crit, True, True, 2, 2, None, 3) == (crit, 0, "stay")
     # Clean and backed by a ledger -> on to the next phase, streak reset for it.
-    assert tc._advance_phase(crit, True, True, 0, 0, {"unchecked": 0}, 0) == (major, 0, "advanced")
+    assert tc._advance_phase(crit, True, True, 0, 0, _summary(), 0) == (major, 0, "advanced")
     # Clean, no ledger, first clean round -> stay and confirm.
     assert tc._advance_phase(crit, True, True, 0, 0, None, 0) == (crit, 1, "stay")
     # Nothing after the last phase.
-    assert tc._advance_phase(major, True, True, 0, 0, {"unchecked": 0}, 0) == (major, 1, "done")
+    assert tc._advance_phase(major, True, True, 0, 0, _summary(), 0) == (major, 1, "done")
     # A critical in a later phase outranks everything else about the round.
-    assert tc._advance_phase(major, True, True, 1, 4, {"unchecked": 0}, 0) == (crit, 0, "demoted")
+    assert tc._advance_phase(major, True, True, 1, 4, _summary(), 0) == (crit, 0, "demoted")
 
 
 def test_a_narrow_round_never_stamps_a_clean_evaluation():
@@ -1789,6 +1835,29 @@ def test_a_clean_round_with_no_ledger_confirms_before_moving_on(
     assert calls["evaluate"] == 4
     assert calls["answer"] == 0
     assert calls["apply"] == 0
+
+
+def test_a_shrinking_ledger_costs_the_phase_one_more_round(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """Round 2's table is half of round 1's, so its zero-unchecked cannot settle the phase on
+    its own — it falls back to needing a second clean round, exactly like a round that wrote
+    no ledger at all."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    calls = _finalize_harness(
+        monkeypatch, clar_dir, _clean(3),
+        coverage_by_round=[_ledger(checks=100),   # 1 critical sweep settles, widens to major
+                           _ledger(checks=50),    # 2 half the table — not evidence
+                           _ledger(checks=50)])   # 3 same size as round 2 — settles
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 3
+    assert calls["answer"] == 0
 
 
 def test_the_critical_phase_stops_at_its_round_budget(

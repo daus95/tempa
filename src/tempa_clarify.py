@@ -92,6 +92,17 @@ _PHASE_BLOCKING = {
 # See _phase_may_advance for why there is a fallback at all.
 _PHASE_CLEAN_ROUNDS_WITHOUT_LEDGER = 2
 
+# How far a round's coverage ledger may fall short of the previous round's row count and
+# still be taken as evidence its sweep was exhaustive. See _ledger_confirms_sweep.
+#
+# 0.85 sits between the two things that have to be told apart: how much the row count moves
+# when the agent merely groups the inventory differently (small — fields and rules are
+# enumerated by the spec), and how much it moves when the inventory itself is thinner
+# (large — the pair of runs that motivated this were 113 rows and 64, a drop to 0.57). The
+# cost of being wrong is asymmetric, which is why the threshold sits nearer the first: a
+# false alarm costs one more round, a miss settles a phase over a critical nobody looked for.
+_LEDGER_SHRINK_TOLERANCE = 0.85
+
 # The coverage ledger lives in a SUBFOLDER of sources.clarifications, never beside the
 # findings files. Everything that reads that folder — _clarification_result_files here,
 # clarification_files/pending_resolutions in dashboard_clarify_parse — globs "*.md"
@@ -139,8 +150,35 @@ def _next_phase(phase: str, phases_on: bool, skip_minor: bool) -> str | None:
     return None
 
 
+def _ledger_confirms_sweep(coverage: dict | None, previous_checks: int | None) -> bool:
+    """Whether this round's coverage ledger is evidence that its sweep was exhaustive.
+
+    `unchecked == 0` on its own is not. Two runs of the same round, over the same PRD, on the
+    same prompt and the same model, produced check tables of 113 rows and 64 — both reporting
+    zero unchecked. The marker attests that every row the agent LISTED got a verdict, never
+    that it listed every row there is, and the table's construction is still its judgement:
+    that judgement varied by 43%.
+
+    Size is the check available for that. Within a phase the spec only gains surface —
+    answering adds screens, fields and rules, and a re-derived inventory has to cover them —
+    so a table coming back materially smaller than the previous round's has lost rows rather
+    than the spec having lost surface. Such a round is treated exactly like one with no ledger
+    at all: it needs a second clean round behind it.
+
+    A malformed marker (no `checks`, or a non-positive one) is no evidence either, for the
+    same reason: nothing in it can be compared."""
+    if not coverage or coverage.get("unchecked") != 0:
+        return False
+    checks = coverage.get("checks")
+    if not isinstance(checks, int) or checks <= 0:
+        return False
+    if previous_checks is None or previous_checks <= 0:
+        return True
+    return checks >= previous_checks * _LEDGER_SHRINK_TOLERANCE
+
+
 def _phase_may_advance(blocking: int, coverage: dict | None, clean_rounds: int,
-                       phases_on: bool = True) -> bool:
+                       phases_on: bool = True, previous_checks: int | None = None) -> bool:
     """Whether a phase's sweep is finished, given this round's blocking-severity count, the
     coverage ledger that round produced, and how many clean rounds in a row it has now had
     (this one included).
@@ -162,7 +200,7 @@ def _phase_may_advance(blocking: int, coverage: dict | None, clean_rounds: int,
         return False
     if not phases_on:
         return True
-    if coverage is not None and coverage.get("unchecked") == 0:
+    if _ledger_confirms_sweep(coverage, previous_checks):
         return True
     return clean_rounds >= _PHASE_CLEAN_ROUNDS_WITHOUT_LEDGER
 
@@ -225,6 +263,17 @@ def _parse_coverage_summary(body: str) -> dict[str, int] | None:
     return counts or None
 
 
+def _carried_ledger_checks(carried: tuple[str, str] | None) -> int | None:
+    """The `checks` count of the ledger carried INTO a round — the baseline this round's own
+    table is judged against (_ledger_confirms_sweep). None when there is no previous ledger,
+    or its marker holds no usable count, which both mean "nothing to compare against"."""
+    if not carried:
+        return None
+    summary = _parse_coverage_summary(carried[1])
+    checks = summary.get("checks") if summary else None
+    return checks if isinstance(checks, int) and checks > 0 else None
+
+
 def _round_coverage(clar_dir: Path, carried: tuple[str, str] | None) -> dict[str, int] | None:
     """The coverage summary of the ledger the evaluate session that just ran wrote, logged as
     it is read. None when that session wrote no ledger, or wrote one with no readable marker —
@@ -244,6 +293,11 @@ def _round_coverage(clar_dir: Path, carried: tuple[str, str] | None) -> dict[str
         return None
     log(f"Coverage ledger {latest[0]}: "
         + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    previous_checks = _carried_ledger_checks(carried)
+    if summary.get("unchecked") == 0 and not _ledger_confirms_sweep(summary, previous_checks):
+        log(f"That ledger checks {summary.get('checks')} row(s) against the previous round's "
+            f"{previous_checks} — too few to read its zero unchecked as an exhaustive sweep, "
+            "since a re-derived inventory should cover at least what the last one did.")
     return summary
 
 
@@ -264,7 +318,8 @@ def _build_evaluate_prompt(config: dict, clar_dir: Path, skip_minor: bool,
 
 
 def _advance_phase(phase: str, phases_on: bool, skip_minor: bool, critical: int, blocking: int,
-                   coverage: dict | None, clean_rounds: int) -> tuple[str, int, str]:
+                   coverage: dict | None, clean_rounds: int,
+                   previous_checks: int | None = None) -> tuple[str, int, str]:
     """Where the phase machine goes after a round that reported `critical` critical findings
     and `blocking` findings in the phase's own severities. Shared by manual clarification and
     the finalize loop so the two can never drift into disagreeing about what settles a phase.
@@ -282,7 +337,7 @@ def _advance_phase(phase: str, phases_on: bool, skip_minor: bool, critical: int,
     clean_rounds = 0 if blocking else clean_rounds + 1
     if phases_on and phase != _PHASE_CRITICAL and critical:
         return _PHASE_CRITICAL, 0, "demoted"
-    if not _phase_may_advance(blocking, coverage, clean_rounds, phases_on):
+    if not _phase_may_advance(blocking, coverage, clean_rounds, phases_on, previous_checks):
         return phase, clean_rounds, "stay"
     following = _next_phase(phase, phases_on, skip_minor)
     if following is None:
@@ -463,6 +518,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
         sys.exit(3)
 
     coverage = _round_coverage(clar_dir, carried_ledger)
+    previous_checks = _carried_ledger_checks(carried_ledger)
     config = load_config()
     findings = config.get("last_clarification_findings", {})
     critical = findings.get("critical", 0)
@@ -481,7 +537,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     blocking = _phase_blocking_count(phase, critical, major, minor)
     next_phase, clean_rounds, transition = _advance_phase(
-        phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds)
+        phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds, previous_checks)
     _save_phase_state(config, next_phase, clean_rounds)
     save_config(config)
     report_files = _clarification_report_files(clar_dir, before_files)
@@ -777,10 +833,11 @@ def _exit_if_graceful_stop(about_to: str) -> None:
 
 def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, round_kind: str,
                              skip_minor: bool, severity_scope: str = "critical_major",
-                             ) -> tuple[int, int, int, dict | None]:
+                             ) -> tuple[int, int, int, dict | None, int | None]:
     """Run one evaluate pass of the finalize loop and return its (critical, major, minor)
-    finding counts plus the coverage summary of the ledger it wrote, having already recorded
-    the counts in config.json.
+    finding counts, the coverage summary of the ledger it wrote, and the row count of the
+    ledger it was handed (the baseline that summary is judged against — see
+    _ledger_confirms_sweep), having already recorded the counts in config.json.
 
     `round_kind` is "evaluate" or "verify" (config.json's "last_finalize_phase") — which kind
     of round this is, NOT which severity phase it belongs to. `severity_scope` is the phase's
@@ -838,7 +895,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
     log(f"Round #{run_number} ({round_kind}) findings: critical={critical}, major={major}, minor={minor}")
-    return critical, major, minor, coverage
+    return critical, major, minor, coverage, _carried_ledger_checks(carried_ledger)
 
 
 def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compactions: int,
@@ -1224,13 +1281,14 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
         _banner(round_header)
         log(round_header, to_console=False)
 
-        critical, major, minor, coverage = _finalize_evaluate_round(
+        critical, major, minor, coverage, previous_checks = _finalize_evaluate_round(
             load_config(), clar_dir, run_number, round_kind, skip_minor, severity_scope)
 
         blocking = _phase_blocking_count(severity_phase, critical, major, minor)
         settled_phase = severity_phase
         severity_phase, clean_rounds, transition = _advance_phase(
-            settled_phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds)
+            settled_phase, phases_on, skip_minor, critical, blocking, coverage, clean_rounds,
+            previous_checks)
         phase_config = load_config()
         _save_phase_state(phase_config, severity_phase, clean_rounds)
         save_config(phase_config)
@@ -1292,8 +1350,8 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             # Clean, but nothing checkable backs that up yet (_phase_may_advance). One more
             # round at the same scope confirms it, and there is nothing to answer in between.
             log(f"Nothing left in the {_phase_label(settled_phase)} this round, but no "
-                "complete coverage ledger backs that up — running one more round at the same "
-                "scope to confirm before moving on.")
+                "coverage ledger complete enough to stand behind it — running one more round "
+                "at the same scope to confirm before moving on.")
             round_kind = "evaluate"
             continue
 

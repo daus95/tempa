@@ -94,7 +94,8 @@ fallout of answering a major, arriving exactly where it can be seen.
 
 A phase is settled when a round reports nothing left in it **and** that result is backed up:
 
-- by a complete [coverage ledger](#the-coverage-ledger) — one clean round is then enough; or
+- by a [coverage ledger](#the-coverage-ledger) that is both complete (`unchecked="0"`) and no
+  smaller than the previous round's table — one clean round is then enough; or
 - failing that, by a **second** clean round in a row.
 
 One clean round on its own is never enough. The behavior this replaces had a round report
@@ -142,8 +143,20 @@ The findings file is then a projection of the `CRITICAL` rows.
 
 The point is that the failure mode being fixed is *writing a report of a plausible size*. A
 table has a known number of rows, and a row nobody filled in is visible — which is also what
-makes a "no criticals" result checkable rather than a claim. `unchecked="0"` is what lets one
-clean round settle a phase.
+makes a "no criticals" result checkable rather than a claim.
+
+`unchecked="0"` alone is not quite enough to settle a phase, though, and it is worth being
+precise about why. The marker attests that every row the agent **listed** got a verdict, never
+that it listed every row there is — the table's construction is still its judgement. Two runs
+of the same round, over the same PRD, on the same prompt and the same model, produced tables
+of **113 rows and 64**, both reporting zero unchecked.
+
+Size is the check available for that. Within a phase the spec only gains surface — answering
+adds screens, fields and rules, and a re-derived inventory has to cover them — so a table
+coming back materially smaller than the previous round's has lost rows rather than the spec
+having lost surface. A ledger under 85% of the previous round's row count is therefore treated
+exactly like no ledger at all: the phase falls back to needing a second clean round. The
+session log says so when it happens.
 
 Each round carries the previous ledger and must re-derive the inventory rather than trust it:
 a ledger says what was checked, not what is true, so a screen missing from it *is* the miss
