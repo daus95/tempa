@@ -524,7 +524,9 @@
   .gate-hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
   .gate-checklist { list-style: none; margin: 0; padding: 0; display: flex;
     flex-direction: column; gap: 6px; }
-  .gate-checklist ~ .clarify-run-btn { margin-top: 14px; }
+  /* The Stop Now split button stands in for the run button while a run is in flight, so it
+     needs the same gap under the checklist — it is a .split-btn wrapper, not a button. */
+  .gate-checklist ~ .clarify-run-btn, .gate-checklist ~ .split-btn { margin-top: 14px; }
   .settings-backend-status { margin-bottom: 16px; }
   .gate-item { display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem; }
   .gate-item .icon { flex: none; }
