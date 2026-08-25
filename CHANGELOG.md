@@ -10,20 +10,46 @@ once the first tagged release is cut.
 
 ### Added
 
+- **A finding that reaches for something an earlier round already decided now says so, above the
+  answer controls.** "Follow the recommendation" is one click and turns that recommendation into
+  the PRD's text verbatim, which is where cross-round contradictions come from: a later round
+  rewords a message, a rule or a field an earlier round settled, nobody sees the two together, and
+  a round later it comes back as a critical finding nobody needed to pay for. Opening a
+  clarification file now cross-checks every finding in it against every earlier round in the
+  folder and renders a **Decided elsewhere** note under any that names a shared surface — a field
+  or entity written in backticks or bold, or a UI string in quotes, with two wordings of one
+  message ("In use by N product(s) and M stock movement(s)" / "In use by N product(s), including M
+  archived") recognised as the same one. Each line names the surfaces and the finding and round
+  that named them. Clicking that id opens the earlier finding — read-only, with the answer that
+  was recorded for it — in the same right-hand drawer spec references already use, so comparing
+  two decisions never costs you the unsaved answers on the page you are on.
+
+  Every earlier round is checked, applied or not, and each line says which: *decided, not yet in
+  the PRD* is the expensive one (the decision exists only in a clarification file, so the spec
+  still reads the old way and nothing shows the contradiction), *already in the PRD* is
+  provenance for wording the current round was evaluated against, and *not yet answered* means
+  the other finding is still open and the two want answering together. The match is textual and
+  deterministic — no model, no PRD read, nothing gated, no count changed — and surfaces most of
+  the folder mentions are dropped as the workspace's vocabulary, so a file whose findings share
+  nothing renders exactly as it did before.
+
 - **Finalized Clarification now takes periodic checkpoints — apply, then commit — and is on by
-  default (every 5 rounds).** Finalize deliberately keeps every answer in a pending overlay and
+  default (every 3 rounds).** Finalize deliberately keeps every answer in a pending overlay and
   writes the whole lot into the PRD in one pass at the very end, which is cheap: the overlay means
   each evaluation already judges the spec as it will read once those decisions are applied, so a
   per-round rewrite buys nothing. What it costs is durability — a long unattended run holds hours
   of agent work the documents have never seen, with no restorable point until the last step, and a
   run that dies at round 18 of 20 leaves the PRD exactly as it started. Every
-  `finalize_checkpoint_rounds` answering rounds (default `5`), the loop now stops, applies what has
+  `finalize_checkpoint_rounds` answering rounds (default `3`), the loop now stops, applies what has
   been answered, and runs `git commit`, leaving a readable diff of what that stretch of rounds
   actually changed in the specification. A successful run always ends with one more commit marking
   the PRD as ready to implement. **This changes what an existing workspace's next finalize run
-  does:** it will spend one extra apply session every 5 rounds where it previously spent none. Set
+  does:** it will spend one extra apply session every 3 rounds where it previously spent none. Set
   "Checkpoint Every N Rounds" (Settings → Runs) to blank to get exactly the old behavior back — the
   closing commit still happens, since that is the one worth keeping regardless of cadence.
+  The cadence is deliberately short: two rounds' answers can only be seen to collide once both
+  are written into the same document, so the longer they sit unwritten in the overlay, the later
+  that collision costs a round to find.
   Committing is best-effort and only ever logged: an unattended run must not die because git has no
   `user.email`. Checkpoints do not consume the run's separate two-rewrite budget, which guards the
   "verification came back dirty" loop and nothing else. Two new Settings → Runs controls
@@ -42,6 +68,29 @@ once the first tagged release is cut.
   shells out to `init` on open), and each checkpoint re-checks the rules before committing, so a
   workspace left open since before this still gets its PRD committed. Re-running `init` is
   idempotent.
+
+### Changed
+
+- **Clarification recommendations are now held to four checks before they are written down, and
+  apply no longer lets a later round silently revoke an earlier one.** A recommendation is normally
+  accepted verbatim — "Follow the recommendation" is one click — so its text becomes the PRD's text,
+  and a late round was spending most of itself on holes that earlier rounds' own answers had opened
+  (in one 5-round run, 7 of round 5's 10 findings traced back to a decision rather than to the
+  original spec). The evaluation prompt now requires every recommendation to resolve its own
+  Question and nothing else, adding the fewest new nouns it can; to keep new rules out of its reason
+  paragraph, and never to state a universal ("only X does Y", "always", "never") there unless that
+  universal is the resolution itself; to list the rules, messages, enumerations, fields, endpoints
+  and guards it touches and check each against the pending overlay and the other findings in the
+  same round, quoting and preserving whatever already decided one (two findings on the same surface
+  are merged into one); and to close what it adds in the same breath — a reader for every new field,
+  a guard and an empty-parameter case for every new endpoint, one clause per member for every rule
+  keyed on an enum, every sibling endpoint of a guarded one. The apply prompt's cross-file
+  precedence is narrowed to match: a later decision now wins **only on the point it actually
+  decides**, and wording that would also negate an earlier decision it does not re-decide is applied
+  in the narrowest reading that keeps both true, and reported. **This changes what your next
+  clarification round writes:** recommendations get terser and stop bundling unrequested
+  improvements, so expect fewer follow-on findings per round rather than a different verdict on the
+  spec itself.
 
 ### Fixed
 

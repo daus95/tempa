@@ -1,7 +1,11 @@
 Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has been fully applied to the PRD/spec in a previous apply pass, so it does NOT need to be read again:
 ${clarification_files}
 
-The files above are listed in chronological order, oldest round first. If two findings across these files cover the same point, the one from the LATER file supersedes the earlier one entirely — apply only the later decision, and do not merge the two. If two findings in the SAME file contradict each other, do not apply either silently: pick the one that keeps the rest of the specification consistent, and say explicitly in your final response which one you dropped and why.
+The files above are listed in chronological order, oldest round first. If two findings across these files decide the SAME point, the one from the LATER file wins on that point — apply only the later decision there, and do not merge the two.
+
+That precedence is narrow, and reading it widely is how an apply pass destroys a decision nobody meant to reverse. A later decision wins only on the point it actually decides. Where its wording ALSO negates something an earlier decision established that the later one does not itself re-decide — most often a sweeping clause in a reason paragraph, an "only X does Y", a "never", an "always" — do NOT apply it as written: apply the narrowest reading that keeps both decisions true, and say in your final response which sentence you narrowed and how.
+
+If two findings in the SAME file contradict each other, do not apply either silently: pick the one that keeps the rest of the specification consistent, and say explicitly in your final response which one you dropped and why.
 
 For each finding, use the content written under its "Your answer:" label if present; otherwise fall back to the finding's own "Recommendation:" line.
 

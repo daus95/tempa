@@ -122,6 +122,38 @@ The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers wri
 - **I'll write my own answer** — enables a text area (5+ rows) to type your own answer,
   overriding the recommendation.
 
+A finding that names something an **earlier** round already named — a field or entity in
+backticks or bold, or a UI string in quotes — also carries a **Decided elsewhere** note between
+its recommendation and those two choices, listing the shared surfaces and which finding in which
+round named them. It is a prompt to read the two side by side, nothing more: it blocks no answer
+and changes no count. Since a recommendation accepted with one click becomes the PRD's text
+verbatim, this is the cheapest moment to notice that accepting it would reword a decision
+somebody already made — the alternative is a later round raising the contradiction as a fresh
+critical finding.
+
+**Every** earlier round is checked, whether or not its answers have been written into the PRD
+yet, and each line says which state its round is in:
+
+- *decided, not yet in the PRD* — the decision exists only in that clarification file. The PRD
+  still reads the old way, so a recommendation that rewords it contradicts something no document
+  shows. This is the one that costs a round to find later.
+- *already in the PRD* — its round has been applied, so the wording is in the spec this round was
+  evaluated against. The note is provenance: it says which round chose that wording, and where to
+  check that this answer preserves it.
+- *not yet answered* — that finding is still open, so there is no decision yet, only another
+  finding reaching for the same thing. Answer the two together.
+
+Clicking the finding id opens it in the same right-hand drawer that spec references use, showing
+it read-only with the answer that was recorded for it, so the comparison never costs you the
+unsaved answers on the page you are on. **⧉** in the drawer's header opens that whole
+clarification file instead (with the usual unsaved-answers prompt).
+
+The match is textual and deterministic — no model runs, and the PRD is never read for it — so
+it is deliberately imperfect in both directions: a surface named in two unrelated senses gets a
+note nobody needs, and one named two different ways in two rounds gets none. Surfaces that most
+of the folder mentions are treated as the workspace's vocabulary and dropped, so the note stays
+rare enough to be worth reading.
+
 ### Reading the spec a finding cites
 
 Requirement/rule ids, `§`-section references and file paths mentioned anywhere in a finding
@@ -275,7 +307,7 @@ Everything above keeps the PRD untouched until the compaction, which is cheap �
 a long unattended run holds hours of agent work in an overlay the documents have never seen,
 with no restorable point until the very last step.
 
-`finalize_checkpoint_rounds` (default `5`, dashboard Settings → Runs tab → "Checkpoint Every
+`finalize_checkpoint_rounds` (default `3`, dashboard Settings → Runs tab → "Checkpoint Every
 N Rounds") buys some of that back. Every N answering rounds the loop stops and does two things:
 
 1. **Apply** — one apply pass writes everything answered so far into the PRD/spec.
@@ -305,7 +337,7 @@ Two interactions worth knowing:
 
 - A checkpoint does **not** consume the two-rewrite budget below. That bound exists for the
   "verification came back dirty, rewrite again" loop; a checkpoint is scheduled by a round
-  counter instead, and charging it there would stop a run checkpointing every 5 rounds long
+  counter instead, and charging it there would stop a run checkpointing every 3 rounds long
   before its 20th round.
 - The counter is per *answering* round and resets after any write to the PRD, so a compaction
   also clears it — a checkpoint never fires just to apply a single round's answers right

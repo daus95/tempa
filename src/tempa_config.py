@@ -378,7 +378,7 @@ DEFAULT_CONFIG = {
     "max_session_run": 30,
     "max_clarification_run": 20,
     "finalize_no_progress_rounds": 5,
-    "finalize_checkpoint_rounds": 5,
+    "finalize_checkpoint_rounds": 3,
     "finalize_checkpoint_commit": True,
     "implement_no_progress_rounds": 2,
     "qa_loop_strikes": 2,
@@ -875,12 +875,12 @@ def get_finalize_checkpoint_rounds(config: dict) -> int | None:
     """Return config.json's "finalize_checkpoint_rounds" — how many answering rounds of a
     `clarify --finalize` run may pile up in the pending overlay before the loop stops to
     write them into the PRD and commit (see _run_checkpoint in tempa_clarify.py) —
-    defaulting to 5.
+    defaulting to 3.
 
     None means "never checkpoint", which is the behavior finalize had before checkpoints
     existed: nothing is written until the closing compaction. Unlike every other limit here
     that is a reason _get_positive_number can't be reused — it has no way to express
-    "disabled", and blank in the Settings form has to mean off rather than "fall back to 5".
+    "disabled", and blank in the Settings form has to mean off rather than "fall back to 3".
     A MISSING key still means the default, though: that's a config.json written before this
     setting existed, not somebody switching checkpoints off."""
     if "finalize_checkpoint_rounds" not in config:

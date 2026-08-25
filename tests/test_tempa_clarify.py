@@ -15,6 +15,7 @@ inside the loop."""
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 
 import pytest
@@ -230,6 +231,95 @@ def test_stamp_clean_evaluation_any_nonzero_severity_leaves_config_untouched():
         config = {}
         tc._stamp_clean_evaluation_if_zero(config, critical, major, minor)
         assert "last_clean_evaluation_at" not in config
+
+
+# ---------------------------------------------------------------------------
+# _clarification_dir_snapshot / _clarification_report_files — which files a
+# session actually produced. Judged against a before-snapshot rather than a
+# wall-clock cutoff, because the answer UI's "Save & Clarify" rewrites the file
+# being answered and starts a run in the same breath, and the old mtime cutoff
+# reported that already-answered file as a result of the new run.
+# ---------------------------------------------------------------------------
+
+def test_report_files_empty_when_nothing_changed(tmp_path):
+    (tmp_path / "clarification-1.md").write_text("old", encoding="utf-8")
+    before = tc._clarification_dir_snapshot(tmp_path)
+    assert tc._clarification_report_files(tmp_path, before) == []
+
+
+def test_report_files_detects_a_newly_written_file(tmp_path):
+    (tmp_path / "clarification-1.md").write_text("old", encoding="utf-8")
+    before = tc._clarification_dir_snapshot(tmp_path)
+    (tmp_path / "clarification-2.md").write_text("new", encoding="utf-8")
+    assert [p.name for p in tc._clarification_report_files(tmp_path, before)] == [
+        "clarification-2.md"
+    ]
+
+
+def test_report_files_detects_an_edited_existing_file(tmp_path):
+    f = tmp_path / "clarification-1.md"
+    f.write_text("old", encoding="utf-8")
+    before = tc._clarification_dir_snapshot(tmp_path)
+    f.write_text("old plus an answer", encoding="utf-8")
+    assert [p.name for p in tc._clarification_report_files(tmp_path, before)] == [
+        "clarification-1.md"
+    ]
+
+
+def test_report_files_detects_a_same_length_rewrite(tmp_path):
+    """Pins the mtime half of the snapshot tuple: an agent rewriting an answer in place
+    can leave the byte count identical, and a size-only snapshot would miss it entirely.
+    utime is set explicitly so the assertion does not depend on the filesystem's
+    timestamp granularity."""
+    f = tmp_path / "clarification-1.md"
+    f.write_text("answer aaa", encoding="utf-8")
+    original = f.stat()
+    before = tc._clarification_dir_snapshot(tmp_path)
+    f.write_text("answer bbb", encoding="utf-8")  # same length, different content
+    os.utime(f, (original.st_mtime + 5,) * 2)
+    assert f.stat().st_size == original.st_size  # only the mtime differs
+    assert [p.name for p in tc._clarification_report_files(tmp_path, before)] == [
+        "clarification-1.md"
+    ]
+
+
+def test_report_files_detects_a_rewrite_that_kept_the_original_mtime(tmp_path):
+    """Pins the size half: on a filesystem whose timestamp granularity is coarse enough
+    to hide a write made in the same tick as the snapshot, only the changed byte count
+    is left to notice it."""
+    f = tmp_path / "clarification-1.md"
+    f.write_text("findings", encoding="utf-8")
+    original = f.stat()
+    before = tc._clarification_dir_snapshot(tmp_path)
+    f.write_text("findings and a much longer answer", encoding="utf-8")
+    os.utime(f, (original.st_mtime,) * 2)  # mtime pushed back; only the size differs
+    assert f.stat().st_mtime == original.st_mtime
+    assert [p.name for p in tc._clarification_report_files(tmp_path, before)] == [
+        "clarification-1.md"
+    ]
+
+
+def test_report_files_returns_new_files_sorted(tmp_path):
+    before = tc._clarification_dir_snapshot(tmp_path)
+    for name in ("clarification-3.md", "clarification-1.md", "clarification-2.md"):
+        (tmp_path / name).write_text("x", encoding="utf-8")
+    assert [p.name for p in tc._clarification_report_files(tmp_path, before)] == [
+        "clarification-1.md",
+        "clarification-2.md",
+        "clarification-3.md",
+    ]
+
+
+def test_report_files_ignores_non_markdown(tmp_path):
+    before = tc._clarification_dir_snapshot(tmp_path)
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    assert tc._clarification_report_files(tmp_path, before) == []
+
+
+def test_snapshot_of_missing_dir_is_empty_and_reports_nothing(tmp_path):
+    missing = tmp_path / "nope"
+    assert tc._clarification_dir_snapshot(missing) == {}
+    assert tc._clarification_report_files(missing, {}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +614,40 @@ def test_finalize_answers_without_applying_then_compacts_and_verifies(
     assert calls["answer"] == 2          # only the two rounds that found something
     assert calls["apply"] == 1           # ONE compaction, at the end — not per round
     assert tempa_config.load_config()["last_clarification_action"] == "evaluate"
+
+
+def test_finalize_stamps_timings_only_on_the_files_each_round_produced(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The directory snapshot has to be taken BEFORE each evaluate session, not after.
+    That placement is the entire content of the fix and the helper unit tests above
+    cannot see it — they call the helpers directly and never cross a session boundary.
+
+    A file that already exists is rewritten by the pre-loop backlog fill moments before
+    round 1 starts, which is the same shape as the answer UI's "Save & Clarify"
+    rewriting a file and launching a run in one gesture. It must NOT be stamped with the
+    round's duration — that is the corruption the snapshot exists to prevent — while the
+    file the round itself wrote must be."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    seeded = clar_dir / "clarification-20251231-000000.md"
+    seeded.write_text(
+        _item("C0", "critical", "Seeded", "PRD 1", "question 0", "recommendation 0", ""),
+        encoding="utf-8",
+    )
+    _finalize_config(tmp_path, clar_dir)
+    _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> compaction
+        {"critical": 0, "major": 0, "minor": 0},   # verification round
+    ])
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    timings = tempa_config.load_config().get("clarify_file_timings", {})
+    assert "clarify_seconds" in timings.get("clarification-20260101-000000.md", {})
+    assert "clarify_seconds" not in timings.get(seeded.name, {})
 
 
 def test_finalize_carries_answers_into_the_next_round_prompt(tmp_path, isolate_tempa_paths, monkeypatch):

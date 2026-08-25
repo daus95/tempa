@@ -102,18 +102,48 @@ def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, min
         config["last_clean_evaluation_at"] = time.time()
 
 
-def _clarification_report_files(folder: Path, since: float) -> list[Path]:
-    """Return .md files in `folder` last modified at/after `since` (epoch seconds) —
-    i.e. the report files produced/updated by the evaluation that just ran."""
+def _clarification_dir_snapshot(folder: Path) -> dict[str, tuple[float, int]]:
+    """{filename: (mtime, size)} for every .md in `folder`, taken immediately BEFORE a
+    clarify session starts so `_clarification_report_files` can tell afterwards which
+    files that session actually touched. Size rides along with mtime purely as a
+    backstop against a filesystem whose timestamp granularity is coarse enough to hide
+    a modification made in the same tick as the snapshot."""
+    if not folder.exists():
+        return {}
+    snap: dict[str, tuple[float, int]] = {}
+    for p in folder.glob("*.md"):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        snap[p.name] = (st.st_mtime, st.st_size)
+    return snap
+
+
+def _clarification_report_files(folder: Path, before: dict[str, tuple[float, int]]) -> list[Path]:
+    """Return the .md files the session that just ran actually created or changed, judged
+    against `before` (a `_clarification_dir_snapshot` taken just before it started).
+
+    Compared against a snapshot rather than a wall-clock cutoff because mtime alone
+    cannot distinguish "the agent wrote this" from "the dashboard wrote this a moment
+    earlier": the answer UI's "Save & Clarify" button rewrites the file being answered
+    (apply_answers_to_file in dashboard_api_clarify.py) and then starts a clarify run in
+    the same breath, so a cutoff — especially one deliberately backdated to catch
+    freshly-written files — swept that already-answered file up as a result of the new
+    run. That mislabelled the run's output in the console and the attention
+    notification, and, worse, `_stamp_clarify_timing` then wrote the new run's duration
+    over the older file's own `clarify_seconds`, so every file but the newest ended up
+    displaying the NEXT run's elapsed time in the dashboard's detail modal."""
     if not folder.exists():
         return []
     out: list[Path] = []
     for p in sorted(folder.glob("*.md")):
         try:
-            if p.stat().st_mtime >= since:
-                out.append(p)
+            st = p.stat()
         except OSError:
-            pass
+            continue
+        if before.get(p.name) != (st.st_mtime, st.st_size):
+            out.append(p)
     return out
 
 
@@ -165,7 +195,8 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     _banner(f"Clarify (manual) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
-    start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
+    start_ts = time.time()
+    before_files = _clarification_dir_snapshot(clar_dir)
     prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
     if not run_with_usage_limit_retry(
         lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
@@ -191,7 +222,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     config["last_clarification_action"] = "evaluate"
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     save_config(config)
-    report_files = _clarification_report_files(clar_dir, start_ts)
+    report_files = _clarification_report_files(clar_dir, before_files)
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
     _banner(f"CLARIFICATION EVALUATION RESULT — critical={critical} major={major} minor={minor}")
@@ -306,13 +337,13 @@ def run_clarify_answer() -> None:
     _banner(f"Clarify (auto-answer) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
 
-    start_ts = time.time() - 1
+    before_files = _clarification_dir_snapshot(clar_dir)
     if not _run_auto_answer_step(config, unanswered_files):
         sys.exit(1)
 
     config = load_config()
     answered = config.get("last_auto_answer", 0)
-    changed = _clarification_report_files(clar_dir, start_ts)
+    changed = _clarification_report_files(clar_dir, before_files)
 
     if isinstance(answered, int) and answered > 0:
         print(f"[OK] {answered} clarification finding(s) answered automatically.", flush=True)
@@ -454,7 +485,8 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, phas
     """
     prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
 
-    start_ts = time.time() - 1  # small epsilon so freshly-written files are caught
+    start_ts = time.time()
+    before_files = _clarification_dir_snapshot(clar_dir)
     # Retry's lambda binds the loop variables as defaults (not by closure) so a retry
     # can't accidentally pick up a later iteration's prompt/run_number/config.
     success = run_with_usage_limit_retry(
@@ -489,7 +521,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, phas
     config["last_finalize_round"] = run_number
     config["last_finalize_phase"] = phase
     save_config(config)
-    report_files = _clarification_report_files(clar_dir, start_ts)
+    report_files = _clarification_report_files(clar_dir, before_files)
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
     log(f"Round #{run_number} ({phase}) findings: critical={critical}, major={major}, minor={minor}")

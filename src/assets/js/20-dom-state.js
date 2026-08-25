@@ -181,7 +181,11 @@ const state = {
   // The referenced-specification drawer. `open` is per-session on purpose: it is a dialog,
   // not part of the page layout, so a reload starts with it closed rather than refetching a
   // file nobody asked for. Only `width` is persisted.
-  specPeek: { open: false, width: uiPrefGet("specPeekWidth", 480), path: null },
+  // `kind` is which of the two things the drawer is showing: a PRD file ("spec", keyed by
+  // `path`) or one finding from another clarification round ("clarify", keyed by
+  // `clarifyPath`). The header's open-elsewhere button dispatches on it.
+  specPeek: { open: false, width: uiPrefGet("specPeekWidth", 480), path: null,
+    kind: null, clarifyPath: null },
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
