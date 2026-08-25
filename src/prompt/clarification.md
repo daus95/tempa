@@ -36,7 +36,7 @@ Run the critical pass along these axes, checking each one ACROSS THE WHOLE SPEC 
 
 1. Every capability a role is given has a screen (or endpoint) that role can actually reach, and that screen is listed in that role's navigation.
 2. Every acceptance criterion has something in the spec that implements it — a screen, a rule, an entity, a field.
-3. Every screen has the entities and fields it reads and writes.
+3. Every screen has the entities and fields it reads and writes, AND every role that can reach that screen is permitted to read and write them. Check the permission against the spec's own access rules, not against what the screen obviously needs — a screen whose role is banned from the data it reads is a contradiction no implementation satisfies, and it is invisible if you check the screen's data and the role's ban separately.
 4. Every entity and field has something that creates it and something that maintains it.
 5. Every state transition names who can trigger it, from which screen, and under what guard.
 6. Every rule names what enforces it and what the user sees when it is violated.
@@ -51,13 +51,14 @@ Save the ledger as a NEW file in ${coverage_dir}, named `coverage-<YYYYMMDD-HHMM
 
 PART 1 — INVENTORY. Transcribe, each with an id and where the spec defines it: every role; every capability each role is given; every screen; every endpoint; every entity; every field; every state and every state transition; every business rule; every acceptance criterion. Include everything the ALREADY-DECIDED RESOLUTIONS overlay adds, exactly as if it were already written into the PRD. This part is transcription, not judgement — never leave an item out because it looks fine, and never collapse a group ("the usual CRUD endpoints") instead of listing its members.
 
-PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the six axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen, axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule. Write it as a Markdown table:
+PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the six axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen AND per role that reaches it (a screen two roles reach is two rows, since the answer can differ by role), axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule. Write it as a Markdown table:
 
 ```
 | # | axis | subject | what must exist for this to be buildable | verdict | finding |
 |---|------|---------|------------------------------------------|---------|---------|
 | 1 | 1 cap->screen | Admin: void a sale | a screen an Admin can reach that lists sales | CRITICAL | C1 |
 | 2 | 1 cap->screen | Cashier: checkout | POS page, in Cashier navigation | OK | — |
+| 3 | 3 screen->data | POS page as Cashier | reads Product — and the Cashier may read it | CRITICAL | C2 |
 ```
 
 `verdict` is exactly one of:
