@@ -22,6 +22,7 @@ import pytest
 
 import tempa_clarify as tc
 import tempa_config
+import tempa_prompts as tp
 
 
 def _item(item_id, severity, heading, where, question, recommendation, answer, wrap_answer=True):
@@ -517,7 +518,7 @@ def test_run_apply_step_uses_clarify_apply_backend_and_effort_independent_of_cla
 
 def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=True,
                       gitignore_result=("unchanged", "already tracked"),
-                      commit_result=("committed", "abc123")):
+                      commit_result=("committed", "abc123"), coverage_by_round=None):
     """Wire up fake evaluate/auto-answer/apply/gitignore/commit steps and return the
     call-count dict.
 
@@ -554,6 +555,13 @@ def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=Tru
                       "PRD 1", f"question {calls['evaluate']}", f"recommendation {calls['evaluate']}", ""),
                 encoding="utf-8",
             )
+        # ...and, when the test asks for it, the agent writing this round's coverage ledger.
+        # None (the default) is the agent NOT writing one, which is a case the phase machine
+        # has to handle rather than an error — see _phase_may_advance.
+        ledger = None if coverage_by_round is None else coverage_by_round[index]
+        if ledger is not None:
+            (clar_dir / tc._COVERAGE_DIRNAME
+             / f"coverage-20260101-{calls['evaluate']:06d}.md").write_text(ledger, encoding="utf-8")
         return True
 
     def fake_auto_answer(config, unanswered_files):
@@ -586,7 +594,13 @@ def _finalize_config(tmp_path, clar_dir, **extra):
     # Checkpoints off unless a test asks for them: they add an apply session (and a commit)
     # every N answering rounds, which would change the round/apply counts every test below
     # asserts. The checkpoint tests pass finalize_checkpoint_rounds through **extra.
-    settings = {"finalize_checkpoint_rounds": None, **extra}
+    #
+    # Severity phases off for the same reason, and not because they are optional in practice
+    # (they are on by default): the tests in this section are about the loop's OTHER
+    # machinery — compaction, verification, convergence, checkpoints, stops — and a phase
+    # machine on top of it would make every round count in them a function of two things at
+    # once. The phase machine has its own section further down, which turns it back on.
+    settings = {"finalize_checkpoint_rounds": None, "clarify_severity_phases": False, **extra}
     tempa_config.save_config({
         "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}, **settings,
     })
@@ -1421,7 +1435,7 @@ def test_the_round_after_a_checkpoint_carries_an_empty_overlay(
     calls = _finalize_harness(monkeypatch, clar_dir, _dirty(2))
     monkeypatch.setattr(
         tc, "build_clarification_prompt",
-        lambda config, pending=None, skip_minor=False: f"pending={len(pending or [])}")
+        lambda config, skip_minor=False, pending=None, **kw: f"pending={len(pending or [])}")
 
     with pytest.raises(SystemExit):
         tc.run_clarify_finalize()
@@ -1472,3 +1486,465 @@ def test_a_checkpoint_ensures_the_prd_is_tracked_before_committing(
     assert calls["events"] == ["apply", "gitignore", "commit"] * 2
     assert calls["gitignore"] == 2
 
+
+
+# ---------------------------------------------------------------------------
+# The severity phase machine, and the coverage ledger that settles a phase
+#
+# Clarification walks the severities one phase at a time — every critical, then major, then
+# minor — because a round can only ANSWER what it found, answering a major rewrites the spec,
+# and a rewritten spec grows new criticals. Sweeping both at once therefore re-derives
+# criticals from documents the previous round changed, which is what made a real workspace
+# report 4, 4, 2, 3 and 1 criticals across five rounds without ever converging.
+#
+# The ledger is what lets a phase end: a round claiming zero criticals is believed when a
+# full check table with no unchecked row backs it up, and otherwise only after a second clean
+# round. Everything above _finalize_config runs with phases OFF; everything here turns them on.
+# ---------------------------------------------------------------------------
+
+def _ledger(unchecked=0, critical=0, checks=12):
+    """A coverage ledger as the prompt asks for it — the table is elided, since only the
+    closing summary marker is ever read mechanically."""
+    return ("| # | axis | subject | what must exist | verdict | finding |\n"
+            "|---|------|---------|-----------------|---------|---------|\n\n"
+            f'<!-- coverage:summary checks="{checks}" ok="{checks - critical - unchecked}" '
+            f'critical="{critical}" na="0" unchecked="{unchecked}" -->\n')
+
+
+def _phased_config(tmp_path, clar_dir, **extra):
+    return _finalize_config(tmp_path, clar_dir, clarify_severity_phases=True, **extra)
+
+
+def _clean(n=1):
+    return [{"critical": 0, "major": 0, "minor": 0}] * n
+
+
+# --- the pure decisions ----------------------------------------------------
+
+def test_phase_scope_with_phases_off_is_the_pre_phases_derivation():
+    assert tc._phase_scope(tc._PHASE_MAJOR, False, True) == "critical_major"
+    assert tc._phase_scope(tc._PHASE_MAJOR, False, False) == "all"
+
+
+def test_each_phase_widens_the_scope_by_exactly_one_severity():
+    assert tc._phase_scope(tc._PHASE_CRITICAL, True, True) == "critical"
+    assert tc._phase_scope(tc._PHASE_MAJOR, True, True) == "critical_major"
+    assert tc._phase_scope(tc._PHASE_MINOR, True, False) == "all"
+
+
+def test_a_phase_only_counts_the_severities_it_actually_looked_for():
+    """A critical-only round reports major=0 because it never looked, not because there are
+    none — counting it would settle the critical phase on a number nobody measured."""
+    assert tc._phase_blocking_count(tc._PHASE_CRITICAL, 2, 7, 3) == 2
+    assert tc._phase_blocking_count(tc._PHASE_MAJOR, 2, 7, 3) == 9
+    assert tc._phase_blocking_count(tc._PHASE_MINOR, 2, 7, 3) == 12
+
+
+def test_phase_order_and_where_it_ends():
+    assert tc._next_phase(tc._PHASE_CRITICAL, True, True) == tc._PHASE_MAJOR
+    # skip_minor on (the default): minor findings are never looked for, so major is the last.
+    assert tc._next_phase(tc._PHASE_MAJOR, True, True) is None
+    assert tc._next_phase(tc._PHASE_MAJOR, True, False) == tc._PHASE_MINOR
+    assert tc._next_phase(tc._PHASE_MINOR, True, False) is None
+    # Phases off: one phase, and nothing after it.
+    assert tc._next_phase(tc._PHASE_MAJOR, False, True) is None
+
+
+def test_findings_left_in_a_phase_never_settle_it():
+    assert tc._phase_may_advance(1, {"unchecked": 0}, 9) is False
+
+
+def test_a_complete_ledger_settles_a_phase_in_one_clean_round():
+    assert tc._phase_may_advance(0, {"unchecked": 0}, 1) is True
+
+
+def test_without_a_ledger_a_phase_needs_two_clean_rounds():
+    """One clean round is not proof: the behavior this exists to fix had a round report zero
+    criticals while three sat in the spec."""
+    assert tc._phase_may_advance(0, None, 1) is False
+    assert tc._phase_may_advance(0, None, 2) is True
+
+
+def test_an_unchecked_row_leaves_the_phase_unsettled():
+    assert tc._phase_may_advance(0, {"unchecked": 3}, 1) is False
+
+
+def test_with_phases_off_one_clean_round_still_ends_the_run():
+    """The ledger is written and logged either way, but it gates nothing when there are no
+    phases — that is what keeps a phases-off run behaving as it did before phases existed."""
+    assert tc._phase_may_advance(0, None, 1, phases_on=False) is True
+
+
+def test_advance_phase_transitions():
+    crit, major = tc._PHASE_CRITICAL, tc._PHASE_MAJOR
+    # Findings remain -> stay, and the clean streak resets.
+    assert tc._advance_phase(crit, True, True, 2, 2, None, 3) == (crit, 0, "stay")
+    # Clean and backed by a ledger -> on to the next phase, streak reset for it.
+    assert tc._advance_phase(crit, True, True, 0, 0, {"unchecked": 0}, 0) == (major, 0, "advanced")
+    # Clean, no ledger, first clean round -> stay and confirm.
+    assert tc._advance_phase(crit, True, True, 0, 0, None, 0) == (crit, 1, "stay")
+    # Nothing after the last phase.
+    assert tc._advance_phase(major, True, True, 0, 0, {"unchecked": 0}, 0) == (major, 1, "done")
+    # A critical in a later phase outranks everything else about the round.
+    assert tc._advance_phase(major, True, True, 1, 4, {"unchecked": 0}, 0) == (crit, 0, "demoted")
+
+
+def test_a_narrow_round_never_stamps_a_clean_evaluation():
+    """last_clean_evaluation_at is read as "a fresh evaluation found nothing at all". A
+    critical-only round reports major=0 and minor=0 without looking, so stamping on it would
+    open Start Implementation on a spec whose majors have never been evaluated."""
+    config = {}
+    tc._stamp_clean_evaluation_if_zero(config, 0, 0, 0, "critical")
+    tc._stamp_clean_evaluation_if_zero(config, 0, 0, 0, "critical_major")
+    assert config == {}
+    tc._stamp_clean_evaluation_if_zero(config, 0, 0, 0, "all")
+    assert config["last_clean_evaluation_at"] > 0
+
+
+# --- reading the ledger ----------------------------------------------------
+
+def test_coverage_summary_is_read_from_the_marker():
+    assert tc._parse_coverage_summary(_ledger(unchecked=2, critical=1, checks=10)) == {
+        "checks": 10, "ok": 7, "critical": 1, "na": 0, "unchecked": 2}
+
+
+def test_coverage_summary_takes_the_last_marker():
+    """The prompt shows the marker as an example before asking for it as the file's last
+    line, so an agent that echoes the example must not win over the real one."""
+    body = _ledger(unchecked=9) + "\n" + _ledger(unchecked=0)
+    assert tc._parse_coverage_summary(body)["unchecked"] == 0
+
+
+def test_coverage_summary_absent_or_unreadable_is_none():
+    assert tc._parse_coverage_summary("a ledger with no marker at all") is None
+    assert tc._parse_coverage_summary("<!-- coverage:summary checks=lots -->") is None
+
+
+def test_latest_coverage_ledger_picks_the_newest_by_name(tmp_path):
+    clar_dir = tmp_path / "clarifications"
+    (clar_dir / tc._COVERAGE_DIRNAME).mkdir(parents=True)
+    for name in ("coverage-20260101-000000.md", "coverage-20260103-000000.md",
+                 "coverage-20260102-000000.md"):
+        (clar_dir / tc._COVERAGE_DIRNAME / name).write_text(name, encoding="utf-8")
+    # By name, not mtime: the 02 file was written last but is not the newest round.
+    assert tc._latest_coverage_ledger(clar_dir)[0] == "coverage-20260103-000000.md"
+
+
+def test_no_coverage_dir_is_not_an_error(tmp_path):
+    assert tc._latest_coverage_ledger(tmp_path / "clarifications") is None
+
+
+def test_a_ledger_is_never_mistaken_for_a_findings_file(tmp_path):
+    """Everything that reads sources.clarifications globs "*.md" non-recursively and treats
+    every hit as a round's findings. A ledger written flat would be tabbed into the answer UI
+    and swept into the apply backlog, which is why it lives in a subfolder."""
+    clar_dir = tmp_path / "clarifications"
+    (clar_dir / tc._COVERAGE_DIRNAME).mkdir(parents=True)
+    (clar_dir / tc._COVERAGE_DIRNAME / "coverage-20260101-000000.md").write_text(
+        _ledger(), encoding="utf-8")
+    assert tc._clarification_result_files(clar_dir) == []
+    assert tc._clarification_backlog(clar_dir, {}) == ([], [])
+
+
+# --- the finalize loop, with phases on -------------------------------------
+
+def test_finalize_sweeps_criticals_first_then_widens_to_majors(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    calls = _finalize_harness(
+        monkeypatch, clar_dir,
+        [{"critical": 2, "major": 0, "minor": 0},   # 1 critical phase, dirty -> answer
+         {"critical": 0, "major": 0, "minor": 0},   # 2 clean + ledger -> settle, widen
+         {"critical": 0, "major": 3, "minor": 0},   # 3 major phase, dirty -> answer
+         {"critical": 0, "major": 0, "minor": 0},   # 4 clean + ledger -> compaction
+         {"critical": 0, "major": 0, "minor": 0}],  # 5 verification -> done
+        coverage_by_round=[None, _ledger(), None, _ledger(), _ledger()])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert exc.value.code == 0
+    assert calls["evaluate"] == 5
+    assert calls["answer"] == 2
+    # Two applies: the phase boundary writes out what the critical sweep decided, and the
+    # closing compaction writes out the rest. The boundary one is committed on the spot.
+    assert calls["apply"] == 2
+    assert calls["commits"] == ["tempa: clarification — critical sweep clean",
+                                "tempa: clarification finalized — PRD ready for implementation"]
+
+
+def test_finalize_sweeps_minors_last_when_they_are_being_looked_for(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """skip_minor off adds a third phase after major. Minor findings never block anything, so
+    the phase sweeps them rather than gating on them — but it still comes last."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "SCOPE: ${finding_scope}", encoding="utf-8")
+    calls = _finalize_harness(monkeypatch, clar_dir, _clean(3),
+                              coverage_by_round=[_ledger()] * 3)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=False)
+
+    assert exc.value.code == 0
+    assert [tp.SEVERITY_SCOPES["critical"] in calls["prompts"][0],
+            tp.SEVERITY_SCOPES["critical_major"] in calls["prompts"][1],
+            tp.SEVERITY_SCOPES["all"] in calls["prompts"][2]] == [True, True, True]
+
+
+def test_the_critical_phase_evaluates_for_criticals_only(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "SCOPE: ${finding_scope}\nDIR: ${coverage_dir}\n\n${previous_coverage_ledger}\n",
+        encoding="utf-8")
+    calls = _finalize_harness(
+        monkeypatch, clar_dir,
+        [{"critical": 1, "major": 0, "minor": 0}, *_clean(3)],
+        coverage_by_round=[None, _ledger(), _ledger(), _ledger()])
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    assert tp.SEVERITY_SCOPES["critical"] in calls["prompts"][0]
+    assert tp.SEVERITY_SCOPES["critical"] in calls["prompts"][1]
+    # Round 3 is the first one past the boundary, so it is the first to look for majors.
+    assert tp.SEVERITY_SCOPES["critical_major"] in calls["prompts"][2]
+
+
+def test_the_ledger_a_round_writes_is_carried_into_the_next_one(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "${previous_coverage_ledger}", encoding="utf-8")
+    calls = _finalize_harness(
+        monkeypatch, clar_dir, [{"critical": 1, "major": 0, "minor": 0}, *_clean(3)],
+        coverage_by_round=[_ledger(unchecked=4), _ledger(), _ledger(), _ledger()])
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    assert "this is the first sweep" in calls["prompts"][0]
+    assert 'unchecked="4"' in calls["prompts"][1]
+
+
+def test_a_critical_found_while_sweeping_majors_demotes_the_run(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """Answering a major rewrites the spec, and a rewritten spec grows new criticals. The
+    widening scope is what catches that, and the demotion is what stops the run from carrying
+    on with majors over a spec that is no longer buildable."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "SCOPE: ${finding_scope}", encoding="utf-8")
+    calls = _finalize_harness(
+        monkeypatch, clar_dir,
+        [{"critical": 0, "major": 0, "minor": 0},   # 1 critical sweep clean -> widen
+         {"critical": 1, "major": 2, "minor": 0},   # 2 major phase turns up a critical
+         {"critical": 0, "major": 0, "minor": 0},   # 3 back on criticals, clean -> widen
+         {"critical": 0, "major": 0, "minor": 0},   # 4 major phase clean -> compaction
+         {"critical": 0, "major": 0, "minor": 0}],  # 5 verification -> done
+        coverage_by_round=[_ledger(), None, _ledger(), _ledger(), _ledger()])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert exc.value.code == 0
+    assert tp.SEVERITY_SCOPES["critical_major"] in calls["prompts"][1]
+    # Round 3 is the demotion: back to criticals only, even though round 2 found majors too.
+    assert tp.SEVERITY_SCOPES["critical"] in calls["prompts"][2]
+    # Round 2's majors are still answered — they are already on paper, and leaving them blank
+    # only defers them to the next apply's backstop fill.
+    assert calls["answer"] == 1
+
+
+def test_a_clean_round_with_no_ledger_confirms_before_moving_on(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    calls = _finalize_harness(monkeypatch, clar_dir, _clean(4), coverage_by_round=None)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert exc.value.code == 0
+    # Rounds 1-2 settle the critical sweep (two clean rounds, no ledger), 3-4 the major phase.
+    # Nothing was answered and nothing was applied: every round came back clean.
+    assert calls["evaluate"] == 4
+    assert calls["answer"] == 0
+    assert calls["apply"] == 0
+
+
+def test_the_critical_phase_stops_at_its_round_budget(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """A critical sweep that keeps making progress, one critical at a time, is not a loop the
+    convergence guard catches — and a critical is the specification being unbuildable, which
+    is worth a human rather than another unattended answering round."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir, critical_phase_max_rounds=2,
+                   finalize_no_progress_rounds=99)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 3, "major": 0, "minor": 0},
+        {"critical": 2, "major": 0, "minor": 0},
+        {"critical": 1, "major": 0, "minor": 0},
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    # Rounds 1 and 2 answer; round 3 hits the budget and stops before spending another.
+    assert calls["evaluate"] == 3
+    assert calls["answer"] == 2
+    assert calls["apply"] == 0
+
+
+def test_the_convergence_guard_judges_the_phase_its_own_findings(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """In the critical phase, a round that changed nothing about criticals has made no
+    progress — whatever happened to the majors it never looked at."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir, finalize_no_progress_rounds=2)
+    calls = _finalize_harness(monkeypatch, clar_dir,
+                              [{"critical": 2, "major": 9, "minor": 0}])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert calls["evaluate"] == 3
+
+
+def test_finalize_resumes_the_phase_a_previous_run_left_behind(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """A finalize run picks up a sweep that manual rounds (or a stopped run) got part-way
+    through, the same way it picks up their pending overlay."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir, last_severity_phase="major")
+    (isolate_tempa_paths["prompt_dir"] / "clarification.md").write_text(
+        "SCOPE: ${finding_scope}", encoding="utf-8")
+    calls = _finalize_harness(monkeypatch, clar_dir, _clean(2),
+                              coverage_by_round=[_ledger(), _ledger()])
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert tp.SEVERITY_SCOPES["critical_major"] in calls["prompts"][0]
+
+
+# --- manual rounds ---------------------------------------------------------
+
+def _manual_harness(monkeypatch, clar_dir, findings, ledger=None):
+    """One manual evaluate pass, faked. Returns the prompts it was given."""
+    prompts = []
+
+    def fake_session(prompt, run_number, backend, model, reasoning_effort=""):
+        prompts.append(prompt)
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = findings
+        tempa_config.save_config(cfg)
+        if findings["critical"] or findings["major"]:
+            (clar_dir / "clarification-20260101-000000.md").write_text(
+                _item("C1", "critical", "Finding", "PRD 1", "q", "r", ""), encoding="utf-8")
+        if ledger is not None:
+            (clar_dir / tc._COVERAGE_DIRNAME / "coverage-20260101-000001.md").write_text(
+                ledger, encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(tc, "run_clarification_session", fake_session)
+    return prompts
+
+
+def _manual_config(tmp_path, clar_dir, **extra):
+    tempa_config.save_config({
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}, **extra,
+    })
+
+
+def test_a_manual_round_stays_on_criticals_until_they_are_clean(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The phase is persisted because manual clarification is one round per process: without
+    it every `tempa clarify` would restart the sweep at the widest scope, which is the
+    behavior the phases exist to replace."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _manual_config(tmp_path, clar_dir)
+    _manual_harness(monkeypatch, clar_dir, {"critical": 2, "major": 0, "minor": 0})
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_once(noui=True)
+
+    assert exc.value.code == 0
+    config = tempa_config.load_config()
+    assert config["last_severity_phase"] == "critical"
+    assert config["clarify_phase_clean_rounds"] == 0
+
+
+def test_a_clean_manual_round_with_a_ledger_moves_on_to_majors(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _manual_config(tmp_path, clar_dir)
+    _manual_harness(monkeypatch, clar_dir, {"critical": 0, "major": 0, "minor": 0},
+                    ledger=_ledger())
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_once(noui=True)
+
+    assert tempa_config.load_config()["last_severity_phase"] == "major"
+
+
+def test_a_clean_manual_round_without_a_ledger_takes_two(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _manual_config(tmp_path, clar_dir)
+    for expected_phase, expected_clean in (("critical", 1), ("major", 0)):
+        _manual_harness(monkeypatch, clar_dir, {"critical": 0, "major": 0, "minor": 0})
+        with pytest.raises(SystemExit):
+            tc.run_clarify_once(noui=True)
+        config = tempa_config.load_config()
+        assert (config["last_severity_phase"], config["clarify_phase_clean_rounds"]) == (
+            expected_phase, expected_clean)
+
+
+def test_a_clean_critical_sweep_does_not_open_the_implementation_gate(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The round reported major=0 and minor=0 without looking for either. Stamping
+    last_clean_evaluation_at on that zeroes out the readiness gate's findings."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _manual_config(tmp_path, clar_dir)
+    _manual_harness(monkeypatch, clar_dir, {"critical": 0, "major": 0, "minor": 0},
+                    ledger=_ledger())
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_once(noui=True)
+
+    assert tempa_config.load_config().get("last_clean_evaluation_at", 0) == 0

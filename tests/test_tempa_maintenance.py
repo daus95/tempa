@@ -170,6 +170,18 @@ def test_reset_clarify_config_state_clears_tracked_keys():
     assert config["last_finalize_round"] == 0
 
 
+def test_reset_clarify_config_state_restarts_the_severity_sweep():
+    """A wiped workspace restarts at the critical sweep. Leaving last_evaluation_scope behind
+    would also go on holding the Start Implementation gate shut over a round whose findings
+    file no longer exists."""
+    config = {"last_severity_phase": "major", "clarify_phase_clean_rounds": 2,
+              "last_evaluation_scope": "critical"}
+    tm._reset_clarify_config_state(config)
+    assert "last_severity_phase" not in config
+    assert "clarify_phase_clean_rounds" not in config
+    assert "last_evaluation_scope" not in config
+
+
 def test_reset_clarify_config_state_missing_keys_no_error():
     config = {}
     tm._reset_clarify_config_state(config)

@@ -450,6 +450,57 @@ def test_build_clarification_prompt_narrow_params(tmp_path, isolate_tempa_paths)
     assert f"CLAR={sources['clarifications']}" in prompt
 
 
+def test_clarification_prompt_renders_the_severity_scope(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "SCOPE: ${finding_scope}")
+    config = _sample_config(tmp_path)
+    for scope, text in tp.SEVERITY_SCOPES.items():
+        assert text in tp.build_clarification_prompt(config, severity_scope=scope)
+
+
+def test_an_unknown_severity_scope_falls_back_to_skip_minor(tmp_path, isolate_tempa_paths):
+    """Rather than rendering a scope line the agent cannot act on."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "SCOPE: ${finding_scope}")
+    config = _sample_config(tmp_path)
+    assert tp.SEVERITY_SCOPES["critical_major"] in tp.build_clarification_prompt(
+        config, skip_minor=True, severity_scope="nonsense")
+    assert tp.SEVERITY_SCOPES["all"] in tp.build_clarification_prompt(
+        config, skip_minor=False, severity_scope=None)
+
+
+def test_clarification_prompt_renders_the_coverage_ledger(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification",
+                  "DIR: ${coverage_dir}\n${previous_coverage_ledger}")
+    config = _sample_config(tmp_path)
+    prompt = tp.build_clarification_prompt(
+        config, coverage_dir="/w/coverage",
+        previous_ledger=("coverage-20260101-000000.md", "  a table  "))
+    assert "DIR: /w/coverage" in prompt
+    assert "--- coverage-20260101-000000.md ---" in prompt
+    assert "a table" in prompt
+
+
+def test_no_previous_ledger_says_so_rather_than_leaving_a_dangling_header(
+    tmp_path, isolate_tempa_paths,
+):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification",
+                  "${previous_coverage_ledger}")
+    prompt = tp.build_clarification_prompt(_sample_config(tmp_path))
+    assert "No previous coverage ledger" in prompt
+    assert "${previous_coverage_ledger}" not in prompt
+
+
+def test_an_oversized_ledger_is_truncated_with_an_instruction(tmp_path, isolate_tempa_paths):
+    """Truncating is safe because the prompt has the agent re-derive the inventory anyway: a
+    missing tail costs re-derivation, not correctness."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification",
+                  "${previous_coverage_ledger}")
+    huge = "row\n" * tp.LEDGER_PROMPT_MAX_CHARS
+    prompt = tp.build_clarification_prompt(
+        _sample_config(tmp_path), previous_ledger=("coverage-20260101-000000.md", huge))
+    assert len(prompt) < len(huge)
+    assert "this ledger was truncated" in prompt
+
+
 def test_build_apply_clarification_prompt(tmp_path, isolate_tempa_paths):
     _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification", "APPLY ${sources.prd} FILES:${clarification_files}")
     config = _sample_config(tmp_path)

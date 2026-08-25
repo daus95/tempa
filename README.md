@@ -404,10 +404,12 @@ intend (this usually starts showing around iteration 4 or 5) — by that point i
 context (from the PRD plus prior answers) that its recommendations can be trusted, and
 continuing manually would just repeat the same outcome.
 
-Finalize stops as soon as there are no more critical/major findings — some minor findings
-may still remain, and that's **fine**: they'll be resolved anyway during implementation
-(Step 3 below). So once it finishes, you can move straight on to implementation without
-chasing down remaining minor findings.
+Finalize sweeps the severities in order — every critical first, then major (see
+[Severity phases](docs/clarify-modes.md#severity-phases)) — and stops as soon as there are no
+more critical/major findings. Some minor findings may still remain, and that's **fine**:
+they'll be resolved anyway during implementation (Step 3 below). So once it finishes, you can
+move straight on to implementation without chasing down remaining minor findings. (Turning
+"Only evaluate critical & major findings" off adds a third phase that does chase them down.)
 
 This can take a while — Finalize repeats the evaluate → answer cycle on its own until
 clean, which can mean several rounds depending on how much the PRD still needs resolving.

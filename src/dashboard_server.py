@@ -393,7 +393,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         )
         requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
         overlay = pending_overlay_stats(self.server.clar_dir, _load_clarify_applied_hashes())
-        status = _implement_readiness_status(findings, True, requirement, overlay["findings"])
+        status = _implement_readiness_status(
+            findings, True, requirement, overlay["findings"],
+            tempa_config.severity_sweep_pending(dashboard_config))
         if not status["ready"]:
             # Wording matches the requirement actually configured (dashboard Settings'
             # "Start Implementation requires") rather than always assuming the strictest

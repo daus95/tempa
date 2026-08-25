@@ -102,7 +102,7 @@ it. `docs` and `apps` mirror `workspace.docs`/`workspace.apps` exactly; `prd`, `
 |-----|------|--------------|
 | `prd` | `<specs>/prd` (i.e. `.tempa/specs/prd`) | **PRD** = the **new** specification to be worked on (incoming work folder) |
 | `docs` | `workspace.docs` | **current** system documentation — reference for "what already exists" |
-| `clarifications` | `<specs>/clarifications` (i.e. `.tempa/specs/clarifications`) | clarification results output |
+| `clarifications` | `<specs>/clarifications` (i.e. `.tempa/specs/clarifications`) | clarification results output; each round's coverage ledger goes in a `coverage/` subfolder of it (see [clarify-modes.md](clarify-modes.md#the-coverage-ledger)) — deliberately not beside the findings files, since everything that reads this folder treats every `.md` directly in it as a round's findings |
 | `epics` | `<specs>/pbi/epics` (i.e. `.tempa/specs/pbi/epics`) | epic/feature/task output from plan drafting (automatic via `implement`) |
 | `apps` | `workspace.apps` | monorepo root — **every service**; each service's source & tests live inside its own folder |
 

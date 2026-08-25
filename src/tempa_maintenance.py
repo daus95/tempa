@@ -104,6 +104,13 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("last_clarification_findings", None)
     config.pop("clarify_applied_hashes", None)
     config.pop("last_clean_evaluation_at", None)
+    # Where the severity phase machine had got to (see tempa_clarify._load_phase_state). A
+    # wiped workspace has to restart at the critical sweep, and "last_evaluation_scope" left
+    # at "critical" would go on holding the Start Implementation gate shut over a round whose
+    # findings file no longer exists.
+    config.pop("last_severity_phase", None)
+    config.pop("clarify_phase_clean_rounds", None)
+    config.pop("last_evaluation_scope", None)
     # Resumable session ids (see tempa_config.get_clarify_session_id /
     # get_clarify_apply_session_id) are meaningless once the clarification files they
     # point at are gone — leaving them would risk a later apply/evaluate --resume-ing a
@@ -236,7 +243,9 @@ def run_clear_all() -> None:
     # _reset_clarify_config_state) — treat that as "still something to clear" too,
     # or this early-exit would leave them behind forever.
     stale_clarify_state = (
-        any(k in config for k in ("last_clarification_action", "last_clarification_findings", "clarify_applied_hashes"))
+        any(k in config for k in ("last_clarification_action", "last_clarification_findings",
+                                  "clarify_applied_hashes", "last_severity_phase",
+                                  "last_evaluation_scope"))
         or config.get("last_auto_answer", 0) != 0
         or config.get("last_clarification_round", 0) != 0
         or config.get("last_finalize_round", 0) != 0

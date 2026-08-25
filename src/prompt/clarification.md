@@ -28,6 +28,8 @@ Severity is not a matter of taste. Classify every finding by this rubric, the sa
 - MAJOR — buildable, but the implementer has to guess, and two reasonable guesses produce materially different systems.
 - MINOR — wording, naming or consistency only; every reasonable reading yields the same system.
 
+THIS ROUND IS SCOPED TO: ${finding_scope}. A severity outside that scope is not looked for, not evaluated, and not written down — not even as an aside inside another finding.
+
 CRITICAL FINDINGS COME FIRST, AND THEY MUST BE COMPLETE. Before evaluating anything else, make one full pass over every spec document hunting ONLY for critical findings, and do not begin writing the findings file until that pass is finished. Report EVERY critical it turns up — there is no cap, and no "reasonable report size" to stay within. A round that reports fewer criticals than the spec actually contains costs the user one more full round for each one it held back, so holding one back is the most expensive thing you can do here. Only once that pass is exhausted, look for the other severities this round is scoped to.
 
 Run the critical pass along these axes, checking each one ACROSS THE WHOLE SPEC rather than section by section — most criticals live between two sections that each read fine on their own:
@@ -40,6 +42,52 @@ Run the critical pass along these axes, checking each one ACROSS THE WHOLE SPEC 
 6. Every rule names what enforces it and what the user sees when it is violated.
 
 Do not assume the earlier rounds were exhaustive. A critical that follows from the spec text alone — one that needs no decision from the overlay above in order to see — should have been caught in an earlier round, and the fact that it is still here means an earlier round missed it. Assume such misses exist and hunt for them deliberately.
+
+=== THE COVERAGE LEDGER — HOW THAT PASS IS MADE COMPLETE ===
+
+The critical pass is not a reading you summarise; it is a table you fill in. Write the ledger BEFORE you write a single finding, and derive the findings file from it — the findings file is a projection of the ledger's CRITICAL rows, never a free-form report. This is what stops the pass from stopping at a plausible number of findings: a table has a known number of rows, and a row nobody filled in is visible.
+
+Save the ledger as a NEW file in ${coverage_dir}, named `coverage-<YYYYMMDD-HHMMSS>.md` using the current date/time. Create that folder if it does not exist. Never delete, overwrite or edit a ledger already there — each round's ledger is the record of what that round actually checked.
+
+PART 1 — INVENTORY. Transcribe, each with an id and where the spec defines it: every role; every capability each role is given; every screen; every endpoint; every entity; every field; every state and every state transition; every business rule; every acceptance criterion. Include everything the ALREADY-DECIDED RESOLUTIONS overlay adds, exactly as if it were already written into the PRD. This part is transcription, not judgement — never leave an item out because it looks fine, and never collapse a group ("the usual CRUD endpoints") instead of listing its members.
+
+PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the six axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen, axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule. Write it as a Markdown table:
+
+```
+| # | axis | subject | what must exist for this to be buildable | verdict | finding |
+|---|------|---------|------------------------------------------|---------|---------|
+| 1 | 1 cap->screen | Admin: void a sale | a screen an Admin can reach that lists sales | CRITICAL | C1 |
+| 2 | 1 cap->screen | Cashier: checkout | POS page, in Cashier navigation | OK | — |
+```
+
+`verdict` is exactly one of:
+
+- OK — the thing that must exist does exist. Name it in the "what must exist" cell, so the claim is checkable rather than asserted.
+- CRITICAL — it does not, and that makes the spec unbuildable as written. Every CRITICAL row carries the id of the finding that reports it, and every critical finding traces back to at least one CRITICAL row.
+- N/A — the axis genuinely does not apply to this subject. Give the reason in one clause; an "N/A" with no reason is an unchecked row wearing a verdict.
+
+A row you cannot decide is UNCHECKED: leave its verdict cell empty rather than guessing. An honest unchecked row tells the next round exactly where to look; a guessed OK is the miss that costs a full round.
+
+Finish the ledger with this marker, exactly once, as its LAST line. It is read mechanically, so keep the attribute names, the order and the quoting exactly as shown:
+
+```
+<!-- coverage:summary checks="<total rows>" ok="<OK rows>" critical="<CRITICAL rows>" na="<N/A rows>" unchecked="<rows with an empty verdict>" -->
+```
+
+Write the ledger even when the round finds nothing. A round reporting zero criticals is only believable with a full table behind it, and that table is what lets the next round move on to the lower severities instead of sweeping for criticals again.
+
+=== THE PREVIOUS ROUND'S COVERAGE LEDGER ===
+
+${previous_coverage_ledger}
+
+Rules for using it — follow all four:
+
+1. RE-DERIVE, DO NOT TRUST. Build Part 1 from the spec and the overlay again this round. A previous ledger tells you what was checked, not what is true: if it is missing a screen the spec has, that omission IS the miss you are hunting.
+2. RE-LIST EVERY ROW. This round's ledger has to be complete on its own. A row whose subject and inputs are unchanged since the previous round, and whose verdict was OK, may be carried over without re-arguing it — but it must still appear, with its verdict, or the counts mean nothing.
+3. NEW SURFACE, NEW ROWS. Everything the overlay has added since that ledger — a screen, a field, an endpoint, a rule, a state — is inventory now, and every axis that quantifies over it gets its own row. This is where a decision that added something without wiring it in becomes visible.
+4. AN UNCHECKED ROW IS THE FIRST THING TO CHECK. Any row the previous ledger left with an empty verdict is this round's highest priority.
+
+=== END COVERAGE LEDGER ===
 
 For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
 

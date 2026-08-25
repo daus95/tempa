@@ -171,7 +171,8 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
     implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
     implement_readiness_json = json.dumps(
         _implement_readiness_status(
-            latest_findings, last_action is not None, implementation_requirement, overlay["findings"]),
+            latest_findings, last_action is not None, implementation_requirement,
+            overlay["findings"], tempa_config.severity_sweep_pending(dashboard_config)),
         ensure_ascii=False,
     )
     backends_status_json = json.dumps(

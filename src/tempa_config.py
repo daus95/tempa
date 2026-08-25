@@ -399,6 +399,8 @@ DEFAULT_CONFIG = {
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
+    "clarify_severity_phases": True,
+    "critical_phase_max_rounds": 6,
     "implementation_start_requirement": "no_critical_or_major",
     "notifications": {
         "email": {
@@ -778,6 +780,48 @@ def get_skip_minor_findings(config: dict) -> bool:
     """Return config.json's "skip_minor_findings" (dashboard toggle + CLI --skip-minor
     default), defaulting to True for a missing value."""
     return bool(config.get("skip_minor_findings", True))
+
+
+def get_clarify_severity_phases(config: dict) -> bool:
+    """Return config.json's "clarify_severity_phases" (default True) — whether clarification
+    walks the severities in phases (every critical first, then major, then minor) instead of
+    evaluating them all in one round.
+
+    Off reproduces the pre-phases behavior exactly: every round is scoped to critical+major
+    (or all, per skip_minor_findings) and the run ends when both reach zero. See
+    tempa_clarify._PHASE_SCOPES for what the switch actually changes about a round."""
+    return bool(config.get("clarify_severity_phases", True))
+
+
+def severity_sweep_pending(config: dict) -> bool:
+    """True when the most recent evaluate pass was scoped narrower than "did anything major
+    turn up" — i.e. it was a critical-only round of the critical phase.
+
+    Such a round records major=0 because it never looked for majors, so the Start
+    Implementation gate must not read that zero as an answer (see
+    dashboard_clarify_parse._implement_readiness_status). A config.json with no
+    "last_evaluation_scope" at all predates severity phases: its last round was the old
+    critical+major one, so it is NOT pending and an already-open gate stays open."""
+    return config.get("last_evaluation_scope", "all") not in ("critical_major", "all")
+
+
+def get_critical_phase_max_rounds(config: dict) -> int | float:
+    """Return config.json's "critical_phase_max_rounds" (default 6) — how many answering
+    rounds a `clarify --finalize` run may spend in the critical phase, across the whole run,
+    before it stops and asks for a human.
+
+    Bounded separately from finalize_no_progress_rounds because the two catch different
+    things: that one catches a loop making no progress, this one catches a loop that is
+    making progress but has spent long enough on findings a human should probably be
+    deciding — a critical is, by the rubric, the specification being unbuildable."""
+    return _get_positive_number(config, "critical_phase_max_rounds", DEFAULT_CONFIG["critical_phase_max_rounds"])
+
+
+# "last_severity_phase", "clarify_phase_clean_rounds" and "last_evaluation_scope" are
+# deliberately NOT in DEFAULT_CONFIG: they are a run's state, not settings, and every reader
+# above treats a missing key as "no clarification round has run under severity phases yet".
+# Seeding them would make a brand-new workspace look like one mid-sweep — and would make
+# `tempa clear` report stale state to clear on a workspace that has never run anything.
 
 
 def _get_positive_number(config: dict, key: str, default: int) -> int | float:
