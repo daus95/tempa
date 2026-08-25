@@ -303,12 +303,15 @@ WORKSPACE_LABELS = {
 #   to a cheaper model. A full stage of its own (has its own backends/reasoning_efforts
 #   entries too, same as clarify/plan/implement) — the optimal backend/effort for
 #   mechanical apply work isn't necessarily the same as for evaluate.
-# - plan         : epic/feature/task planning session (run automatically by implement / implement --replan)
-# - implement    : implementation session (implement), including QA and verify
+# - plan         : epic/feature/task planning session (run automatically by implement /
+#   implement --replan) — its output determines the validity of every implementation that
+#   follows, so it keeps the strongest default model, same as clarify.
+# - implement    : implementation session (implement), including QA and verify — runs
+#   repeatedly at high volume, so it defaults to a cheaper/faster model.
 DEFAULT_MODELS = {
     "clarify": "claude-opus-5",
     "clarify_apply": "claude-sonnet-5",
-    "plan": "claude-sonnet-5",
+    "plan": "claude-opus-5",
     "implement": "claude-sonnet-5",
 }
 

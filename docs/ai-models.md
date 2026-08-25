@@ -46,14 +46,17 @@ Each stage has a different workload profile:
   its backend and reasoning effort are configured independently of `clarify`'s, since the
   optimal choice for mechanical apply work isn't necessarily the same as for evaluate (e.g.
   evaluate on Claude Opus at high effort, apply on a cheaper backend/model entirely).
-- **Plan drafting** (`plan`) and **implementation** (`implement`) run repeatedly and
-  automatically at high volume (per epic/feature/session), unattended — here speed & cost
-  matter more, as long as quality stays adequate. Default: a faster/cheaper model that's
-  still capable (`claude-sonnet-5`).
+- **Plan drafting** (`plan`) runs automatically (via `implement` / `implement --replan`) but,
+  like `clarify`, its output determines the validity of every implementation that follows —
+  it needs the most careful reasoning to lay out epics/features/tasks correctly. Default: the
+  most capable model (`claude-opus-5`).
+- **Implementation** (`implement`) runs repeatedly and automatically at high volume (per
+  epic/feature/session), unattended — here speed & cost matter more, as long as quality stays
+  adequate. Default: a faster/cheaper model that's still capable (`claude-sonnet-5`).
 
 Because the needs differ, each stage's model can be set independently — e.g. keep Opus for
-`clarify` (critical, rarely runs) but Sonnet for `implement` (runs often, high volume), or
-drop everything to Haiku for a quick/cheap trial run.
+`clarify`/`plan` (critical, rarely/automatically run) but Sonnet for `implement` (runs often,
+high volume), or drop everything to Haiku for a quick/cheap trial run.
 
 ## Table & commands
 
@@ -63,11 +66,11 @@ The AI model is stored in `config.json` under the `models` key.
 |-------|----------------|---------|
 | `clarify` | `clarify` (evaluate) | `claude-opus-5` (opus-5) |
 | `clarify_apply` | `clarify --apply`, `--auto-answer`, the apply half of `--finalize` | `claude-sonnet-5` (sonnet-5) |
-| `plan` | plan drafting (automatic via `implement`, or `implement --replan`) | `claude-sonnet-5` (sonnet-5) |
+| `plan` | plan drafting (automatic via `implement`, or `implement --replan`) | `claude-opus-5` (opus-5) |
 | `implement` | `implement`, QA, `verify` | `claude-sonnet-5` (sonnet-5) |
 
 ```bash
-tempa set-model --clarify opus-5 --clarify-apply sonnet-5 --plan sonnet-5 --implement sonnet-5
+tempa set-model --clarify opus-5 --clarify-apply sonnet-5 --plan opus-5 --implement sonnet-5
 tempa set-model --implement claude-opus-5      # accepts an alias or a full model id
 tempa show-models                              # show the model per stage
 ```
