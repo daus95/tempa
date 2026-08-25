@@ -255,16 +255,62 @@ The sequence:
    is filled in mechanically with its own `Recommendation` text (no agent call). Everything
    answered enters the loop as the pending overlay. Nothing is applied here.
 2. **Loop: evaluate → auto-answer.** Each round evaluates the PRD carrying the whole overlay,
-   then auto-answers whatever it found. **No apply runs inside the loop** — the PRD is not
-   touched. Repeat until a round reports `critical == 0` and `major == 0` (remaining `minor`
-   findings are considered acceptable).
+   then auto-answers whatever it found. **No apply runs per round** — the PRD is untouched
+   between checkpoints (see below). Repeat until a round reports `critical == 0` and
+   `major == 0` (remaining `minor` findings are considered acceptable).
 3. **Compaction.** One apply pass writes the entire accumulated overlay into the PRD/spec.
    This replaces what used to be an apply after every single round.
 4. **Verification.** One more evaluation, this time over the compacted PRD with an empty
    overlay — because applying is an agent rewriting prose, and the only way to know the
    documents themselves are clean is to evaluate them. A clean verification ends the run
    successfully (and leaves `last_clarification_action` at `evaluate`, which is what the
-   dashboard's finalize readiness looks for).
+   dashboard's finalize readiness looks for), after writing one last `-final` PRD snapshot
+   and commit — the version that is ready to be implemented. That closing snapshot runs on
+   every successful finish, including a short run that never checkpointed and a run with
+   checkpoints switched off; only the backup/commit toggles below can suppress it.
+
+### Checkpoints
+
+Everything above keeps the PRD untouched until the compaction, which is cheap — but it means
+a long unattended run holds hours of agent work in an overlay the documents have never seen,
+with no restorable point until the very last step.
+
+`finalize_checkpoint_rounds` (default `5`, dashboard Settings → Runs tab → "Checkpoint Every
+N Rounds") buys some of that back. Every N answering rounds the loop stops and does three
+things, in this order:
+
+1. **Apply** — one apply pass writes everything answered so far into the PRD/spec.
+2. **Back up** — a timestamped ZIP of the PRD folder, identical to what the **Download PRD**
+   button produces, into the backup folder (`finalize_checkpoint_backup`,
+   `finalize_checkpoint_backup_dir`).
+3. **Commit** — `git add -A` + `git commit` in the working folder
+   (`finalize_checkpoint_commit`). After the backup, so the ZIP is part of the commit it
+   belongs to.
+
+Set the interval to blank for no checkpoints at all — the pure one-apply-at-the-end behavior
+finalize had before. Each checkpoint costs one extra agent session, so `1` (apply after every
+round) is the most expensive setting; the trade being made is recoverability, not evaluation
+quality, since the overlay already made per-round applies unnecessary for correctness.
+
+Backing up and committing are **best-effort**: whatever they report is logged and the run
+carries on either way, because losing an unattended run's whole clarification effort over a
+full disk or a missing `user.email` would cost far more than the snapshot was protecting. A
+checkpoint whose *apply* fails does stop the run — that is a systemic problem (auth, backend,
+prompt) which would recur at the compaction anyway.
+
+Two interactions worth knowing:
+
+- A checkpoint does **not** consume the two-rewrite budget below. That bound exists for the
+  "verification came back dirty, rewrite again" loop; a checkpoint is scheduled by a round
+  counter instead, and charging it there would stop a run checkpointing every 5 rounds long
+  before its 20th round.
+- The counter is per *answering* round and resets after any write to the PRD, so a compaction
+  also clears it — a checkpoint never fires just to apply a single round's answers right
+  after a compaction emptied the overlay.
+
+Nothing prunes old snapshots: each one is a full copy of the PRD, in the backup folder and —
+if that folder is inside the working folder — in git history too. See
+[config-json.md](config-json.md) for all four settings.
 
 If that verification comes back **dirty**, the run doesn't fail: it re-enters the loop,
 answers the new findings, and compacts a second time. That's bounded at two compactions per
@@ -288,8 +334,11 @@ The verification round is a full evaluation and counts as a normal round — it 
 `last_clarification_round` / `last_finalize_round` and consumes the `max_clarification_run`
 budget like any other.
 
-Stopping a `--finalize` run mid-way now leaves the answers **unapplied** (in the overlay)
-rather than a partially-updated PRD — nothing has been written until the compaction step.
+Stopping a `--finalize` run mid-way leaves the answers recorded since the last checkpoint
+**unapplied** (in the overlay) rather than a partially-updated PRD. With checkpoints off,
+that means nothing has been written at all until the compaction step; with them on, the PRD
+is whatever the most recent checkpoint made it — a complete, applied, committed state, not a
+half-finished one, since a checkpoint's apply either finishes or stops the run.
 
 ### Stopping a finalize run
 
@@ -298,8 +347,8 @@ in flight had worked out but not yet written.
 
 **Stop After Current Round** — the chevron next to that button, or `tempa clarify
 --stop-graceful` — leaves a request instead. The run checks for it at the three points where it
-is about to spend another agent session: before the next round, before the compaction apply, and
-before the auto-answer step. Whichever session is already running finishes and records its work;
+is about to spend another agent session: before the next round, before the compaction apply,
+before the auto-answer step, and before a checkpoint's apply. Whichever session is already running finishes and records its work;
 the run then exits cleanly (code 0). Because `last_finalize_round` / `last_finalize_phase` and
 the round's findings are saved before each of those checks, the run picks up from exactly where
 it stopped the next time you click **Finalized Clarification**.

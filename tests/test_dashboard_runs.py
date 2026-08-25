@@ -136,8 +136,18 @@ def _server_with_run(running: bool, mode: str | None):
     return SimpleNamespace(clarify_run=run)
 
 
-def _limits(max_run, no_progress=5):
-    return {"max_clarification_run": max_run, "finalize_no_progress_rounds": no_progress}
+def _limits(max_run, no_progress=5, checkpoint=5):
+    return {"max_clarification_run": max_run, "finalize_no_progress_rounds": no_progress,
+            "finalize_checkpoint_rounds": checkpoint}
+
+
+def test_a_changed_checkpoint_interval_is_warned_about_too():
+    """It is snapshotted at run start exactly like the two round limits, so a mid-run save
+    can't reach the run the user is watching either."""
+    server = _server_with_run(True, "finalize")
+    warning = dr._finalize_limit_change_warning(server, _limits(20), _limits(20, checkpoint=2))
+    assert warning is not None
+    assert "Checkpoint Every N Rounds was saved as 2" in warning
 
 
 def test_no_warning_when_the_value_did_not_change():

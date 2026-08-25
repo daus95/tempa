@@ -258,6 +258,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/workspace/create": "_handle_workspace_create",
         "/api/workspace/recent/remove": "_handle_workspace_recent_remove",
         "/api/config/save": "_handle_config_save",
+        "/api/settings/pick-backup-folder": "_handle_settings_pick_backup_folder",
         "/api/notifications/test-email": "_handle_test_email",
         "/api/principles/save": "_handle_principles_save",
         "/api/epic/spec/save": "_handle_epic_spec_save",
@@ -501,6 +502,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             dashboard_api_status.backend_status(),
             lambda previous, new: _finalize_limit_change_warning(self.server, previous, new),
         ))
+
+    def _handle_settings_pick_backup_folder(self) -> None:
+        self._send_json(*dashboard_api_settings.pick_backup_folder(_pick_folder_dialog))
 
     def _handle_test_email(self) -> None:
         self._send_json(*dashboard_api_settings.run_test_email())

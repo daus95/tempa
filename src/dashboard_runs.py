@@ -146,18 +146,19 @@ def _stream_tempa_command(run: dict, command: str, args: list[str]) -> int:
 _FINALIZE_SNAPSHOT_LIMITS = {
     "max_clarification_run": "Max Finalize Clarification Round",
     "finalize_no_progress_rounds": "Max Finalize No-Progress Round",
+    "finalize_checkpoint_rounds": "Checkpoint Every N Rounds",
 }
 
 
 def _finalize_limit_change_warning(server, previous: dict, current: dict) -> str | None:
-    """Warning text for saving a changed finalize run limit ("Max Finalize Clarification
-    Round" / "Max Finalize No-Progress Round") while a Finalized Clarification run is
-    already in progress — or None when there's nothing to warn about.
+    """Warning text for saving a changed finalize run limit (any of the settings in
+    _FINALIZE_SNAPSHOT_LIMITS above) while a Finalized Clarification run is already in
+    progress — or None when there's nothing to warn about.
 
-    `clarify --finalize` reads both limits ONCE, when its process starts (see
+    `clarify --finalize` reads those limits ONCE, when its process starts (see
     run_clarify_finalize in tempa_clarify.py), and keeps using that snapshot for its whole
     evaluate/apply loop even though it re-reads the rest of config.json every round. So
-    lowering a limit mid-run doesn't shorten the run the user is watching: its rounds keep
+    changing a limit mid-run doesn't reach the run the user is watching: its rounds keep
     counting toward the limits that were in effect when it started ("ROUND 17/25" while the
     Settings field reads 10), which is easily mistaken for the limit not being enforced at
     all. It is enforced — just from the next finalize run onward. This is the one moment

@@ -59,6 +59,8 @@ functions directly in-process.
 | `tempa_implement.py` | The implement poll loop and scheduler: `check_and_run` walks four steps in priority order — `_resume_interrupted_qa`, `_resume_in_progress_epic`, `_run_qa_gate`, `_start_next_epic` — and the first one that takes the poll wins. That order IS the policy: resuming interrupted work beats starting new work, and no epic is implemented past one still waiting on QA. |
 | `tempa_maintenance.py` | `clear`/reset commands — destructive, gated behind confirmation + a workspace-root safety check. |
 | `tempa_commands.py` | The remaining mostly-stateless commands: workspace/model/backend/reasoning-effort/status/spec/verify/test, plus opening the dashboard. |
+| `tempa_git.py` | The one place Tempa runs git: `commit_workspace_changes` (`add -A` + `commit` in `workspace.root`), behind the `commit_after_qa_pass` and `finalize_checkpoint_commit` settings. Reports an outcome and never raises — an auto-commit must never be able to fail a run. |
+| `tempa_backup.py` | PRD snapshots for `clarify --finalize` checkpoints: `backup_prd_zip` writes a timestamped ZIP of the PRD folder into the configured backup folder. Same never-raises contract as `tempa_git.py`, and the same reason for it. |
 | `tempa_update.py` | Tempa updating itself: `version`, `check-update`, `update`. The only module that talks to GitHub or writes to the install folder, and the one the dashboard's Settings page reads the version from — importing it there avoids pulling in `tempa_commands`, which drags the whole dashboard in via `dashboard_ui`. |
 
 ### Dashboard side (`dashboard_*.py`)
@@ -234,6 +236,12 @@ split: `tempa_clarify` computes the overlay (it already imports `dashboard_clari
 marker parsing) and hands it to `tempa_prompts`, which only *formats* it. That keeps
 `tempa_prompts` — a CLI-half module — free of any import from the dashboard half, matching the
 boundary described above.
+
+`tempa_backup.py` is the other CLI-half module that reaches across, and for the same kind of
+reason: it imports `dashboard_zip.build_zip` so that a checkpoint's PRD snapshot is byte-for-byte
+what the dashboard's **Download PRD** button produces, rather than a second zip implementation
+free to drift from it. Both `dashboard_clarify_parse` and `dashboard_zip` are pure, stdlib-only
+leaves that import nothing local, so neither can create a cycle.
 
 ## Extending Tempa
 

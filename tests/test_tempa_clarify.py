@@ -424,13 +424,29 @@ def test_run_apply_step_uses_clarify_apply_backend_and_effort_independent_of_cla
 # writes those files; the fake has to stand in for it).
 # ---------------------------------------------------------------------------
 
-def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=True):
-    """Wire up fake evaluate/auto-answer/apply steps and return the call-count dict.
+def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=True,
+                      backup_result=("saved", "/tmp/prd.zip"),
+                      commit_result=("committed", "abc123")):
+    """Wire up fake evaluate/auto-answer/apply/backup/commit steps and return the call-count
+    dict.
 
     Counts are keyed "evaluate"/"answer"/"apply"; "resume" records what the compaction
     apply was handed, and "prompts" every evaluate prompt (so a test can prove the overlay
-    reached the next round)."""
-    calls = {"evaluate": 0, "answer": 0, "apply": 0, "resume": [], "prompts": []}
+    reached the next round). "backups" and "commits" record the label/message each snapshot
+    step was called with, and "events" is the interleaved order of all three durability
+    steps, which is what proves apply -> backup -> commit."""
+    calls = {"evaluate": 0, "answer": 0, "apply": 0, "resume": [], "prompts": [],
+             "backups": [], "commits": [], "events": []}
+
+    def fake_backup(config, label):
+        calls["backups"].append(label)
+        calls["events"].append(f"backup:{label}")
+        return backup_result
+
+    def fake_commit(workspace_root, message):
+        calls["commits"].append(message)
+        calls["events"].append("commit")
+        return commit_result
 
     def fake_run_clarification_session(prompt, run_number, backend, model, reasoning_effort=""):
         index = min(calls["evaluate"], len(findings_by_round) - 1)
@@ -456,21 +472,32 @@ def _finalize_harness(monkeypatch, clar_dir, findings_by_round, apply_result=Tru
     def fake_run_apply_step(config, resume_session_id=None):
         calls["apply"] += 1
         calls["resume"].append(resume_session_id)
+        calls["events"].append("apply")
         if apply_result:
             # A real apply stamps every current file's hash, which is what empties the
-            # overlay — without it the "verify" round would still carry one.
+            # overlay — without it the "verify" round would still carry one — and records
+            # that the last thing to touch the PRD was an apply, not an evaluation.
             tc._record_clarify_applied_state(tempa_config.load_config(), clar_dir)
+            cfg = tempa_config.load_config()
+            cfg["last_clarification_action"] = "apply"
+            tempa_config.save_config(cfg)
         return apply_result
 
     monkeypatch.setattr(tc, "run_clarification_session", fake_run_clarification_session)
     monkeypatch.setattr(tc, "_run_auto_answer_step", fake_auto_answer)
     monkeypatch.setattr(tc, "_run_apply_step", fake_run_apply_step)
+    monkeypatch.setattr(tc, "backup_prd_zip", fake_backup)
+    monkeypatch.setattr(tc, "commit_workspace_changes", fake_commit)
     return calls
 
 
 def _finalize_config(tmp_path, clar_dir, **extra):
+    # Checkpoints off unless a test asks for them: they add an apply session (and a backup +
+    # commit) every N answering rounds, which would change the round/apply counts every test
+    # below asserts. The checkpoint tests pass finalize_checkpoint_rounds through **extra.
+    settings = {"finalize_checkpoint_rounds": None, **extra}
     tempa_config.save_config({
-        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}, **extra,
+        "sources": {"clarifications": str(clar_dir), "prd": str(tmp_path / "prd")}, **settings,
     })
 
 
@@ -958,3 +985,342 @@ def test_finalize_stops_before_the_auto_answer_session(tmp_path, isolate_tempa_p
     # The round's own findings were still saved before the stop — this is what makes the
     # stopped run resumable rather than a wasted round.
     assert tempa_config.load_config()["last_finalize_round"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Finalize checkpoints (finalize_checkpoint_rounds) — the periodic
+# apply -> back up -> commit save point inside the loop.
+# ---------------------------------------------------------------------------
+
+def _dirty(n):
+    """n rounds that each still find something, so the loop keeps answering."""
+    return [{"critical": 1, "major": 0, "minor": 0}] * n
+
+
+def test_checkpoint_fires_after_the_configured_number_of_answering_rounds(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=2, max_clarification_run=4)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(4))
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    # Never converged, so the run ends on the max-run limit — but two checkpoints ran on the
+    # way there, at rounds 2 and 4, without a single clean evaluation.
+    assert exc.value.code == 1
+    assert calls["evaluate"] == 4
+    assert calls["apply"] == 2
+    assert calls["backups"] == ["round2", "round4"]
+    assert calls["commits"] == [
+        "tempa: clarification checkpoint — round 2",
+        "tempa: clarification checkpoint — round 4",
+    ]
+
+
+def test_checkpoint_order_is_apply_then_backup_then_commit(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The ZIP has to exist before `git add -A` runs, or the commit it belongs to won't
+    contain it."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, max_clarification_run=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(1))
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    assert calls["events"] == ["apply", "backup:round1", "commit"]
+
+
+def test_checkpoints_do_not_consume_the_compaction_budget(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """MAX_COMPACTIONS bounds the "verification came back dirty, rewrite again" loop. A
+    checkpoint is scheduled by a round counter instead, so charging it there would stop a run
+    with frequent checkpoints long before its round limit."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, max_clarification_run=10)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        *_dirty(4),                                # 4 checkpoints — more than MAX_COMPACTIONS
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> compaction
+        {"critical": 0, "major": 0, "minor": 0},   # verification, clean -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0                     # not the "rewritten too many times" exit
+    assert calls["backups"] == ["round1", "round2", "round3", "round4", "final"]
+
+
+def test_no_checkpoint_when_the_backlog_is_already_applied(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """Nothing to write means no apply session, no duplicate ZIP and no empty commit."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, max_clarification_run=2)
+    # Rounds that report findings but write no clarification file leave the backlog empty.
+    calls = _finalize_harness(monkeypatch, clar_dir, [])
+    findings = {"critical": 1, "major": 0, "minor": 0}
+
+    def evaluate_without_writing_a_file(prompt, run_number, backend, model, reasoning_effort=""):
+        calls["evaluate"] += 1
+        cfg = tempa_config.load_config()
+        cfg["last_clarification_findings"] = findings
+        tempa_config.save_config(cfg)
+        return True
+
+    monkeypatch.setattr(tc, "run_clarification_session", evaluate_without_writing_a_file)
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    assert calls["apply"] == 0
+    assert calls["backups"] == []
+    assert calls["commits"] == []
+
+
+def test_checkpoints_off_never_applies_inside_the_loop(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """finalize_checkpoint_rounds = null is the pre-checkpoint behavior: one apply, at the
+    end, and nothing before it."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=None)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        *_dirty(3),
+        {"critical": 0, "major": 0, "minor": 0},   # clean -> compaction
+        {"critical": 0, "major": 0, "minor": 0},   # verification, clean -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["apply"] == 1                     # the compaction only
+    assert calls["backups"] == ["final"]           # ...but the closing snapshot still happens
+
+
+@pytest.mark.parametrize(
+    "settings, expect_backups, expect_commits",
+    [
+        ({"finalize_checkpoint_backup": False}, [], 2),
+        ({"finalize_checkpoint_commit": False}, ["round1", "final"], 0),
+        ({"finalize_checkpoint_backup": False, "finalize_checkpoint_commit": False}, [], 0),
+    ],
+)
+def test_each_toggle_suppresses_only_its_own_step(
+    tmp_path, isolate_tempa_paths, monkeypatch, settings, expect_backups, expect_commits,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, **settings)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        *_dirty(1),
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    # One apply, at the checkpoint: it emptied the backlog, so the clean round after it had
+    # nothing left to compact. The toggles never gate the apply itself either way.
+    assert calls["apply"] == 1
+    assert calls["backups"] == expect_backups
+    assert len(calls["commits"]) == expect_commits
+
+
+def test_a_graceful_stop_is_honored_before_the_checkpoint_apply(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(2))
+    real_session = tc.run_clarification_session
+
+    def evaluate_then_request_stop(prompt, run_number, backend, model, reasoning_effort=""):
+        result = real_session(prompt, run_number, backend, model, reasoning_effort)
+        tempa_config.request_graceful_stop("clarify")
+        return result
+
+    monkeypatch.setattr(tc, "run_clarification_session", evaluate_then_request_stop)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["apply"] == 0                     # stopped before spending the apply session
+    assert calls["backups"] == [] and calls["commits"] == []
+
+
+def test_a_failed_checkpoint_apply_stops_the_run(tmp_path, isolate_tempa_paths, monkeypatch):
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(3), apply_result=False)
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert calls["evaluate"] == 1                  # stopped at the first checkpoint
+    assert calls["backups"] == [] and calls["commits"] == []
+
+
+def test_a_failed_backup_or_commit_does_not_stop_the_run(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """Both are best-effort: losing hours of clarification work over a full disk or a missing
+    git identity would cost far more than the snapshot was protecting."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1)
+    calls = _finalize_harness(
+        monkeypatch, clar_dir,
+        [*_dirty(1), {"critical": 0, "major": 0, "minor": 0},
+         {"critical": 0, "major": 0, "minor": 0}],
+        backup_result=("failed", "could not write"),
+        commit_result=("failed", "git commit failed: no user.email"),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0                     # the run still finished successfully
+    assert calls["backups"] == ["round1", "final"]
+
+
+def test_a_compaction_resets_the_checkpoint_counter(tmp_path, isolate_tempa_paths, monkeypatch):
+    """The compaction already wrote the whole overlay, so nothing has piled up since — a
+    checkpoint on the very next round would be a full apply session for one round of answers."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=2, max_clarification_run=6)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        {"critical": 1, "major": 0, "minor": 0},   # 1: answered (1 round since checkpoint)
+        {"critical": 0, "major": 0, "minor": 0},   # 2: clean -> compaction, counter reset
+        {"critical": 1, "major": 0, "minor": 0},   # 3: dirty verification -> answered (1)
+        {"critical": 0, "major": 0, "minor": 0},   # 4: clean -> compaction #2
+        {"critical": 0, "major": 0, "minor": 0},   # 5: verification, clean -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    # Without the reset, round 3 would have been the 2nd round since the last checkpoint and
+    # fired one — so the only snapshot before "final" would prove the reset didn't happen.
+    assert calls["backups"] == ["final"]
+
+
+def test_a_checkpoint_skips_one_comparison_but_keeps_the_no_progress_count(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """With checkpoints every round and a no-progress limit of 3, a counter that reset on
+    every checkpoint could never reach the limit — the run would only ever stop at max_run."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1,
+                     finalize_no_progress_rounds=3, max_clarification_run=20)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(20))
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    # Round 1 sets the baseline; rounds 2, 3 and 4 each fail to reduce it, and the third
+    # strike stops the run — checkpoints in between don't reset the count or skip a comparison.
+    assert calls["evaluate"] == 4
+
+
+def test_a_successful_run_still_ends_on_an_evaluate_action(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The dashboard's finalize-readiness gate requires last_clarification_action ==
+    "evaluate". A checkpoint stamps "apply", so a round has to stamp it back."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1)
+    _finalize_harness(monkeypatch, clar_dir, [
+        *_dirty(2),
+        {"critical": 0, "major": 0, "minor": 0},
+        {"critical": 0, "major": 0, "minor": 0},
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert tempa_config.load_config()["last_clarification_action"] == "evaluate"
+
+
+def test_a_run_that_exhausts_max_run_right_after_a_checkpoint_ends_on_apply(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The one case that now ends on "apply" instead of "evaluate". Accepted deliberately: it
+    is truthful (the answers really were written), the run failed anyway, and saving that work
+    is the point of the checkpoint."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, max_clarification_run=1)
+    _finalize_harness(monkeypatch, clar_dir, _dirty(1))
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 1
+    assert tempa_config.load_config()["last_clarification_action"] == "apply"
+
+
+def test_the_round_after_a_checkpoint_carries_an_empty_overlay(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """A checkpoint applies everything recorded so far, so the next evaluation must judge the
+    PRD on its own rather than re-carrying decisions already written into it."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1, max_clarification_run=2)
+    calls = _finalize_harness(monkeypatch, clar_dir, _dirty(2))
+    monkeypatch.setattr(
+        tc, "build_clarification_prompt",
+        lambda config, pending=None, skip_minor=False: f"pending={len(pending or [])}")
+
+    with pytest.raises(SystemExit):
+        tc.run_clarify_finalize()
+
+    # Round 1 starts clean; round 2 follows the checkpoint, so its overlay is empty again.
+    assert calls["prompts"] == ["pending=0", "pending=0"]
+
+
+def test_the_final_snapshot_runs_on_the_nothing_left_to_apply_exit(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """The second success exit: a clean round whose backlog a checkpoint already emptied. It
+    leaves the loop from inside _compact_resolutions_into_documents, so it needs the closing
+    snapshot of its own."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _finalize_config(tmp_path, clar_dir, finalize_checkpoint_rounds=1)
+    calls = _finalize_harness(monkeypatch, clar_dir, [
+        *_dirty(1),                                # -> checkpoint applies the whole backlog
+        {"critical": 0, "major": 0, "minor": 0},   # clean, nothing left to apply -> done
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize()
+
+    assert exc.value.code == 0
+    assert calls["apply"] == 1                     # the checkpoint's — no compaction followed
+    assert calls["backups"] == ["round1", "final"]
+    assert calls["commits"][-1] == (
+        "tempa: clarification finalized — PRD ready for implementation")

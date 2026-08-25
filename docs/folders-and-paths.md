@@ -78,6 +78,14 @@ throughout the config.
 | `infra` | infrastructure scripts (e.g. docker compose) | `infra` |
 | `archive` | archive of old specs no longer in use | `archive` |
 
+One more folder can appear directly under `root`, but it isn't part of the `workspace` table
+above and isn't created by `init`: **`prd-backup/`**, where `clarify --finalize` writes the PRD
+ZIP snapshots it takes at each checkpoint and at the end of a successful run. It is created on
+demand the first time a snapshot is written, its name/location comes from
+`finalize_checkpoint_backup_dir` (relative → under `root`, absolute → as-is; see
+[config-json.md](config-json.md)), and it deliberately sits outside `.tempa/` — unlike logs and
+QA reports, these are deliverables you may want to open or hand over. Nothing prunes it.
+
 ```bash
 tempa show-folders            # check the active layout + resolved absolute paths
 
