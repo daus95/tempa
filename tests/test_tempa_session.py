@@ -15,6 +15,7 @@ import io
 import json
 import threading
 import time
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -903,3 +904,108 @@ def test_a_line_with_no_ceiling_count_is_not_second_guessed(monkeypatch, capsys)
     ts._warn_if_ceiling_disagrees("Background tasks still running; terminating.", "EPIC-02")
 
     assert "not reaching the CLI" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# _feed_stdin / _is_broken_install_text / _report_broken_install
+#
+# The installed-but-broken backend: on 2026-08-25 a half-finished Claude Code auto-update
+# left `bin/` holding nothing but `claude.exe.old.1787658950080`. `claude.cmd` still resolved
+# on PATH, so `resolve_exe` was satisfied and the spawn succeeded — but cmd.exe exited 9009
+# immediately, and writing the prompt into its dead stdin raised OSError EINVAL on Windows
+# rather than the BrokenPipeError anyone would guard for. That escaped the runner entirely,
+# so the CLI's own explanation was never read off stdout and two clarification rounds reached
+# the user as an empty log plus "[agent-runner error] [Errno 22] Invalid argument".
+# ---------------------------------------------------------------------------
+
+class _DeadStdin:
+    """A pipe whose reader is already gone. Windows raises OSError(EINVAL) here, not
+    BrokenPipeError — writing the platform's own error is the whole point of the fake."""
+
+    def __init__(self):
+        self.closed_count = 0
+
+    def write(self, _text):
+        raise OSError(22, "Invalid argument")
+
+    def close(self):
+        self.closed_count += 1
+
+
+def test_feeding_a_dead_stdin_does_not_escape_the_runner():
+    """The regression itself: unguarded, this OSError propagated past the read loop and out of
+    _stream_backend_process, so nothing the CLI printed was ever collected."""
+    process = Mock(stdin=_DeadStdin())
+
+    ts._feed_stdin(process, "the prompt", "Clarification run #1")  # must not raise
+
+    assert process.stdin.closed_count == 1
+
+
+def test_feeding_a_dead_stdin_stays_off_the_console(capsys):
+    """A broken pipe is a symptom, never the diagnosis — the real message comes from the CLI's
+    own output and exit code further down. Saying both would put the wrong one first, and
+    "[Errno 22] Invalid argument" is exactly the wrong one."""
+    ts._feed_stdin(Mock(stdin=_DeadStdin()), "the prompt", "Clarification run #1")
+
+    assert capsys.readouterr().out == ""
+
+
+def test_a_live_stdin_still_gets_the_prompt_and_is_closed():
+    stdin = Mock()
+    ts._feed_stdin(Mock(stdin=stdin), "the prompt", "Clarification run #1")
+    stdin.write.assert_called_once_with("the prompt")
+    stdin.close.assert_called_once()
+
+
+def test_an_empty_prompt_is_not_written_but_stdin_is_still_closed():
+    """file_ref backends pass "" — the CLI reads its task from a sidecar file and would block
+    forever on a stdin that never closes."""
+    stdin = Mock()
+    ts._feed_stdin(Mock(stdin=stdin), "", "Clarification run #1")
+    stdin.write.assert_not_called()
+    stdin.close.assert_called_once()
+
+
+def test_is_broken_install_text_matches_the_real_cmd_exe_message():
+    """Copied from the 2026-08-25 incident: cmd.exe echoes the whole missing path back,
+    so the marker has to match a fragment of a long line rather than the line itself."""
+    printed = (
+        '\'"C:\\Users\\daus\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"\' '
+        'is not recognized as an internal or external command,\n'
+        'operable program or batch file.\n'
+    )
+    assert ts._is_broken_install_text(printed) is True
+
+
+def test_is_broken_install_text_empty_string_false():
+    assert ts._is_broken_install_text("") is False
+
+
+def test_is_broken_install_text_unrelated_text_false():
+    assert ts._is_broken_install_text("Reading the PRD to evaluate it.") is False
+
+
+def test_report_broken_install_names_the_backend_and_quotes_its_repair_command():
+    log_file = io.StringIO()
+    ts._report_broken_install(tb.CLAUDE, "Clarification run #1", log_file)
+
+    written = log_file.getvalue()
+    assert "Claude Code" in written
+    assert tb.CLAUDE.install_command in written
+
+
+def test_report_broken_install_omits_the_fix_for_a_backend_with_no_install_command():
+    """Every shipped backend sets one, but the field defaults to "" — a sentence trailing off
+    into an empty backtick pair would read as a bug in Tempa, not advice."""
+    backend = replace(tb.CLAUDE, install_command="")
+    log_file = io.StringIO()
+    ts._report_broken_install(backend, "Clarification run #1", log_file)
+
+    assert "Reinstall it with" not in log_file.getvalue()
+
+
+@pytest.mark.parametrize("backend", tb.BACKENDS.values(), ids=lambda b: b.name)
+def test_every_backend_can_tell_the_user_how_to_reinstall_itself(backend):
+    """The message is only actionable if it ends in a command the user can run."""
+    assert backend.install_command.strip()

@@ -8,6 +8,25 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A backend CLI whose install is broken now says so, instead of failing as
+  `[Errno 22] Invalid argument` with an empty log.** On Windows an npm-installed CLI is a `.cmd`
+  shim that calls a real `.exe`; a half-finished auto-update renames that `.exe` out of the way
+  and can fail to put the replacement back, leaving the shim on PATH pointing at nothing. The
+  availability check (`resolve_exe`) is satisfied by the shim, so the spawn went ahead, cmd.exe
+  exited immediately, and writing the prompt into its dead stdin raised `OSError` EINVAL — which
+  is how Windows reports a broken pipe, where POSIX raises `BrokenPipeError`. Nothing guarded for
+  it, so it escaped the runner before the output loop ever ran: the CLI's own explanation was
+  never read off stdout and the session log the user was pointed at was empty. Two clarification
+  rounds failed that way on 2026-08-25 with no usable symptom at all. The prompt write is now
+  guarded, so a CLI that exits early still gets its output collected and its exit code reported;
+  and the runner recognizes the shell's own "is not recognized as an internal or external
+  command" / exit code 9009 (127 on POSIX, only when the CLI produced no output at all) and says
+  plainly that the backend is installed but broken, quoting the command that reinstalls it —
+  `npm install -g @anthropic-ai/claude-code` for Claude Code, and the equivalent for Copilot and
+  Codex.
+
 ## [0.10.2] - 2026-08-19
 
 ### Added

@@ -21,7 +21,14 @@ whichever account is running Tempa either can or can't write to the workspace re
 which CLI is invoked. Installed status, on the other hand, is per backend.
 
 Neither check actually invokes the CLI (no `--version`, no test session) — both are cheap,
-synchronous, local checks, safe to run on every dashboard page load. That also means **this
+synchronous, local checks, safe to run on every dashboard page load. That also means the
+Installed check verifies that a *launcher* resolves, not that it works: on Windows an
+npm-installed CLI is a `.cmd` shim that calls a real `.exe`, and a half-finished auto-update
+can leave that shim on PATH pointing at an executable it already renamed away. The check has
+no way to see that, so such a backend still shows as installed — but a session that spawns it
+no longer fails obscurely: the runner recognizes the shell's own "is not recognized as an
+internal or external command" (exit code 9009; 127 on POSIX) and reports that the backend is
+installed but broken, quoting the command that reinstalls it. That also means **this
 is not an authentication check**: a backend can show "ready" and still fail at runtime if
 you aren't logged in to it (see [Choosing a CLI Backend](../README.md#choosing-a-cli-backend)
 in the README for each backend's login command). For a check that *does* exercise the
