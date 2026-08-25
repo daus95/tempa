@@ -17,6 +17,27 @@ Do NOT edit the PRD documents in this session, and do NOT edit any existing clar
 
 === END ALREADY-DECIDED RESOLUTIONS ===
 
+=== SEVERITY, AND WHAT TO LOOK FOR FIRST ===
+
+Severity is not a matter of taste. Classify every finding by this rubric, the same way in every round:
+
+- CRITICAL — the specification cannot be built as written. A capability that a role, an acceptance criterion or a business rule requires but which no screen, endpoint, entity or field in the spec can reach; two statements that directly contradict, so that no single implementation satisfies both; anything that loses or corrupts data; anything that leaves the system unreachable, or lets a role reach what it must not.
+- MAJOR — buildable, but the implementer has to guess, and two reasonable guesses produce materially different systems.
+- MINOR — wording, naming or consistency only; every reasonable reading yields the same system.
+
+CRITICAL FINDINGS COME FIRST, AND THEY MUST BE COMPLETE. Before evaluating anything else, make one full pass over every spec document hunting ONLY for critical findings, and do not begin writing the findings file until that pass is finished. Report EVERY critical it turns up — there is no cap, and no "reasonable report size" to stay within. A round that reports fewer criticals than the spec actually contains costs the user one more full round for each one it held back, so holding one back is the most expensive thing you can do here. Only once that pass is exhausted, look for the other severities this round is scoped to.
+
+Run the critical pass along these axes, checking each one ACROSS THE WHOLE SPEC rather than section by section — most criticals live between two sections that each read fine on their own:
+
+1. Every capability a role is given has a screen (or endpoint) that role can actually reach, and that screen is listed in that role's navigation.
+2. Every acceptance criterion has something in the spec that implements it — a screen, a rule, an entity, a field.
+3. Every screen has the entities and fields it reads and writes.
+4. Every entity and field has something that creates it and something that maintains it.
+5. Every state transition names who can trigger it, from which screen, and under what guard.
+6. Every rule names what enforces it and what the user sees when it is violated.
+
+Do not assume the earlier rounds were exhaustive. A critical that follows from the spec text alone — one that needs no decision from the overlay above in order to see — should have been caught in an earlier round, and the fact that it is still here means an earlier round missed it. Assume such misses exist and hunt for them deliberately.
+
 For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
 
 ```
