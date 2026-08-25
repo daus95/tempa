@@ -95,8 +95,8 @@ fallout of answering a major, arriving exactly where it can be seen.
 A phase is settled when a round reports nothing left in it **and** that result is backed up:
 
 - by a [coverage ledger](#the-coverage-ledger) that accounts for every finding the previous
-  round raised, is complete (`unchecked="0"`), and is no smaller than the previous round's
-  table — one clean round is then enough; or
+  round raised, is complete (`unchecked="0"`), and is no smaller than the previous round's —
+  neither its check table nor any inventory category — one clean round is then enough; or
 - failing that, by a **second** clean round in a row.
 
 One clean round on its own is never enough. The behavior this replaces had a round report
@@ -132,8 +132,12 @@ writing any findings, the evaluation writes a ledger to a `coverage/` subfolder 
 `sources.clarifications`, named `coverage-<YYYYMMDD-HHMMSS>.md`:
 
 - **Part 1 — inventory.** Every role, capability, screen, endpoint, entity, field, state,
-  state transition, business rule and acceptance criterion, each with its location in the
-  spec — including everything the pending overlay adds. Transcription, not judgement.
+  state transition, business rule and acceptance criterion, each with its location in the spec
+  **and a short quote of the phrase that grants it** — including everything the pending overlay
+  adds. Transcription, not judgement. Blanket sentences ("Admin sees everything", "full
+  access", "no master data") are expanded into one entry per member of the set they quantify
+  over, never one entry for the sentence. Closed by a
+  `<!-- coverage:inventory roles="…" capabilities="…" … -->` marker giving each category's size.
 - **Part 2 — the check table.** One row per (axis, subject) pair over the six critical axes,
   each with a verdict of `OK`, `CRITICAL`, `N/A` — or **blank**, meaning the row could not be
   decided. A row that cannot be decided is unchecked, not OK.
@@ -185,6 +189,27 @@ raised may not quietly stop existing.
 
 Minor findings are never carried, even when they are being looked for — they block nothing, so
 an accountability table over them would be cost with no decision behind it.
+
+### An inventory may not go short either
+
+Part 3 stops a finding that was *raised* from being lost. It cannot help with one that was
+never raised, and the way that happens is Part 1: an item the inventory never lists never
+becomes a row, so it is not reported as unchecked either — it is simply absent, and every check
+that would have quantified over it silently disappears with it. One round's inventory had no
+entry at all for a capability the spec grants, and the contradiction that capability was part
+of went unreported for two rounds while every ledger involved reported `unchecked="0"`.
+
+Two things address it. In the prompt, every entry has to quote the phrase that grants it — an
+entry you cannot quote is one you inferred — and any sentence that quantifies over a set has to
+be expanded into its members, which is exactly the case that went missing. In the code, the
+`coverage:inventory` marker's per-category counts are compared against the previous round's
+under the same 85% rule as the check table, **category by category** rather than as one total,
+since a total can hold still while capabilities halve and fields double. A category that
+shrinks — or disappears — is named in the log and stops the round settling its phase.
+
+What this does not do is make a *first* round provably complete. There is no previous inventory
+to compare it against, and nothing but the agent reads the PRD. The guard bounds how far the
+inventory can drift once a baseline exists; the prompt rules are what aim at the first round.
 
 Each round carries the previous ledger and must re-derive the inventory rather than trust it:
 a ledger says what was checked, not what is true, so a screen missing from it *is* the miss

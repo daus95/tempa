@@ -51,6 +51,20 @@ Save the ledger as a NEW file in ${coverage_dir}, named `coverage-<YYYYMMDD-HHMM
 
 PART 1 — INVENTORY. Transcribe, each with an id and where the spec defines it: every role; every capability each role is given; every screen; every endpoint; every entity; every field; every state and every state transition; every business rule; every acceptance criterion. Include everything the ALREADY-DECIDED RESOLUTIONS overlay adds, exactly as if it were already written into the PRD. This part is transcription, not judgement — never leave an item out because it looks fine, and never collapse a group ("the usual CRUD endpoints") instead of listing its members.
 
+Two rules decide whether Part 1 is right. Both are here because a round once wrote an inventory with no entry at all for a capability the spec grants: nothing downstream could check what was never listed, and the contradiction that capability was part of went unreported for two whole rounds. An item missing from Part 1 is worse than an unchecked row, because an unchecked row at least admits it exists.
+
+QUOTE WHAT GRANTS IT. Every entry names the section it comes from AND quotes the phrase that establishes it — a few words, no more. An entry you cannot quote is one you inferred rather than read; either find the text that grants it or leave it out and raise the gap as a finding in its own right.
+
+EXPAND EVERY BLANKET STATEMENT. A sentence that quantifies — "Admin sees everything", "full access", "all master data", "no master data", "every screen", "read-only everywhere" — is a grant or a ban over a SET, and it produces one entry per member of that set, never one entry for the sentence. Enumerate the members and list them individually, each quoting that same blanket phrase as its source. This is exactly where an inventory goes quietly short: a blanket sentence reads like flavour text next to the explicit lists around it, and skipping it silently removes every check that would have quantified over what it grants.
+
+Then state the size of what you transcribed, exactly once, as its own marker. It is read mechanically, so keep the attribute names and quoting exactly as shown, all on one line:
+
+```
+<!-- coverage:inventory roles="…" capabilities="…" screens="…" endpoints="…" entities="…" fields="…" transitions="…" rules="…" criteria="…" -->
+```
+
+Those counts are compared against the previous round's. Within a phase the spec only gains surface, so a category coming back smaller than last round's is the signal that something dropped out of the INVENTORY rather than out of the spec.
+
 PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the six axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen AND per role that reaches it (a screen two roles reach is two rows, since the answer can differ by role), axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule. Write it as a Markdown table:
 
 ```
@@ -87,7 +101,7 @@ PART 3 — THE CARRY-OVER TABLE. Below is every finding the previous round raise
 - STILL OPEN — it is still true of the spec. Raise it again as a finding this round and name the id it became. A finding that is still open and is not re-raised is the single most expensive thing this table exists to prevent.
 - WITHDRAWN — it was never a finding at this severity. Say exactly what the previous round misread. Use this sparingly, and never to make the list shorter.
 
-Part 1 is re-derived every round and may legitimately come out different. Part 3 is not: an inventory can be grouped a new way, but a finding somebody already raised cannot quietly stop existing. Account for every id below, including the ones you disagree with.
+Part 1 is re-derived every round and may legitimately be grouped a new way — within the limit its own counts marker sets. Part 3 is not re-derived at all: a finding somebody already raised cannot quietly stop existing. Account for every id below, including the ones you disagree with.
 
 === FINDINGS THE PREVIOUS ROUND RAISED ===
 

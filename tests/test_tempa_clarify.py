@@ -1519,13 +1519,17 @@ def _carried_block(ids, verdict="RESOLVED"):
             "|---|---|---|\n" + rows + "<!-- coverage:endcarried -->\n")
 
 
-def _ledger(unchecked=0, critical=0, checks=12):
-    """A coverage ledger as the prompt asks for it — the table is elided, since only the
-    closing summary marker is ever read mechanically."""
-    return ("| # | axis | subject | what must exist | verdict | finding |\n"
-            "|---|------|---------|-----------------|---------|---------|\n\n"
-            f'<!-- coverage:summary checks="{checks}" ok="{checks - critical - unchecked}" '
-            f'critical="{critical}" na="0" unchecked="{unchecked}" -->\n')
+def _ledger(unchecked=0, critical=0, checks=12, inventory=None):
+    """A coverage ledger as the prompt asks for it — the tables are elided, since only the
+    markers are ever read mechanically."""
+    head = ("| # | axis | subject | what must exist | verdict | finding |\n"
+            "|---|------|---------|-----------------|---------|---------|\n\n")
+    if inventory:
+        head += ("<!-- coverage:inventory "
+                 + " ".join(f'{k}="{v}"' for k, v in sorted(inventory.items())) + " -->\n\n")
+    return head + (
+        f'<!-- coverage:summary checks="{checks}" ok="{checks - critical - unchecked}" '
+        f'critical="{critical}" na="0" unchecked="{unchecked}" -->\n')
 
 
 def _phased_config(tmp_path, clar_dir, **extra):
@@ -1573,9 +1577,9 @@ def _summary(checks=12, unchecked=0):
             "unchecked": unchecked}
 
 
-def _ev(summary=None, previous_checks=None, unaccounted=()):
+def _ev(summary=None, previous_checks=None, unaccounted=(), shrunken=()):
     """A LedgerEvidence, defaulting to the "this round wrote no ledger" case."""
-    return tc.LedgerEvidence(summary, previous_checks, tuple(unaccounted))
+    return tc.LedgerEvidence(summary, previous_checks, tuple(unaccounted), tuple(shrunken))
 
 
 def test_findings_left_in_a_phase_never_settle_it():
@@ -1710,6 +1714,59 @@ def test_no_previous_round_carries_nothing(tmp_path):
     clar_dir = tmp_path / "clarifications"
     clar_dir.mkdir()
     assert tc._previous_round_findings(clar_dir, "critical") == []
+
+
+# --- ...nor may an inventory quietly go short -------------------------------
+#
+# A capability that never reaches Part 1 never becomes a row, so it is not reported as an
+# unchecked row either — the category count is the only place it is visible at all. An
+# inventory that omitted one role capability is what let a contradiction go unreported for two
+# rounds while every ledger involved reported unchecked="0".
+
+def test_inventory_marker_is_read_per_category():
+    body = _ledger(inventory={"capabilities": 17, "screens": 10})
+    assert tc._parse_coverage_inventory(body) == {"capabilities": 17, "screens": 10}
+
+
+def test_no_inventory_marker_reads_as_none():
+    assert tc._parse_coverage_inventory(_ledger()) is None
+
+
+def test_a_category_that_shrank_is_named():
+    assert tc._shrunken_categories({"capabilities": 8, "screens": 10},
+                                   {"capabilities": 17, "screens": 10}) == ["capabilities"]
+
+
+def test_a_category_that_grew_or_held_still_is_not():
+    assert tc._shrunken_categories({"capabilities": 20, "screens": 10},
+                                   {"capabilities": 17, "screens": 10}) == []
+
+
+def test_a_category_dropped_entirely_is_named():
+    assert tc._shrunken_categories({"screens": 10}, {"capabilities": 17, "screens": 10}) == [
+        "capabilities"]
+
+
+def test_a_category_the_previous_round_never_counted_is_new_not_shrunken():
+    assert tc._shrunken_categories({"capabilities": 17, "endpoints": 4},
+                                   {"capabilities": 17}) == []
+
+
+def test_shrinkage_needs_both_markers_to_judge():
+    assert tc._shrunken_categories(None, {"capabilities": 17}) == []
+    assert tc._shrunken_categories({"capabilities": 17}, None) == []
+
+
+def test_a_shrunken_inventory_is_not_evidence_of_an_exhaustive_sweep():
+    assert tc._ledger_confirms_sweep(_ev(_summary(), 12, shrunken=("capabilities",))) is False
+    assert tc._phase_may_advance(0, _ev(_summary(), 12, shrunken=("capabilities",)), 1) is False
+
+
+def test_carried_ledger_inventory_reads_the_baseline_from_the_previous_file():
+    assert tc._carried_ledger_inventory(
+        ("coverage-1.md", _ledger(inventory={"capabilities": 17}))) == {"capabilities": 17}
+    assert tc._carried_ledger_inventory(("coverage-1.md", "no marker")) is None
+    assert tc._carried_ledger_inventory(None) is None
 
 
 def test_carried_ledger_checks_reads_the_baseline_from_the_previous_file():
@@ -1985,6 +2042,31 @@ def test_a_ledger_that_drops_the_previous_round_costs_one_more_round(
     # round 4 then settles the major phase. Without the guard round 3 would not have existed.
     assert calls["evaluate"] == 4
     assert calls["answer"] == 1
+
+
+def test_an_inventory_that_goes_short_costs_the_phase_one_more_round(
+    tmp_path, isolate_tempa_paths, monkeypatch,
+):
+    """Round 2's check table is the same size as round 1's and reports zero unchecked, so the
+    row-count guard sees nothing wrong. Its inventory lists half the capabilities, which is the
+    only place that shows."""
+    clar_dir = tmp_path / "clarifications"
+    clar_dir.mkdir()
+    _phased_config(tmp_path, clar_dir)
+    calls = _finalize_harness(
+        monkeypatch, clar_dir, _clean(3),
+        coverage_by_round=[_ledger(inventory={"capabilities": 17, "screens": 10}),
+                           _ledger(inventory={"capabilities": 8, "screens": 10}),
+                           _ledger(inventory={"capabilities": 17, "screens": 10})])
+
+    with pytest.raises(SystemExit) as exc:
+        tc.run_clarify_finalize(skip_minor=True)
+
+    assert exc.value.code == 0
+    # Round 1 settles the critical sweep. Round 2's short inventory cannot settle the major
+    # phase, so round 3 is what does — a round that would not have existed on the row count.
+    assert calls["evaluate"] == 3
+    assert calls["answer"] == 0
 
 
 def test_the_critical_phase_stops_at_its_round_budget(

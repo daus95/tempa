@@ -113,6 +113,7 @@ _COVERAGE_DIRNAME = "coverage"
 
 _COVERAGE_SUMMARY_RE = re.compile(r"<!--\s*coverage:summary\s+([^>]*?)-->", re.IGNORECASE)
 _COVERAGE_ATTR_RE = re.compile(r'(?P<key>[a-z_]+)\s*=\s*"(?P<value>-?\d+)"', re.IGNORECASE)
+_COVERAGE_INVENTORY_RE = re.compile(r"<!--\s*coverage:inventory\s+([^>]*?)-->", re.IGNORECASE)
 _COVERAGE_CARRIED_RE = re.compile(
     r"<!--\s*coverage:carried\s*-->(?P<body>.*?)<!--\s*coverage:endcarried\s*-->",
     re.IGNORECASE | re.DOTALL)
@@ -136,10 +137,12 @@ class LedgerEvidence(NamedTuple):
 
     `summary` is the parsed coverage:summary marker; `previous_checks` the row count of the
     ledger this one was judged against; `unaccounted` the ids of findings the previous round
-    raised that this ledger's carry-over table never mentions."""
+    raised that this ledger's carry-over table never mentions; `shrunken` the inventory
+    categories that came back smaller than the previous round's."""
     summary: dict | None = None
     previous_checks: int | None = None
     unaccounted: tuple[str, ...] = ()
+    shrunken: tuple[str, ...] = ()
 
 
 def _phase_scope(phase: str, phases_on: bool, skip_minor: bool) -> str:
@@ -199,10 +202,16 @@ def _ledger_confirms_sweep(evidence: LedgerEvidence) -> bool:
     phase the spec only gains surface, so a table materially smaller than the previous round's
     has lost rows rather than the spec having lost surface.
 
+    NOR DID ANY PART OF THE INVENTORY. The same check per inventory category, because the row
+    total can hold still while capabilities halve and fields double — and a capability that
+    never reaches Part 1 never becomes a row, so it cannot be reported as unchecked either.
+    That is not hypothetical: an inventory that omitted one role capability is what let a
+    contradiction go unreported for two rounds.
+
     Failing any of them makes the round exactly as good as one that wrote no ledger at all: it
     needs a second clean round behind it. A malformed marker (no `checks`, or a non-positive
     one) fails for the same reason as a shrunken one — nothing in it can be compared."""
-    if evidence.unaccounted:
+    if evidence.unaccounted or evidence.shrunken:
         return False
     summary = evidence.summary
     if not summary or summary.get("unchecked") != 0:
@@ -289,16 +298,53 @@ def _latest_coverage_ledger(clar_dir: Path) -> tuple[str, str] | None:
         return None
 
 
-def _parse_coverage_summary(body: str) -> dict[str, int] | None:
-    """The counts in a ledger's closing `<!-- coverage:summary ... -->` marker, or None when
-    there is no such marker (or nothing numeric inside it). The LAST marker wins: the prompt
-    asks for it as the file's last line, so an earlier one is the template being quoted."""
-    matches = _COVERAGE_SUMMARY_RE.findall(body)
+def _parse_coverage_marker(body: str, pattern: re.Pattern) -> dict[str, int] | None:
+    """The `key="123"` counts inside a ledger marker, or None when the marker is absent or
+    holds nothing numeric. The LAST match wins: every marker the prompt asks for is shown as a
+    fenced example before it is asked for, so an earlier match is the template being quoted
+    back rather than the real thing."""
+    matches = pattern.findall(body)
     if not matches:
         return None
     counts = {m.group("key").lower(): int(m.group("value"))
               for m in _COVERAGE_ATTR_RE.finditer(matches[-1])}
     return counts or None
+
+
+def _parse_coverage_summary(body: str) -> dict[str, int] | None:
+    """The check-table counts in a ledger's closing `<!-- coverage:summary ... -->` marker."""
+    return _parse_coverage_marker(body, _COVERAGE_SUMMARY_RE)
+
+
+def _parse_coverage_inventory(body: str) -> dict[str, int] | None:
+    """The per-category sizes in a ledger's `<!-- coverage:inventory ... -->` marker — how many
+    roles, capabilities, screens, endpoints, entities, fields, transitions, rules and criteria
+    Part 1 transcribed. Judged category by category rather than as one total, because a total
+    can hold still while capabilities halve and fields double."""
+    return _parse_coverage_marker(body, _COVERAGE_INVENTORY_RE)
+
+
+def _shrunken_categories(inventory: dict | None, previous: dict | None) -> list[str]:
+    """Inventory categories this round transcribed materially fewer of than the previous round.
+
+    Only categories present in BOTH markers are compared: a category the previous round never
+    counted is a new one, not a shrunken one, and a category this round drops entirely is
+    reported by name rather than silently skipped.
+
+    The failure this catches is Part 1 going short — a round whose inventory simply has no
+    entry for something the spec grants. Nothing downstream can check what was never listed,
+    so it does not show up as an unchecked row; the category count is the only place it is
+    visible at all."""
+    if not inventory or not previous:
+        return []
+    shrunken = []
+    for key, before in previous.items():
+        if not isinstance(before, int) or before <= 0:
+            continue
+        now = inventory.get(key)
+        if now is None or now < before * _LEDGER_SHRINK_TOLERANCE:
+            shrunken.append(key)
+    return sorted(shrunken)
 
 
 def _carried_ledger_checks(carried: tuple[str, str] | None) -> int | None:
@@ -355,6 +401,12 @@ def _carryover_gaps(ledger_body: str, carried_ids: list[str]) -> list[str]:
     return [raw_id for raw_id in carried_ids if raw_id not in accounted]
 
 
+def _carried_ledger_inventory(carried: tuple[str, str] | None) -> dict[str, int] | None:
+    """The per-category inventory sizes of the ledger carried INTO a round — the baseline this
+    round's own Part 1 is judged against (_shrunken_categories)."""
+    return _parse_coverage_inventory(carried[1]) if carried else None
+
+
 def _ledger_evidence(clar_dir: Path, carried: tuple[str, str] | None,
                      carried_ids: list[str]) -> LedgerEvidence:
     """Everything about the ledger the evaluate session just wrote that bears on whether its
@@ -365,6 +417,7 @@ def _ledger_evidence(clar_dir: Path, carried: tuple[str, str] | None,
     one still sitting there rather than a new one; `carried_ids` are the previous round's
     findings that session was told to account for."""
     previous_checks = _carried_ledger_checks(carried)
+    previous_inventory = _carried_ledger_inventory(carried)
     latest = _latest_coverage_ledger(clar_dir)
     if latest is None or (carried is not None and latest[0] == carried[0]):
         log("This round wrote no coverage ledger, so there is no record of what its sweep "
@@ -377,13 +430,23 @@ def _ledger_evidence(clar_dir: Path, carried: tuple[str, str] | None,
     else:
         log(f"Coverage ledger {latest[0]}: "
             + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    inventory = _parse_coverage_inventory(latest[1])
+    if inventory:
+        log("That ledger's inventory: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(inventory.items())))
     gaps = _carryover_gaps(latest[1], carried_ids)
-    evidence = LedgerEvidence(summary, previous_checks, tuple(gaps))
+    shrunken = _shrunken_categories(inventory, previous_inventory)
+    evidence = LedgerEvidence(summary, previous_checks, tuple(gaps), tuple(shrunken))
 
     if gaps:
         log(f"That ledger never accounts for {len(gaps)} finding(s) the previous round raised "
             f"({', '.join(gaps)}). A finding is closed by saying what became of it, never by "
             "being left out of the next round's table.")
+    elif shrunken:
+        log("That ledger's inventory came back short of the previous round's in "
+            f"{', '.join(shrunken)} — within a phase the spec only gains surface, so a "
+            "category that shrinks is something dropping out of the inventory rather than "
+            "out of the spec. Nothing downstream can check what was never listed.")
     elif summary and summary.get("unchecked") == 0 and not _ledger_confirms_sweep(evidence):
         log(f"That ledger checks {summary.get('checks')} row(s) against the previous round's "
             f"{previous_checks} — too few to read its zero unchecked as an exhaustive sweep, "
