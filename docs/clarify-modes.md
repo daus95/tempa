@@ -138,7 +138,7 @@ writing any findings, the evaluation writes a ledger to a `coverage/` subfolder 
   access", "no master data") are expanded into one entry per member of the set they quantify
   over, never one entry for the sentence. Closed by a
   `<!-- coverage:inventory roles="…" capabilities="…" … -->` marker giving each category's size.
-- **Part 2 — the check table.** One row per (axis, subject) pair over the six critical axes,
+- **Part 2 — the check table.** One row per (axis, subject) pair over the seven critical axes,
   each with a verdict of `OK`, `CRITICAL`, `N/A` — or **blank**, meaning the row could not be
   decided. A row that cannot be decided is unchecked, not OK.
 - **Part 3 — the carry-over table.** One row per finding the *previous* round raised at a
@@ -189,6 +189,26 @@ raised may not quietly stop existing.
 
 Minor findings are never carried, even when they are being looked for — they block nothing, so
 an accountability table over them would be cost with no decision behind it.
+
+### Existence is not agreement
+
+Six of the seven critical axes ask whether a thing exists — does this capability have a screen,
+does this screen have its data, does this field have something that creates it. A ledger row
+once read `Product.stock_qty — entered on the Products form; maintained by Stock In (+),
+checkout (−), void (+)` and was verdicted OK. Everything in it is true, and axis 4 is satisfied:
+something creates the field, something maintains it. What nobody asked is whether the form's
+direct write obeys the movement-log and negative-stock rules the other three paths obey. It
+does not, and that took three rounds to surface as a critical.
+
+Axis 7 asks that question. For every field, entity, state or guarded surface that more than one
+path reaches, it lists the paths and the rule each is subject to, and raises a finding for a
+path that escapes a rule the others obey — or one subject to no stated rule at all. Its
+population costs no new enumeration: it is read off the axis-3 and axis-4 rows already written,
+so a cell naming four writers is four paths and gets an axis-7 row.
+
+Two other findings had the same shape: a non-nullable `invoice_no` whose one creation path had
+no format or uniqueness rule, and a read carve-out for a role whose write on the same field
+stayed banned. In all three, existence was never what was missing.
 
 ### An inventory may not go short either
 

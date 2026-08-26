@@ -40,6 +40,9 @@ Run the critical pass along these axes, checking each one ACROSS THE WHOLE SPEC 
 4. Every entity and field has something that creates it and something that maintains it.
 5. Every state transition names who can trigger it, from which screen, and under what guard.
 6. Every rule names what enforces it and what the user sees when it is violated.
+7. Every field, entity, state and guarded surface that MORE THAN ONE path reaches is governed by the same rules on all of them. Axes 1-6 ask whether a thing exists; this one asks whether the things that exist agree. List every path that writes or reaches it and the rule each path is subject to, then raise a finding for either of these: a path that escapes a rule the other paths obey, or a path subject to no stated rule at all.
+
+Axis 7 is the one that catches what a cell can state and still call fine. A ledger row once read "Product.stock_qty — entered on the Products form; maintained by Stock In (+), checkout (−), void (+)" and was verdicted OK: everything in it is true, something creates the field and something maintains it, so axis 4 is satisfied. What nobody asked is whether the form's direct write obeys the movement-log and negative-stock rules the other three paths obey. It does not, and that took three rounds to surface. Two more went the same way — a non-nullable `invoice_no` whose one creation path had no format or uniqueness rule, and a read carve-out for a role whose write on the same field stayed banned. Existence was never the problem in any of them.
 
 Do not assume the earlier rounds were exhaustive. A critical that follows from the spec text alone — one that needs no decision from the overlay above in order to see — should have been caught in an earlier round, and the fact that it is still here means an earlier round missed it. Assume such misses exist and hunt for them deliberately.
 
@@ -65,7 +68,7 @@ Then state the size of what you transcribed, exactly once, as its own marker. It
 
 Those counts are compared against the previous round's. Within a phase the spec only gains surface, so a category coming back smaller than last round's is the signal that something dropped out of the INVENTORY rather than out of the spec.
 
-PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the six axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen AND per role that reaches it (a screen two roles reach is two rows, since the answer can differ by role), axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule. Write it as a Markdown table:
+PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of the seven axes above, one row per inventory item that axis quantifies over — axis 1 one row per role capability, axis 2 one row per acceptance criterion, axis 3 one row per screen AND per role that reaches it (a screen two roles reach is two rows, since the answer can differ by role), axis 4 one row per entity and per field, axis 5 one row per state transition, axis 6 one row per business rule, axis 7 one row per subject whose OWN axis-4 or axis-3 row named more than one path reaching it. Axis 7 costs no new enumeration: its population is read off the rows you have already written, so a field whose axis-4 cell says "entered on S6; maintained by S7, checkout, void" is four paths and gets an axis-7 row. Write it as a Markdown table:
 
 ```
 | # | axis | subject | what must exist for this to be buildable | verdict | finding |
@@ -73,6 +76,7 @@ PART 2 — THE CHECK TABLE. One row for every (axis, subject) pair: for each of 
 | 1 | 1 cap->screen | Admin: void a sale | a screen an Admin can reach that lists sales | CRITICAL | C1 |
 | 2 | 1 cap->screen | Cashier: checkout | POS page, in Cashier navigation | OK | — |
 | 3 | 3 screen->data | POS page as Cashier | reads Product — and the Cashier may read it | CRITICAL | C2 |
+| 4 | 7 agreement | Product.stock_qty | 4 paths: Products form (direct, no guard), Stock In / checkout / void (via StockMovement, negative-stock guard) — the form escapes both | CRITICAL | C3 |
 ```
 
 `verdict` is exactly one of:
