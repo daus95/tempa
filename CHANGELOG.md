@@ -8,6 +8,14 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- New step-by-step dashboard user manual (`docs/getting-started/dashboard-walkthrough.md`),
+  screenshotted end-to-end against a real workspace: opening the dashboard, creating a new
+  workspace, uploading a PRD, answering clarification findings (including the PRD-reference
+  drawer and "Decided elsewhere" flow), Finalized Clarification, Apply Answers, and Start
+  Implementation through plan drafting, per-epic QA, and automatic fixing.
+
 ## [0.11.0] - 2026-08-26
 
 ### Added
