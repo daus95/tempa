@@ -8,7 +8,58 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-26
+
 ### Added
+
+- **Clarification now sweeps every critical finding to exhaustion before it looks for a single
+  major, instead of evaluating both severities in the same round.** A workspace running the old
+  single-scope evaluation reported 4, 4, 2, 3, 1, 1 critical findings across six manual rounds and
+  never reached zero — and one round still missed a defect derivable from the untouched original
+  PRD. The cause: a round can only answer what it found, answering a major rewrites the PRD, and a
+  rewritten PRD grows new criticals, so a round scoped to both severities at once was re-deriving
+  criticals from documents its own last round had just changed. Clarification now walks the
+  severities in **phases** — critical, then major, then minor (the last only when "Only evaluate
+  critical & major findings" is off) — each phase widening the scope by exactly one severity rather
+  than switching to it, so a critical that turns up during the major sweep **demotes** the run
+  straight back to criticals only. On the same PRD, a 12-round run under the new mechanism found 29
+  critical findings (several — unbounded numeric inputs, a role/token divergence, a missing
+  case-sensitivity rule, a concurrency defect — that no round under the old mechanism ever
+  surfaced) and ended with a confirmed clean critical sweep advancing the run to the major phase.
+
+  A phase is not allowed to close on its own say-so. Before writing findings, the evaluation now
+  fills in a **coverage ledger** (a new `coverage/` subfolder next to the clarification files): an
+  inventory of every role, capability, screen, endpoint, entity, field, state, rule and acceptance
+  criterion — each quoting the spec phrase that grants it, with any blanket statement ("Admin sees
+  everything", "full access") expanded into one entry per member it covers — followed by a check
+  table with one row per (axis, subject) pair and a verdict. A phase settles only when that table
+  reports zero unchecked rows, is no smaller than the previous round's (in total or in any single
+  inventory category — a shrunk table or a dropped capability is treated as if no ledger were
+  written at all), and its own carry-over section accounts for every finding the *previous* round
+  raised as resolved, still open (naming what it became), or withdrawn. Nothing may drop out of
+  that account silently: a measured before/after comparison showed one finding vanishing between
+  rounds simply because a re-derived inventory stopped listing it. Without a usable ledger, a phase
+  falls back to needing two clean rounds in a row instead of one.
+
+  Two new critical-pass axes came out of running this repeatedly against a real PRD: checking
+  whether a screen's own data agrees with the access rule for every role that can reach it (a
+  screen whose granted role is separately banned from the data it reads was invisible when the two
+  were checked apart), and checking whether every entered numeric value, identifier or guard of one
+  *kind* carries the same rule as its siblings — asked once per constraint class rather than
+  rediscovered one field at a time, which is what let "no lower bound on a numeric input" surface
+  as three separate findings across three rounds under an earlier iteration of this mechanism.
+
+  **This changes what a manual `tempa clarify` round evaluates for:** by default it now scopes to
+  whichever severity phase the workspace is currently sweeping (persisted across rounds, so
+  repeated manual runs continue a sweep instead of restarting it at the widest scope each time) —
+  a critical-only round therefore reports `major: 0` without having looked for any, which the
+  finalize gate and the "clean evaluation" timestamp now both account for so neither misreads it as
+  "nothing left." Set `clarify_severity_phases: false` in config.json to restore the previous
+  single-scope behavior exactly. New settings: `clarify_severity_phases` (default `true`) and
+  `critical_phase_max_rounds` (default `10`, measured from real rounds that were still finding
+  original-spec defects past a lower default) — see
+  [clarify-modes.md](docs/clarify-modes.md#severity-phases) and
+  [clarify-modes.md](docs/clarify-modes.md#the-coverage-ledger).
 
 - **A finding that reaches for something an earlier round already decided now says so, above the
   answer controls.** "Follow the recommendation" is one click and turns that recommendation into
