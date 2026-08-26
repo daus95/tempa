@@ -113,10 +113,14 @@ process — without it, every round would restart the sweep at the widest scope.
 
 ### What it changes elsewhere
 
-- **`critical_phase_max_rounds`** (default `6`) bounds how many answering rounds a
+- **`critical_phase_max_rounds`** (default `20`) bounds how many answering rounds a
   `--finalize` run may spend in the critical phase across the whole run. Past it the run stops
   and asks for a human: a critical is, by the rubric, the specification being unbuildable,
-  which is worth a decision rather than another unattended answering round.
+  which is worth a decision rather than another unattended answering round. The default was 6
+  until seven measured rounds against a 256-line PRD turned up a critical derivable from the
+  *original* spec in each of rounds 4 through 7 — a budget of 6 would have cut two of them off.
+  At `20` it no longer binds before `max_clarification_run` does; lower it where spending a
+  whole run budget on criticals is itself what you want caught.
 - The **convergence guard** (`finalize_no_progress_rounds`) judges the phase's own count. In
   the critical phase, a round that changed nothing about criticals has made no progress,
   whatever happened to the majors it never looked at.
