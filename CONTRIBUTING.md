@@ -16,9 +16,13 @@ cd tempa
 ```
 
 No virtual environment or `pip install` step is needed — Tempa only uses the Python 3
-standard library (see [README.md](README.md#step-1--prerequisites)). You'll also need the
-`claude` CLI on `PATH` and authenticated, since most of Tempa's behavior is only observable
-by actually driving it.
+standard library (see [README.md](README.md#step-1--prerequisites)). You'll also need at
+least one supported backend CLI — `claude`, `copilot`, or `codex` — on `PATH` and
+authenticated, since most of Tempa's behavior is only observable by actually driving it. See
+[Choosing a CLI Backend](README.md#choosing-a-cli-backend) if you're not sure which to use;
+`claude` is the default and the one most of the existing test coverage/PR descriptions
+exercise, but changes touching `tempa_backend.py` should be verified against whichever
+backend(s) they affect.
 
 Sanity-check your setup with:
 
@@ -51,10 +55,11 @@ command/prompt-stage/dashboard-route, see [docs/architecture.md](docs/architectu
 - Keep pull requests focused — one behavior change or fix per PR is much easier to review
   than a bundle of unrelated tweaks.
 - Run the test suite (see [Testing](#testing) below) before opening a PR, and add tests
-  for new pure-logic behavior where practical. Code that shells out to the `claude` CLI or
-  serves the dashboard isn't covered by tests yet, so for changes there, describe in your
-  PR description exactly what you ran and what you observed (CLI output, dashboard
-  screenshots, etc.).
+  for new pure-logic behavior where practical. Code that shells out to a backend CLI
+  (`claude`/`copilot`/`codex`) or serves the dashboard isn't covered by tests yet, so for
+  changes there, describe in your PR description exactly what you ran and what you observed
+  (CLI output, dashboard screenshots, etc.) — and which backend(s) you tested against, if the
+  change is backend-specific.
 - If your change affects user-facing behavior (a command, a config key, dashboard flow),
   update the relevant file in `docs/` and/or `README.md` in the same PR.
 - If your change affects a prompt template in `src/prompt/`, mention which stage(s) you
@@ -68,9 +73,9 @@ command/prompt-stage/dashboard-route, see [docs/architecture.md](docs/architectu
 Tempa has a `pytest`-based unit test suite under `tests/`, covering the pure-logic
 modules in `src/tempa_*.py` / `src/dashboard_*.py` (config parsing, clarify-result
 parsing, spec handling, prompt templating, destructive-clear safety checks, and the
-pure parsing/formatting helpers in `tempa_session.py`). Code that shells out to the
-`claude` CLI or serves the dashboard's HTTP handler isn't covered yet — that's next on
-the list if you're looking to contribute here.
+pure parsing/formatting helpers in `tempa_session.py`). Code that shells out to a backend
+CLI (`claude`/`copilot`/`codex`) or serves the dashboard's HTTP handler isn't covered yet —
+that's next on the list if you're looking to contribute here.
 
 Run it locally:
 

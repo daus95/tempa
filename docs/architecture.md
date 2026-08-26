@@ -9,7 +9,8 @@ for the contribution workflow itself.
 Tempa is one Python package split into two halves that share a config layer:
 
 - **The CLI** (`tempa_*.py`) — `tempa init/clarify/implement/...`, the thing that actually spawns
-  `claude` and drives the clarify → plan → implement → QA loop.
+  the configured backend CLI (Claude Code / GitHub Copilot CLI / OpenAI Codex CLI — see
+  `tempa_backend.py` below) and drives the clarify → plan → implement → QA loop.
 - **The dashboard** (`dashboard_*.py`) — `tempa dashboard`, a local web UI that drives the same
   workflow through buttons instead of commands.
 
@@ -274,4 +275,4 @@ load it lazily and from a same-origin path, so the dashboard keeps working with 
 
 `tests/` (pytest) covers the pure-logic modules end to end — see
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing) for how to run it and which modules aren't covered
-yet (anything that shells out to `claude` or serves the dashboard's HTTP handler directly).
+yet (anything that shells out to a backend CLI or serves the dashboard's HTTP handler directly).

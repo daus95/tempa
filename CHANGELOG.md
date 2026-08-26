@@ -1026,6 +1026,11 @@ check is a no-op and Stop Now, exit codes and scheduling are byte-for-byte what 
   contradicting itself. It now only prints "Apply finished" when the backlog is actually
   cleared.
 
+- **CONTRIBUTING.md, SECURITY.md, the bug report issue template, and docs/architecture.md
+  still described Tempa as only driving the `claude` CLI**, left over from before
+  multi-backend support (GitHub Copilot CLI, OpenAI Codex CLI) was added. Reworded to speak
+  of "the configured backend CLI" generically, with all three call out where relevant.
+
 ## [0.6.0] - 2026-08-10
 
 ### Added
