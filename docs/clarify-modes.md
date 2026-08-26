@@ -255,6 +255,26 @@ What this does not do is make a *first* round provably complete. There is no pre
 to compare it against, and nothing but the agent reads the PRD. The guard bounds how far the
 inventory can drift once a baseline exists; the prompt rules are what aim at the first round.
 
+### The same comparison checks an apply
+
+Applying is an agent rewriting prose, and nothing else compares the PRD before it against the
+PRD after. The inventory counts do, for free and without being designed to: the round before an
+apply derives them from the overlay plus the PRD, and the round after derives them from the
+rewritten PRD alone. Applying moves surface into the document — it never removes any — so those
+two counts should match category by category, and a category that comes back short means the
+apply dropped something rather than the agent having listed less.
+
+Measured twice on the same workspace, over an apply that took the PRD from 256 lines to 369 and
+then to 400 while writing in 28 decisions:
+
+| | before → after apply 1 | before → after apply 2 |
+|---|---|---|
+| capabilities, screens, endpoints, entities, fields, roles, criteria, transitions | identical | identical |
+| rules | 41 → 44 | 50 → 51 |
+
+Eight of nine categories unchanged both times, the ninth up. Nothing was lost. A shrunken
+category here is a real defect report about the apply, not a false alarm to tune away.
+
 Each round carries the previous ledger and must re-derive the inventory rather than trust it:
 a ledger says what was checked, not what is true, so a screen missing from it *is* the miss
 being hunted. Everything the overlay has added since gets new rows, and any row left blank
