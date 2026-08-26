@@ -113,14 +113,14 @@ process — without it, every round would restart the sweep at the widest scope.
 
 ### What it changes elsewhere
 
-- **`critical_phase_max_rounds`** (default `20`) bounds how many answering rounds a
+- **`critical_phase_max_rounds`** (default `10`) bounds how many answering rounds a
   `--finalize` run may spend in the critical phase across the whole run. Past it the run stops
   and asks for a human: a critical is, by the rubric, the specification being unbuildable,
-  which is worth a decision rather than another unattended answering round. The default was 6
-  until seven measured rounds against a 256-line PRD turned up a critical derivable from the
-  *original* spec in each of rounds 4 through 7 — a budget of 6 would have cut two of them off.
-  At `20` it no longer binds before `max_clarification_run` does; lower it where spending a
-  whole run budget on criticals is itself what you want caught.
+  which is worth a decision rather than another unattended answering round. Measured rather
+  than guessed — eight rounds against a 256-line PRD found a critical derivable from the
+  *original* spec in each of rounds 4 through 8, so a smaller budget cuts a sweep off while it
+  is still productive. `10` leaves headroom past that and still binds before
+  `max_clarification_run`.
 - The **convergence guard** (`finalize_no_progress_rounds`) judges the phase's own count. In
   the critical phase, a round that changed nothing about criticals has made no progress,
   whatever happened to the majors it never looked at.
@@ -142,7 +142,7 @@ writing any findings, the evaluation writes a ledger to a `coverage/` subfolder 
   access", "no master data") are expanded into one entry per member of the set they quantify
   over, never one entry for the sentence. Closed by a
   `<!-- coverage:inventory roles="…" capabilities="…" … -->` marker giving each category's size.
-- **Part 2 — the check table.** One row per (axis, subject) pair over the seven critical axes,
+- **Part 2 — the check table.** One row per (axis, subject) pair over the eight critical axes,
   each with a verdict of `OK`, `CRITICAL`, `N/A` — or **blank**, meaning the row could not be
   decided. A row that cannot be decided is unchecked, not OK.
 - **Part 3 — the carry-over table.** One row per finding the *previous* round raised at a
@@ -213,6 +213,26 @@ so a cell naming four writers is four paths and gets an axis-7 row.
 Two other findings had the same shape: a non-nullable `invoice_no` whose one creation path had
 no format or uniqueness rule, and a read carve-out for a role whose write on the same field
 stayed banned. In all three, existence was never what was missing.
+
+### One defect, not one per field
+
+Axis 7 compares a subject's paths to each other, so it can only see a member that is out of
+step with its siblings. When every sibling is equally unconstrained there is nothing for it to
+see — and that turned one defect into one finding per round for three rounds running.
+
+The measurement: a ledger row read `Product.purchase_price — 2 paths: the form (direct entry)
+and stock-in (BR11 overwrite); both stated, neither carries a further guard` and was verdicted
+**OK**. Three rounds later, after other rounds had put bounds on quantities and on the discount
+value, the same two paths with the same missing bound became **CRITICAL** — *"neither carries a
+lower bound, while every other entered numeric input now carries one"*. The spec fact never
+changed. Only the comparison class did.
+
+Axis 8 asks the question class-wise instead: take each kind of rule the spec could state — a
+bound on a numeric input, uniqueness on an identifier, case-sensitivity on a comparison, what
+supplies a required column, a guard on an access path — list every member it could cover, and
+report the members that do not carry it as **one** finding. Its rows are per class, not per
+member, and it runs even when the spec states that rule nowhere at all, which is the case that
+defeats axis 7 entirely.
 
 ### An inventory may not go short either
 

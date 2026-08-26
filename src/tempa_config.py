@@ -400,7 +400,7 @@ DEFAULT_CONFIG = {
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
     "clarify_severity_phases": True,
-    "critical_phase_max_rounds": 20,
+    "critical_phase_max_rounds": 10,
     "implementation_start_requirement": "no_critical_or_major",
     "notifications": {
         "email": {
@@ -806,7 +806,7 @@ def severity_sweep_pending(config: dict) -> bool:
 
 
 def get_critical_phase_max_rounds(config: dict) -> int | float:
-    """Return config.json's "critical_phase_max_rounds" (default 20) — how many answering
+    """Return config.json's "critical_phase_max_rounds" (default 10) — how many answering
     rounds a `clarify --finalize` run may spend in the critical phase, across the whole run,
     before it stops and asks for a human.
 
@@ -815,17 +815,15 @@ def get_critical_phase_max_rounds(config: dict) -> int | float:
     making progress but has spent long enough on findings a human should probably be
     deciding — a critical is, by the rubric, the specification being unbuildable.
 
-    The default started at 6 and was raised on measurement. Seven manual rounds against a
-    256-line PRD turned up a critical derivable from the ORIGINAL spec — not fallout from an
-    earlier round's answer — in each of rounds 4, 5, 6 and 7: quantity bounds, a discount
-    lower bound, the unit of the stock check, and a role/token divergence. A budget of 6 would
-    have stopped two of those from ever being found, on a specification that was still
-    yielding one real defect per round.
+    The default was measured, not guessed. Eight manual rounds against a 256-line PRD turned
+    up a critical derivable from the ORIGINAL spec — not fallout from an earlier round's
+    answer — in each of rounds 4 through 8. An earlier default of 6 would have cut three of
+    those off while the specification was still yielding one real defect per round.
 
-    At 20 it no longer binds before max_clarification_run's own default of 20 does, which is
-    deliberate: on the evidence, a critical sweep running long is a specification with more
-    wrong with it than anyone assumed, not a loop misbehaving. Lower it for a workspace where
-    spending the whole run budget on criticals is the thing worth catching."""
+    10 leaves headroom past that observed run and still binds well before
+    max_clarification_run's own default of 20, so it remains a guard rather than a formality.
+    Raise it for a specification whose critical sweep is still finding original defects when
+    it stops; the log says which round found what."""
     return _get_positive_number(config, "critical_phase_max_rounds", DEFAULT_CONFIG["critical_phase_max_rounds"])
 
 
