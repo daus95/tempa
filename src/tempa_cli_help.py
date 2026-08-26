@@ -140,7 +140,7 @@ CONFIG OPTIONS (config.json)
   sources.clarifications          Clarification results folder (default: workspace.specs/clarifications,
                                       i.e. <root>/.tempa/specs/clarifications)
   models.clarify                  AI model for clarify (default: claude-opus-5)
-  models.plan                     AI model for the plan stage, run via implement (default: claude-sonnet-5)
+  models.plan                     AI model for the plan stage, run via implement (default: claude-opus-5)
   models.implement                AI model for implement/QA/verify (default: claude-sonnet-5)
   backends.clarify                CLI backend for clarify: claude | copilot | codex (default: claude)
   backends.plan                   CLI backend for the plan stage, run via implement (default: claude)

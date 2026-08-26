@@ -643,25 +643,106 @@ def _render_pending_overlay(pending: list) -> str:
     return "\n".join(lines)
 
 
-def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: list | None = None) -> str:
+# What ${finding_scope} renders as, per severity scope. Narrowing a round to criticals alone
+# is the severity phase machine's main lever (see tempa_clarify._PHASE_SCOPES): it stops the
+# round spending attention on majors while criticals are still being found, and — because a
+# round can only answer what it found — stops it answering majors, whose recommendations are
+# the spec surface that opens the NEXT round's criticals.
+SEVERITY_SCOPES = {
+    "critical": ("critical ONLY — do NOT look for, evaluate, or report MAJOR or "
+                 "MINOR findings at all"),
+    "critical_major": ("critical or major — do NOT look for, evaluate, or report MINOR "
+                       "findings at all"),
+    "all": "critical, major, or minor",
+}
+
+# How much of the previous coverage ledger to carry into the next round's prompt. A ledger
+# is one row per (axis, subject) pair over the whole spec, so it grows with the spec rather
+# than with the number of rounds — but a large spec can still produce one big enough to
+# crowd out the PRD itself. Truncating is safe because the prompt tells the agent to
+# re-derive the inventory anyway: a missing tail costs re-derivation, not correctness.
+LEDGER_PROMPT_MAX_CHARS = 40_000
+
+
+def _render_previous_ledger(previous_ledger: tuple[str, str] | None) -> str:
+    """Render the ${previous_coverage_ledger} block from a (file_name, text) pair.
+
+    None renders an explicit "there isn't one" line rather than an empty block, for the same
+    reason _render_pending_overlay does: the template's section header would otherwise dangle
+    over nothing and read as a ledger the agent failed to receive."""
+    if not previous_ledger:
+        return ("(No previous coverage ledger — this is the first sweep over this "
+                "specification. Build Part 1 from the spec and the overlay alone.)")
+    name, body = previous_ledger
+    body = body.strip()
+    if len(body) > LEDGER_PROMPT_MAX_CHARS:
+        body = (body[:LEDGER_PROMPT_MAX_CHARS].rstrip()
+                + "\n\n[... this ledger was truncated to fit the prompt. Re-derive the rows "
+                  "beyond this point from the spec yourself, and list them in full in "
+                  "this round's ledger. ...]")
+    return f"--- {name} ---\n\n{body}"
+
+
+def _render_carried_findings(carried: list[tuple[str, str, str, bool]] | None) -> str:
+    """Render the ${carried_findings} block — the previous round's findings, which this round's
+    ledger has to account for one by one (Part 3 of prompt/clarification.md).
+
+    Each entry is (id, severity, title, answered). The answered flag is stated because it
+    changes what a RESOLVED verdict has to point at: an answered finding should be closed by a
+    decision in the overlay, while an unanswered one can only have been closed by the spec
+    already saying something the previous round missed.
+
+    None/empty renders an explicit "nothing to carry" line and tells the agent to omit the
+    table, rather than leaving it to invent an empty one whose markers the parser would then
+    read as an account of nothing."""
+    if not carried:
+        return ("(No previous round at these severities — there is nothing to carry over. "
+                "Omit Part 3's table and its markers entirely.)")
+    lines = [f"- {raw_id} ({severity}, {'answered' if answered else 'unanswered'}) — {title}"
+             for raw_id, severity, title, answered in carried]
+    return "\n".join(lines)
+
+
+def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: list | None = None,
+                               severity_scope: str | None = None, coverage_dir: str = "",
+                               previous_ledger: tuple[str, str] | None = None,
+                               carried_findings: list[tuple[str, str, str, bool]] | None = None) -> str:
     """`pending` is the pending-resolution overlay: every answered clarification finding
     whose answer hasn't been written into the PRD yet (see
     dashboard_clarify_parse.pending_resolutions, computed by tempa_clarify._pending_overlay).
     Carrying it in the prompt is what lets a round of clarification run without an apply
     pass first — the agent evaluates the PRD as it will read once those decisions are
     applied. None/empty renders an explicit "nothing pending" line rather than an empty
-    block, so the template's overlay section never has a dangling header."""
+    block, so the template's overlay section never has a dangling header.
+
+    `severity_scope` is one of SEVERITY_SCOPES and is what a severity phase actually changes
+    about a round (tempa_clarify._PHASE_SCOPES). None falls back to deriving it from
+    `skip_minor`, which is the pre-phases behavior and what every caller that doesn't run
+    phases still wants; an unrecognized value falls back the same way rather than rendering
+    a scope line the agent can't act on.
+
+    `coverage_dir` and `previous_ledger` drive the coverage ledger — the table the critical
+    pass fills in instead of writing a free-form report (see tempa_clarify._coverage_dir /
+    _latest_coverage_ledger). `previous_ledger` is a (file_name, text) pair or None.
+
+    `carried_findings` is the previous round's findings (id, severity, title, answered) that
+    this round's ledger has to account for one by one. Re-deriving the inventory every round is
+    what keeps a round honest about the spec, but it also lets a finding vanish by simply not
+    being listed again — four runs of the same round over the same PRD produced overlapping but
+    different critical sets, so this is not hypothetical."""
     sources = get_sources(config)
     template = load_prompt("clarification")
+    if severity_scope not in SEVERITY_SCOPES:
+        severity_scope = "critical_major" if skip_minor else "all"
     params = {
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
         "pending_resolutions": _render_pending_overlay(pending or []),
-        "finding_scope": (
-            "critical or major — do NOT look for, evaluate, or report MINOR findings at all"
-            if skip_minor else "critical, major, or minor"
-        ),
+        "finding_scope": SEVERITY_SCOPES[severity_scope],
+        "coverage_dir": coverage_dir,
+        "previous_coverage_ledger": _render_previous_ledger(previous_ledger),
+        "carried_findings": _render_carried_findings(carried_findings),
     }
     return build_prompt(template, params)
 

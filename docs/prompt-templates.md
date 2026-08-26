@@ -18,14 +18,18 @@ to customize harness behavior.
 
 **Placeholders** substituted at runtime (depending on the prompt): `${epic}`, `${sources}`,
 `${sources.<key>}`, `${config_path}`, `${output_file}`, `${qa_output_file}`,
-`${clarification_files}`, `${finding_scope}`, `${pending_resolutions}`.
+`${clarification_files}`, `${finding_scope}`, `${pending_resolutions}`, `${coverage_dir}`,
+`${previous_coverage_ledger}`.
 
 Nearly all of these substitute a **path** (or a list of them) and leave the reading to the
 agent's own tools — the PRD is never inlined into a prompt. The one exception is
 `${pending_resolutions}` in `clarification.md`: the question-and-answer text of every
 clarification finding that's been answered but not yet written into the PRD, rendered inline
 so the evaluation can treat those decisions as settled without an apply pass having run
-first. See [clarify-modes.md](clarify-modes.md#pending-resolutions-overlay). It's built by
+first. `${previous_coverage_ledger}` in the same template is inlined for the same reason: it
+is the check table the last critical sweep filled in, and the round carrying it has to be able
+to see which rows were left unchecked. See
+[clarify-modes.md](clarify-modes.md#the-coverage-ledger). `${pending_resolutions}` is built by
 `_render_pending_overlay()` in `src/tempa_prompts.py` from data the CLI half computes
 (`pending_resolutions()`), and it substitutes to an explicit "nothing pending" line rather
 than an empty string when there's no overlay.

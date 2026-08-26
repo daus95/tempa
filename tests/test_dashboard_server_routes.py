@@ -216,7 +216,7 @@ def test_tree_returns_the_full_first_paint_payload(dash):
     assert body["spec"]["tree"]["name"] == dash.prd_dir.name
     assert set(body["clarify"]) == {
         "unanswered", "answered", "findings", "finalize", "implementReadiness",
-        "pendingOverlay", "overlayWarnThreshold", "skipMinorFindings",
+        "pendingOverlay", "overlayWarnThreshold", "skipMinorFindings", "severityPhase",
     }
     assert body["backends"] == FAKE_BACKEND_STATUS
 

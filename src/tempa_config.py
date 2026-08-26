@@ -303,12 +303,15 @@ WORKSPACE_LABELS = {
 #   to a cheaper model. A full stage of its own (has its own backends/reasoning_efforts
 #   entries too, same as clarify/plan/implement) — the optimal backend/effort for
 #   mechanical apply work isn't necessarily the same as for evaluate.
-# - plan         : epic/feature/task planning session (run automatically by implement / implement --replan)
-# - implement    : implementation session (implement), including QA and verify
+# - plan         : epic/feature/task planning session (run automatically by implement /
+#   implement --replan) — its output determines the validity of every implementation that
+#   follows, so it keeps the strongest default model, same as clarify.
+# - implement    : implementation session (implement), including QA and verify — runs
+#   repeatedly at high volume, so it defaults to a cheaper/faster model.
 DEFAULT_MODELS = {
     "clarify": "claude-opus-5",
     "clarify_apply": "claude-sonnet-5",
-    "plan": "claude-sonnet-5",
+    "plan": "claude-opus-5",
     "implement": "claude-sonnet-5",
 }
 
@@ -396,6 +399,8 @@ DEFAULT_CONFIG = {
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
+    "clarify_severity_phases": True,
+    "critical_phase_max_rounds": 10,
     "implementation_start_requirement": "no_critical_or_major",
     "notifications": {
         "email": {
@@ -775,6 +780,58 @@ def get_skip_minor_findings(config: dict) -> bool:
     """Return config.json's "skip_minor_findings" (dashboard toggle + CLI --skip-minor
     default), defaulting to True for a missing value."""
     return bool(config.get("skip_minor_findings", True))
+
+
+def get_clarify_severity_phases(config: dict) -> bool:
+    """Return config.json's "clarify_severity_phases" (default True) — whether clarification
+    walks the severities in phases (every critical first, then major, then minor) instead of
+    evaluating them all in one round.
+
+    Off reproduces the pre-phases behavior exactly: every round is scoped to critical+major
+    (or all, per skip_minor_findings) and the run ends when both reach zero. See
+    tempa_clarify._PHASE_SCOPES for what the switch actually changes about a round."""
+    return bool(config.get("clarify_severity_phases", True))
+
+
+def severity_sweep_pending(config: dict) -> bool:
+    """True when the most recent evaluate pass was scoped narrower than "did anything major
+    turn up" — i.e. it was a critical-only round of the critical phase.
+
+    Such a round records major=0 because it never looked for majors, so the Start
+    Implementation gate must not read that zero as an answer (see
+    dashboard_clarify_parse._implement_readiness_status). A config.json with no
+    "last_evaluation_scope" at all predates severity phases: its last round was the old
+    critical+major one, so it is NOT pending and an already-open gate stays open."""
+    return config.get("last_evaluation_scope", "all") not in ("critical_major", "all")
+
+
+def get_critical_phase_max_rounds(config: dict) -> int | float:
+    """Return config.json's "critical_phase_max_rounds" (default 10) — how many answering
+    rounds a `clarify --finalize` run may spend in the critical phase, across the whole run,
+    before it stops and asks for a human.
+
+    Bounded separately from finalize_no_progress_rounds because the two catch different
+    things: that one catches a loop making no progress, this one catches a loop that is
+    making progress but has spent long enough on findings a human should probably be
+    deciding — a critical is, by the rubric, the specification being unbuildable.
+
+    The default was measured, not guessed. Eight manual rounds against a 256-line PRD turned
+    up a critical derivable from the ORIGINAL spec — not fallout from an earlier round's
+    answer — in each of rounds 4 through 8. An earlier default of 6 would have cut three of
+    those off while the specification was still yielding one real defect per round.
+
+    10 leaves headroom past that observed run and still binds well before
+    max_clarification_run's own default of 20, so it remains a guard rather than a formality.
+    Raise it for a specification whose critical sweep is still finding original defects when
+    it stops; the log says which round found what."""
+    return _get_positive_number(config, "critical_phase_max_rounds", DEFAULT_CONFIG["critical_phase_max_rounds"])
+
+
+# "last_severity_phase", "clarify_phase_clean_rounds" and "last_evaluation_scope" are
+# deliberately NOT in DEFAULT_CONFIG: they are a run's state, not settings, and every reader
+# above treats a missing key as "no clarification round has run under severity phases yet".
+# Seeding them would make a brand-new workspace look like one mid-sweep — and would make
+# `tempa clear` report stale state to clear on a workspace that has never run anything.
 
 
 def _get_positive_number(config: dict, key: str, default: int) -> int | float:

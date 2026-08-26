@@ -355,6 +355,7 @@ def _clarify_finalize_status(
 
 def _implement_readiness_status(
     findings: dict, has_run: bool, requirement: str, pending_overlay_findings: int = 0,
+    severity_sweep_pending: bool = False,
 ) -> dict:
     """Whether "Start Implementation" is currently allowed to run, per config.json's
     "implementation_start_requirement" (the dashboard Settings "Start Implementation
@@ -379,18 +380,28 @@ def _implement_readiness_status(
     pending_resolutions), this is the only thing left forcing the PRD to be current before
     any code gets written.
 
+    `severity_sweep_pending` (tempa_config.severity_sweep_pending) gates the MAJOR half only,
+    and so only matters at the default requirement. Clarification sweeps the severities in
+    phases now (tempa_clarify._PHASE_SCOPES): while it is still on the critical sweep, a round
+    reports zero majors because it never looked for any, and a clean one writes no findings
+    file at all — which would otherwise leave this gate reading zeroes nobody measured and
+    opening implementation on a spec whose majors have never been evaluated. One more round
+    (the major phase's first) is what clears it.
+
     This is the single source of truth shared by the server-side gate
     (_handle_implement_run_start in dashboard_server.py) and every dashboard surface
     that shows Start Implementation readiness (Home step 3, the Clarification
     overview's ready-for-implementation banner, and the Implementation page's
     readiness gate) — see /api/tree's "clarify.implementReadiness"."""
     critical_ok = requirement == "none" or findings["critical"] == 0
-    major_ok = requirement in ("none", "no_critical") or findings["major"] == 0
+    major_ok = requirement in ("none", "no_critical") or (
+        findings["major"] == 0 and not severity_sweep_pending)
     return {
         "hasRun": has_run,
         "critical": findings["critical"],
         "major": findings["major"],
         "requirement": requirement,
+        "severitySweepPending": severity_sweep_pending and requirement == "no_critical_or_major",
         "pendingOverlay": pending_overlay_findings,
         "ready": has_run and critical_ok and major_ok and pending_overlay_findings == 0,
     }

@@ -563,6 +563,30 @@ def test_implement_readiness_overlay_defaults_to_zero():
     assert dcp._implement_readiness_status(_CLEAN, True, "no_critical_or_major")["ready"] is True
 
 
+def test_implement_readiness_blocked_while_the_critical_sweep_is_still_running():
+    """A critical-only round reports zero majors because it never looked for any, and a clean
+    one writes no findings file at all — so these zeroes are unmeasured, not answers."""
+    result = dcp._implement_readiness_status(
+        _CLEAN, True, "no_critical_or_major", 0, severity_sweep_pending=True)
+    assert result["ready"] is False
+    assert result["severitySweepPending"] is True
+
+
+def test_the_critical_sweep_does_not_gate_a_requirement_that_ignores_majors():
+    """"no_critical" says majors may remain open, so a round that measured only criticals
+    answers exactly the question that setting asks."""
+    for requirement in ("no_critical", "none"):
+        result = dcp._implement_readiness_status(
+            _CLEAN, True, requirement, 0, severity_sweep_pending=True)
+        assert result["ready"] is True
+        assert result["severitySweepPending"] is False
+
+
+def test_implement_readiness_sweep_flag_defaults_to_not_pending():
+    # Callers that don't pass it keep their previous behavior.
+    assert dcp._implement_readiness_status(_CLEAN, True, "no_critical_or_major")["ready"] is True
+
+
 def test_clarify_finalize_status_reports_overlay_without_gating_on_it():
     # Finalize CONSUMES the overlay, so it must stay "ready" while one is pending.
     result = dcp._clarify_finalize_status({"critical": 0}, "evaluate", pending_overlay_findings=7)

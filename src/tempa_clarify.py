@@ -10,10 +10,12 @@ last_clarification_* state.
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from dashboard_clarify_parse import (
     _file_started_at,
@@ -28,6 +30,8 @@ from tempa_config import (
     get_backend,
     get_clarify_apply_session_id,
     get_clarify_session_id,
+    get_clarify_severity_phases,
+    get_critical_phase_max_rounds,
     get_finalize_checkpoint_commit,
     get_finalize_checkpoint_rounds,
     get_finalize_no_progress_rounds,
@@ -62,6 +66,448 @@ from tempa_session_runners import run_apply_clarification_session, run_clarifica
 # checkpoints every 5 rounds could never reach its 20th round.
 MAX_COMPACTIONS = 2
 
+# The severity phases, in the order clarification walks them. The point of walking them at
+# all is that a round can only ANSWER what it found: answering a major rewrites the spec, and
+# a rewritten spec grows new criticals (see the overlay's rule 3c in prompt/clarification.md),
+# so looking for majors while criticals are still being swept means sweeping a moving target.
+_PHASE_CRITICAL = "critical"
+_PHASE_MAJOR = "major"
+_PHASE_MINOR = "minor"
+
+# What each phase scopes its evaluation to (tempa_prompts.SEVERITY_SCOPES), and which
+# severities have to reach zero before it is settled. Each phase WIDENS the scope by one
+# severity rather than switching to it, so a later phase never stops checking what an earlier
+# one established — which is what makes the demotion in run_clarify_finalize possible.
+_PHASE_SCOPES = {
+    _PHASE_CRITICAL: "critical",
+    _PHASE_MAJOR: "critical_major",
+    _PHASE_MINOR: "all",
+}
+_PHASE_BLOCKING = {
+    _PHASE_CRITICAL: ("critical",),
+    _PHASE_MAJOR: ("critical", "major"),
+    _PHASE_MINOR: ("critical", "major", "minor"),
+}
+
+# Clean rounds in a row that settle a phase when no coverage ledger backs the result up.
+# See _phase_may_advance for why there is a fallback at all.
+_PHASE_CLEAN_ROUNDS_WITHOUT_LEDGER = 2
+
+# How far a round's coverage ledger may fall short of the previous round's row count and
+# still be taken as evidence its sweep was exhaustive. See _ledger_confirms_sweep.
+#
+# 0.85 sits between the two things that have to be told apart: how much the row count moves
+# when the agent merely groups the inventory differently (small — fields and rules are
+# enumerated by the spec), and how much it moves when the inventory itself is thinner
+# (large — the pair of runs that motivated this were 113 rows and 64, a drop to 0.57). The
+# cost of being wrong is asymmetric, which is why the threshold sits nearer the first: a
+# false alarm costs one more round, a miss settles a phase over a critical nobody looked for.
+_LEDGER_SHRINK_TOLERANCE = 0.85
+
+# The coverage ledger lives in a SUBFOLDER of sources.clarifications, never beside the
+# findings files. Everything that reads that folder — _clarification_result_files here,
+# clarification_files/pending_resolutions in dashboard_clarify_parse — globs "*.md"
+# non-recursively and treats every hit as a findings file, so a ledger written flat would be
+# parsed as a round, tabbed into the answer UI, and swept into the apply backlog.
+_COVERAGE_DIRNAME = "coverage"
+
+_COVERAGE_SUMMARY_RE = re.compile(r"<!--\s*coverage:summary\s+([^>]*?)-->", re.IGNORECASE)
+_COVERAGE_ATTR_RE = re.compile(r'(?P<key>[a-z_]+)\s*=\s*"(?P<value>-?\d+)"', re.IGNORECASE)
+_COVERAGE_INVENTORY_RE = re.compile(r"<!--\s*coverage:inventory\s+([^>]*?)-->", re.IGNORECASE)
+_COVERAGE_CARRIED_RE = re.compile(
+    r"<!--\s*coverage:carried\s*-->(?P<body>.*?)<!--\s*coverage:endcarried\s*-->",
+    re.IGNORECASE | re.DOTALL)
+
+# Which of the previous round's findings a round has to account for, per severity scope. Minor
+# findings are never carried even when they are being looked for: they block nothing, so an
+# accountability table over them would be cost without a decision behind it.
+_CARRIED_SEVERITIES = {
+    "critical": ("critical",),
+    "critical_major": ("critical", "major"),
+    "all": ("critical", "major"),
+}
+
+
+class LedgerEvidence(NamedTuple):
+    """What the coverage ledger a round wrote is worth as evidence that its sweep was complete.
+
+    Bundled rather than passed as three arguments because the three are only ever read
+    together, by _ledger_confirms_sweep, and every one of them can independently sink the same
+    conclusion. The default is the honest "no ledger at all" case.
+
+    `summary` is the parsed coverage:summary marker; `previous_checks` the row count of the
+    ledger this one was judged against; `unaccounted` the ids of findings the previous round
+    raised that this ledger's carry-over table never mentions; `shrunken` the inventory
+    categories that came back smaller than the previous round's."""
+    summary: dict | None = None
+    previous_checks: int | None = None
+    unaccounted: tuple[str, ...] = ()
+    shrunken: tuple[str, ...] = ()
+
+
+def _phase_scope(phase: str, phases_on: bool, skip_minor: bool) -> str:
+    """The severity scope one round of `phase` evaluates at.
+
+    With phases off there is only ever one phase (_PHASE_MAJOR) and its scope is the
+    pre-phases derivation from skip_minor — which is what keeps a phases-off run behaving
+    exactly as clarification did before phases existed."""
+    if not phases_on:
+        return "critical_major" if skip_minor else "all"
+    return _PHASE_SCOPES[phase]
+
+
+def _phase_blocking_count(phase: str, critical: int, major: int, minor: int) -> int:
+    """How many findings still stand between `phase` and being settled — the severities that
+    phase is responsible for, and only those. A critical-only round reports major=0 because
+    it never looked, so counting majors here would settle the critical phase on the strength
+    of a number nobody measured."""
+    counts = {"critical": critical, "major": major, "minor": minor}
+    return sum(counts[sev] for sev in _PHASE_BLOCKING[phase])
+
+
+def _next_phase(phase: str, phases_on: bool, skip_minor: bool) -> str | None:
+    """The phase to enter once `phase` is settled, or None when clarification is finished.
+
+    With phases off, _PHASE_MAJOR is the only phase and nothing follows it — the run ends
+    where it always did, on zero critical and zero major. A minor phase exists only when
+    minor findings are being looked for at all (skip_minor off); it sweeps them rather than
+    gating on them, which is why nothing follows it either."""
+    if not phases_on:
+        return None
+    if phase == _PHASE_CRITICAL:
+        return _PHASE_MAJOR
+    if phase == _PHASE_MAJOR and not skip_minor:
+        return _PHASE_MINOR
+    return None
+
+
+def _ledger_confirms_sweep(evidence: LedgerEvidence) -> bool:
+    """Whether a round's coverage ledger is evidence that its sweep was exhaustive. Three
+    things have to hold, and each was added because the one before it turned out not to be
+    enough on its own.
+
+    NOTHING WAS DROPPED. Every finding the previous round raised is accounted for in this
+    ledger's carry-over table (Part 3). Re-deriving the inventory each round is what keeps a
+    round honest about the spec, but it also lets a finding vanish by simply not being listed
+    again — four runs of the same round over the same PRD produced overlapping but different
+    critical sets, none of them complete. An inventory may legitimately be grouped a new way; a
+    finding somebody already raised may not quietly stop existing.
+
+    NOTHING WAS LEFT UNDECIDED. `unchecked == 0`, the ledger's own count of rows it could not
+    call.
+
+    THE TABLE DID NOT SHRINK. Two runs of the same round — same PRD, prompt and model —
+    produced tables of 113 rows and 64, both reporting zero unchecked. The marker attests that
+    every row the agent LISTED got a verdict, never that it listed every row there is. Within a
+    phase the spec only gains surface, so a table materially smaller than the previous round's
+    has lost rows rather than the spec having lost surface.
+
+    NOR DID ANY PART OF THE INVENTORY. The same check per inventory category, because the row
+    total can hold still while capabilities halve and fields double — and a capability that
+    never reaches Part 1 never becomes a row, so it cannot be reported as unchecked either.
+    That is not hypothetical: an inventory that omitted one role capability is what let a
+    contradiction go unreported for two rounds.
+
+    Failing any of them makes the round exactly as good as one that wrote no ledger at all: it
+    needs a second clean round behind it. A malformed marker (no `checks`, or a non-positive
+    one) fails for the same reason as a shrunken one — nothing in it can be compared."""
+    if evidence.unaccounted or evidence.shrunken:
+        return False
+    summary = evidence.summary
+    if not summary or summary.get("unchecked") != 0:
+        return False
+    checks = summary.get("checks")
+    if not isinstance(checks, int) or checks <= 0:
+        return False
+    if evidence.previous_checks is None or evidence.previous_checks <= 0:
+        return True
+    return checks >= evidence.previous_checks * _LEDGER_SHRINK_TOLERANCE
+
+
+def _phase_may_advance(blocking: int, evidence: LedgerEvidence, clean_rounds: int,
+                       phases_on: bool = True) -> bool:
+    """Whether a phase's sweep is finished, given this round's blocking-severity count, the
+    coverage ledger that round produced, and how many clean rounds in a row it has now had
+    (this one included).
+
+    With phases off there is nothing to confirm: one clean round ended the run before phases
+    existed and still does, so the ledger is written and logged but never gates anything.
+
+    One clean round is not proof. The behavior this mechanism exists to fix had a round report
+    zero criticals while three of them sat in the spec, so "the agent says it is clean" cannot
+    be the thing that closes a phase. What replaces it is the ledger: a full check table with
+    no unchecked row is checkable evidence the sweep was exhaustive, and one clean round
+    carrying one is enough.
+
+    Without a readable ledger there is no evidence, so the fallback is the crude one — two
+    clean rounds in a row. A fallback rather than a hard requirement on purpose: the ledger is
+    written by an agent, and a phase that could never advance because the agent kept omitting
+    a marker would be a worse failure than the miss this guards against."""
+    if blocking:
+        return False
+    if not phases_on:
+        return True
+    if _ledger_confirms_sweep(evidence):
+        return True
+    return clean_rounds >= _PHASE_CLEAN_ROUNDS_WITHOUT_LEDGER
+
+
+def _load_phase_state(config: dict, phases_on: bool) -> tuple[str, int]:
+    """The severity phase clarification is on and how many clean rounds in a row it has had,
+    as left behind by the last round — manual or finalize alike.
+
+    Persisted rather than derived because manual clarification is one round per process:
+    "still sweeping for criticals" has to survive the process exiting, or every
+    `tempa clarify` would restart the sweep at the widest scope, which is exactly the behavior
+    the phases exist to replace."""
+    if not phases_on:
+        return _PHASE_MAJOR, 0
+    phase = config.get("last_severity_phase")
+    if phase not in _PHASE_SCOPES:
+        phase = _PHASE_CRITICAL
+    clean = config.get("clarify_phase_clean_rounds", 0)
+    valid = isinstance(clean, int) and not isinstance(clean, bool) and clean >= 0
+    return phase, clean if valid else 0
+
+
+def _save_phase_state(config: dict, phase: str, clean_rounds: int) -> None:
+    """Record the phase state on `config` — the caller saves it, as everything else here does."""
+    config["last_severity_phase"] = phase
+    config["clarify_phase_clean_rounds"] = clean_rounds
+
+
+def _coverage_dir(clar_dir: Path) -> Path:
+    return clar_dir / _COVERAGE_DIRNAME
+
+
+def _latest_coverage_ledger(clar_dir: Path) -> tuple[str, str] | None:
+    """(file_name, text) of the most recent coverage ledger, or None if there is none.
+
+    Newest by NAME, not mtime: the prompt names each ledger coverage-<YYYYMMDD-HHMMSS>.md so
+    the names sort chronologically, and mtime would pick the wrong one the moment anything
+    else touched an older file — a git checkout, an editor, a restored backup."""
+    folder = _coverage_dir(clar_dir)
+    if not folder.exists():
+        return None
+    files = sorted(p for p in folder.glob("coverage-*.md") if p.is_file())
+    if not files:
+        return None
+    try:
+        return files[-1].name, files[-1].read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _parse_coverage_marker(body: str, pattern: re.Pattern) -> dict[str, int] | None:
+    """The `key="123"` counts inside a ledger marker, or None when the marker is absent or
+    holds nothing numeric. The LAST match wins: every marker the prompt asks for is shown as a
+    fenced example before it is asked for, so an earlier match is the template being quoted
+    back rather than the real thing."""
+    matches = pattern.findall(body)
+    if not matches:
+        return None
+    counts = {m.group("key").lower(): int(m.group("value"))
+              for m in _COVERAGE_ATTR_RE.finditer(matches[-1])}
+    return counts or None
+
+
+def _parse_coverage_summary(body: str) -> dict[str, int] | None:
+    """The check-table counts in a ledger's closing `<!-- coverage:summary ... -->` marker."""
+    return _parse_coverage_marker(body, _COVERAGE_SUMMARY_RE)
+
+
+def _parse_coverage_inventory(body: str) -> dict[str, int] | None:
+    """The per-category sizes in a ledger's `<!-- coverage:inventory ... -->` marker — how many
+    roles, capabilities, screens, endpoints, entities, fields, transitions, rules and criteria
+    Part 1 transcribed. Judged category by category rather than as one total, because a total
+    can hold still while capabilities halve and fields double."""
+    return _parse_coverage_marker(body, _COVERAGE_INVENTORY_RE)
+
+
+def _shrunken_categories(inventory: dict | None, previous: dict | None) -> list[str]:
+    """Inventory categories this round transcribed materially fewer of than the previous round.
+
+    Only categories present in BOTH markers are compared: a category the previous round never
+    counted is a new one, not a shrunken one, and a category this round drops entirely is
+    reported by name rather than silently skipped.
+
+    The failure this catches is Part 1 going short — a round whose inventory simply has no
+    entry for something the spec grants. Nothing downstream can check what was never listed,
+    so it does not show up as an unchecked row; the category count is the only place it is
+    visible at all."""
+    if not inventory or not previous:
+        return []
+    shrunken = []
+    for key, before in previous.items():
+        if not isinstance(before, int) or before <= 0:
+            continue
+        now = inventory.get(key)
+        if now is None or now < before * _LEDGER_SHRINK_TOLERANCE:
+            shrunken.append(key)
+    return sorted(shrunken)
+
+
+def _carried_ledger_checks(carried: tuple[str, str] | None) -> int | None:
+    """The `checks` count of the ledger carried INTO a round — the baseline this round's own
+    table is judged against (_ledger_confirms_sweep). None when there is no previous ledger,
+    or its marker holds no usable count, which both mean "nothing to compare against"."""
+    if not carried:
+        return None
+    summary = _parse_coverage_summary(carried[1])
+    checks = summary.get("checks") if summary else None
+    return checks if isinstance(checks, int) and checks > 0 else None
+
+
+def _previous_round_findings(clar_dir: Path, severity_scope: str) -> list[tuple[str, str, str, bool]]:
+    """(id, severity, title, answered) for every finding the most recent round raised at a
+    severity `severity_scope` covers — what the next round's ledger has to account for.
+
+    Most recent by _file_started_at, which reads the round's timestamp out of the file NAME
+    rather than its mtime: answering a finding rewrites the file, and mtime would make the
+    oldest round look like the newest the moment somebody worked through its answers."""
+    files = _clarification_result_files(clar_dir)
+    if not files:
+        return []
+    latest = max(files, key=_file_started_at)
+    try:
+        body = latest.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    items, _ = parse_file(latest, body, 0)
+    wanted = _CARRIED_SEVERITIES.get(severity_scope, ("critical", "major"))
+    return [(item.raw_id, item.severity, item.title, bool(item.resolved_answer.strip()))
+            for item in items if item.severity in wanted]
+
+
+def _carryover_gaps(ledger_body: str, carried_ids: list[str]) -> list[str]:
+    """Which of `carried_ids` the ledger's carry-over table (Part 3) never mentions.
+
+    Only the block between the `coverage:carried` markers is searched, never the whole ledger:
+    finding ids restart at C1 every round, so a bare "C1" anywhere else in the file is this
+    round's own finding and would answer for the previous round's by coincidence.
+
+    A ledger with no carry-over block at all leaves every id unaccounted, which is the correct
+    reading — an absent table accounts for nothing."""
+    if not carried_ids:
+        return []
+    match = _COVERAGE_CARRIED_RE.search(ledger_body)
+    if match is None:
+        return list(carried_ids)
+    accounted = set()
+    for line in match.group("body").splitlines():
+        line = line.strip()
+        if line.startswith("|"):
+            accounted.add(line.strip("|").split("|")[0].strip())
+    return [raw_id for raw_id in carried_ids if raw_id not in accounted]
+
+
+def _carried_ledger_inventory(carried: tuple[str, str] | None) -> dict[str, int] | None:
+    """The per-category inventory sizes of the ledger carried INTO a round — the baseline this
+    round's own Part 1 is judged against (_shrunken_categories)."""
+    return _parse_coverage_inventory(carried[1]) if carried else None
+
+
+def _ledger_evidence(clar_dir: Path, carried: tuple[str, str] | None,
+                     carried_ids: list[str]) -> LedgerEvidence:
+    """Everything about the ledger the evaluate session just wrote that bears on whether its
+    phase may be settled (_ledger_confirms_sweep), logged as it is read so an extra round
+    always has a stated reason.
+
+    `carried` is the ledger handed TO that session, so one with the same file name is the old
+    one still sitting there rather than a new one; `carried_ids` are the previous round's
+    findings that session was told to account for."""
+    previous_checks = _carried_ledger_checks(carried)
+    previous_inventory = _carried_ledger_inventory(carried)
+    latest = _latest_coverage_ledger(clar_dir)
+    if latest is None or (carried is not None and latest[0] == carried[0]):
+        log("This round wrote no coverage ledger, so there is no record of what its sweep "
+            "actually checked — a clean result can't be confirmed from it.")
+        return LedgerEvidence(None, previous_checks, tuple(carried_ids))
+
+    summary = _parse_coverage_summary(latest[1])
+    if summary is None:
+        log(f"Coverage ledger {latest[0]} has no readable coverage:summary marker.")
+    else:
+        log(f"Coverage ledger {latest[0]}: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(summary.items())))
+    inventory = _parse_coverage_inventory(latest[1])
+    if inventory:
+        log("That ledger's inventory: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(inventory.items())))
+    gaps = _carryover_gaps(latest[1], carried_ids)
+    shrunken = _shrunken_categories(inventory, previous_inventory)
+    evidence = LedgerEvidence(summary, previous_checks, tuple(gaps), tuple(shrunken))
+
+    if gaps:
+        log(f"That ledger never accounts for {len(gaps)} finding(s) the previous round raised "
+            f"({', '.join(gaps)}). A finding is closed by saying what became of it, never by "
+            "being left out of the next round's table.")
+    elif shrunken:
+        log("That ledger's inventory came back short of the previous round's in "
+            f"{', '.join(shrunken)} — within a phase the spec only gains surface, so a "
+            "category that shrinks is something dropping out of the inventory rather than "
+            "out of the spec. Nothing downstream can check what was never listed.")
+    elif summary and summary.get("unchecked") == 0 and not _ledger_confirms_sweep(evidence):
+        log(f"That ledger checks {summary.get('checks')} row(s) against the previous round's "
+            f"{previous_checks} — too few to read its zero unchecked as an exhaustive sweep, "
+            "since a re-derived inventory should cover at least what the last one did.")
+    return evidence
+
+
+def _build_evaluate_prompt(config: dict, clar_dir: Path, skip_minor: bool, severity_scope: str,
+                           ) -> tuple[str, tuple[str, str] | None, list[str]]:
+    """The prompt for one evaluate pass, plus the two things the caller has to check the
+    result against afterwards (_ledger_evidence): the coverage ledger this round was handed,
+    and the ids of the previous round's findings it was told to account for."""
+    coverage_dir = _coverage_dir(clar_dir)
+    coverage_dir.mkdir(parents=True, exist_ok=True)
+    carried = _latest_coverage_ledger(clar_dir)
+    if carried:
+        log(f"Carrying the previous coverage ledger ({carried[0]}) into this evaluation.")
+    carried_findings = _previous_round_findings(clar_dir, severity_scope)
+    if carried_findings:
+        log(f"Carrying {len(carried_findings)} finding(s) from the previous round for this "
+            "round's ledger to account for one by one.")
+    prompt = build_clarification_prompt(
+        config, skip_minor, _log_pending_overlay(config, clar_dir),
+        severity_scope=severity_scope, coverage_dir=str(coverage_dir), previous_ledger=carried,
+        carried_findings=carried_findings)
+    return prompt, carried, [raw_id for raw_id, _, _, _ in carried_findings]
+
+
+def _advance_phase(phase: str, phases_on: bool, skip_minor: bool, critical: int, blocking: int,
+                   evidence: LedgerEvidence, clean_rounds: int) -> tuple[str, int, str]:
+    """Where the phase machine goes after a round that reported `critical` critical findings
+    and `blocking` findings in the phase's own severities. Shared by manual clarification and
+    the finalize loop so the two can never drift into disagreeing about what settles a phase.
+
+    Returns (phase, clean_rounds, transition), where transition is one of:
+
+      "demoted"  — a later phase turned up a critical, so the next round narrows back to
+                   criticals only. The spec moved under the sweep, which is precisely what
+                   answering majors does and precisely what the phases exist to re-sweep.
+      "advanced" — this phase is settled; the next one starts.
+      "done"     — settled, with nothing after it: clarification is finished.
+      "stay"     — still sweeping this phase, either because findings remain or because a
+                   clean round isn't confirmed yet (see _phase_may_advance).
+    """
+    clean_rounds = 0 if blocking else clean_rounds + 1
+    if phases_on and phase != _PHASE_CRITICAL and critical:
+        return _PHASE_CRITICAL, 0, "demoted"
+    if not _phase_may_advance(blocking, evidence, clean_rounds, phases_on):
+        return phase, clean_rounds, "stay"
+    following = _next_phase(phase, phases_on, skip_minor)
+    if following is None:
+        return phase, clean_rounds, "done"
+    return following, 0, "advanced"
+
+
+def _phase_label(phase: str) -> str:
+    """How a phase is named in console output and logs."""
+    return {_PHASE_CRITICAL: "critical sweep",
+            _PHASE_MAJOR: "major sweep",
+            _PHASE_MINOR: "minor sweep"}[phase]
+
 
 def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> None:
     """Merge a per-file clarify/apply duration into config.json's
@@ -87,7 +533,8 @@ def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> No
     save_config(config)
 
 
-def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, minor: int) -> None:
+def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, minor: int,
+                                    severity_scope: str = "all") -> None:
     """If a fresh evaluate pass found truly zero findings (every severity), stamp
     config["last_clean_evaluation_at"] with the current time (caller still has to
     save_config). This covers the one case the file-based readiness gate
@@ -97,7 +544,15 @@ def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, min
     the gate would otherwise keep reading whatever the last finding-bearing file
     said, even if that file is from an old round whose criticals/majors have since
     been resolved. Any round with even one remaining finding (of any severity) still
-    gets its own file, so this only fires for the all-zero case."""
+    gets its own file, so this only fires for the all-zero case.
+
+    Only a round that actually looked for every severity may stamp it. A critical-only round
+    (`severity_scope` "critical", the critical phase — see _PHASE_SCOPES) reports major=0 and
+    minor=0 because it never looked for them, not because there are none; stamping on that
+    would zero out the readiness gate's findings and open Start Implementation on a spec
+    whose majors have never been evaluated."""
+    if severity_scope != "all":
+        return
     if critical == 0 and major == 0 and minor == 0:
         config["last_clean_evaluation_at"] = time.time()
 
@@ -171,15 +626,20 @@ def _log_pending_overlay(config: dict, clar_dir: Path) -> list:
 
 
 def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
-    """Manual clarification — run ONE evaluation pass, report findings + report file(s),
-    then suggest the next step based on severity:
-      - critical==0 & major==0 : clarification done → suggest moving on to implement (auto plan)
-      - critical==0 (major>0)  : suggest answering manually, or finishing with clarify --finalize
-      - critical>0             : suggest reviewing/answering manually then clarify again
-    Unless `noui` is set, also opens the clarification-answer web UI on the freshly
-    written report file(s) so the user can answer right away instead of hand-editing
-    the markdown. `skip_minor` instructs the evaluation pass to skip minor findings
-    entirely (config.json's "skip_minor_findings" / CLI --skip-minor)."""
+    """Manual clarification — run ONE evaluation pass, report findings + report file(s), then
+    suggest the next step based on what the round's severity phase still owes.
+
+    The phase (config.json's "clarify_severity_phases", on by default) is what makes repeated
+    manual rounds converge instead of drifting: a round evaluates at its phase's scope only —
+    criticals alone while the critical sweep is unfinished — and the phase is persisted, so
+    the next `tempa clarify` picks the sweep back up rather than restarting it at the widest
+    scope. _advance_phase decides where it goes next; _print_manual_next_steps says so.
+
+    Unless `noui` is set, also opens the clarification-answer web UI on the freshly written
+    report file(s) so the user can answer right away instead of hand-editing the markdown.
+    `skip_minor` keeps minor findings out of the run entirely (config.json's
+    "skip_minor_findings" / CLI --skip-minor) — with phases on that means there is no minor
+    phase, so the major phase is the last one."""
     _init_process_log()
     flush_pending_notifications()
 
@@ -192,12 +652,18 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     clar_dir = Path(clarifications_path)
     clar_dir.mkdir(parents=True, exist_ok=True)
 
+    phases_on = get_clarify_severity_phases(config)
+    phase, clean_rounds = _load_phase_state(config, phases_on)
+    severity_scope = _phase_scope(phase, phases_on, skip_minor)
+
     _banner(f"Clarify (manual) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-            f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}")
+            f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path}"
+            + (f" | phase={_phase_label(phase)}" if phases_on else ""))
 
     start_ts = time.time()
     before_files = _clarification_dir_snapshot(clar_dir)
-    prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
+    prompt, carried_ledger, carried_ids = _build_evaluate_prompt(
+        config, clar_dir, skip_minor, severity_scope)
     if not run_with_usage_limit_retry(
         lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
         "Clarification evaluation",
@@ -209,18 +675,27 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     if _state.auth_error_hit:
         sys.exit(3)
 
+    evidence = _ledger_evidence(clar_dir, carried_ledger, carried_ids)
     config = load_config()
     findings = config.get("last_clarification_findings", {})
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
-    _stamp_clean_evaluation_if_zero(config, critical, major, minor)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope)
     # Stamps *how* the current last_clarification_findings was produced — an
     # evaluate pass here, vs an apply pass in _run_apply_step() — so the dashboard's
     # finalize gate can tell "criticals were answered and applied" apart from "a
     # fresh evaluation independently confirmed 0 criticals remain".
     config["last_clarification_action"] = "evaluate"
+    # Which severities this round actually looked for. Read by
+    # tempa_config.severity_sweep_pending: a critical-only round reports major=0 without
+    # measuring it, and the Start Implementation gate must not read that as "no majors".
+    config["last_evaluation_scope"] = severity_scope
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
+    blocking = _phase_blocking_count(phase, critical, major, minor)
+    next_phase, clean_rounds, transition = _advance_phase(
+        phase, phases_on, skip_minor, critical, blocking, evidence, clean_rounds)
+    _save_phase_state(config, next_phase, clean_rounds)
     save_config(config)
     report_files = _clarification_report_files(clar_dir, before_files)
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
@@ -232,27 +707,10 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     else:
         print(f"  (No new file detected — check the folder manually: {clarifications_path})", flush=True)
 
-    if critical == 0 and major == 0:
-        print("[OK] No critical/major findings — clarification is considered DONE.", flush=True)
-        if minor:
-            print(f"     (Still {minor} minor finding(s) — considered acceptable.)", flush=True)
-        print("     Write the answers into the PRD/spec:  tempa clarify --apply  (required before implementing)", flush=True)
-        print("     Then move on to the next stage:       tempa implement  (auto plan runs first)", flush=True)
-    elif critical == 0:
-        print(f"Only {major} major finding(s) remain (no critical). Next steps:", flush=True)
-        print("  1. Answer — manually in the file above, or automatically:  tempa clarify --auto-answer", flush=True)
-        print("  2. Clarify again to check what's left:                     tempa clarify", flush=True)
-        print("     (answers are carried into the next round — no need to apply first)", flush=True)
-        print("  3. Write the answers into the PRD/spec:                    tempa clarify --apply", flush=True)
-        print("  (Or do all of it unattended, evaluate+answer loop:         tempa clarify --finalize)", flush=True)
-    else:
-        print(f"[!] There are {critical} critical finding(s). Next steps:", flush=True)
-        print("  1. Answer — manually in the file above, or automatically:  tempa clarify --auto-answer", flush=True)
-        print("  2. Repeat tempa clarify to verify — your answers are carried into the next round.", flush=True)
-        print("     Applying them to the PRD/spec (tempa clarify --apply) can wait until you're", flush=True)
-        print("     done clarifying; it's only required before implementing.", flush=True)
+    _print_manual_next_steps(phase, next_phase, transition, phases_on,
+                             critical, major, minor, blocking)
 
-    if critical or major:
+    if blocking:
         notify_attention(
             AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED,
             "Clarification", "Clarification answers are required",
@@ -269,6 +727,65 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
                 "before implementing).")
 
     sys.exit(0)
+
+
+def _print_manual_next_steps(phase: str, next_phase: str, transition: str, phases_on: bool,
+                             critical: int, major: int, minor: int, blocking: int) -> None:
+    """What a manual round tells the user to do next, given where _advance_phase just left the
+    phase machine.
+
+    Split out of run_clarify_once because the phases turned one three-way branch on severity
+    into a four-way branch on transition, and because getting it wrong is expensive in a
+    specific way: a critical-only round reports major=0 for a reason that has nothing to do
+    with the spec, so the pre-phases "no critical/major — clarification is DONE" line would
+    now be printed over a spec whose majors have never been looked at."""
+    answer_steps = (
+        "  1. Answer — manually in the file above, or automatically:  tempa clarify --auto-answer\n"
+        "  2. Clarify again to check what's left:                     tempa clarify\n"
+        "     (answers are carried into the next round — no need to apply first)\n"
+        "  3. Write the answers into the PRD/spec:                    tempa clarify --apply\n"
+        "  (Or do all of it unattended, evaluate+answer loop:         tempa clarify --finalize)"
+    )
+
+    if transition == "demoted":
+        print(f"[!] {critical} critical finding(s) turned up during the "
+              f"{_phase_label(phase)} — answering a major rewrites the spec, and this is that "
+              "rewrite's fallout.", flush=True)
+        print("    The next round narrows back to criticals only until they're clear again.",
+              flush=True)
+        print(answer_steps, flush=True)
+        return
+
+    if blocking:
+        if phase == _PHASE_CRITICAL and phases_on:
+            print(f"[!] {critical} critical finding(s). This round looked for criticals ONLY — "
+                  "majors and minors are not being evaluated yet, by design.", flush=True)
+        elif critical:
+            print(f"[!] There are {critical} critical finding(s). Next steps:", flush=True)
+        else:
+            print(f"Only {major} major finding(s) remain (no critical). Next steps:", flush=True)
+        print(answer_steps, flush=True)
+        return
+
+    if transition == "stay":
+        # Clean, but nothing backs that up yet — see _phase_may_advance.
+        print(f"Nothing left in the {_phase_label(phase)} this round, but it isn't "
+              "confirmed: this round left no complete coverage ledger behind.", flush=True)
+        print("     Run tempa clarify once more to confirm before moving on.", flush=True)
+        return
+
+    if transition == "advanced":
+        print(f"[OK] The {_phase_label(phase)} is clean and confirmed — nothing at that "
+              "severity is left.", flush=True)
+        print(f"     The next round moves on to the {_phase_label(next_phase)}: "
+              "tempa clarify", flush=True)
+        return
+
+    print("[OK] No critical/major findings — clarification is considered DONE.", flush=True)
+    if minor:
+        print(f"     (Still {minor} minor finding(s) — considered acceptable.)", flush=True)
+    print("     Write the answers into the PRD/spec:  tempa clarify --apply  (required before implementing)", flush=True)
+    print("     Then move on to the next stage:       tempa implement  (auto plan runs first)", flush=True)
 
 
 def _run_auto_answer_step(config: dict, unanswered_files: list[Path]) -> bool:
@@ -471,19 +988,27 @@ def _exit_if_graceful_stop(about_to: str) -> None:
     sys.exit(0)
 
 
-def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, phase: str,
-                             skip_minor: bool) -> tuple[int, int, int]:
+def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, round_kind: str,
+                             skip_minor: bool, severity_scope: str = "critical_major",
+                             ) -> tuple[int, int, int, LedgerEvidence]:
     """Run one evaluate pass of the finalize loop and return its (critical, major, minor)
-    finding counts, having already recorded them in config.json.
+    finding counts plus what the coverage ledger it wrote is worth as evidence
+    (_ledger_evidence), having already recorded the counts in config.json.
+
+    `round_kind` is "evaluate" or "verify" (config.json's "last_finalize_phase") — which kind
+    of round this is, NOT which severity phase it belongs to. `severity_scope` is the phase's
+    (_PHASE_SCOPES); the two are independent, since every phase has both kinds of round.
 
     The prompt is rebuilt every round rather than reused: auto-answering grows the pending
-    overlay, and a compaction empties it (so the verify round evaluates the PRD on its own
-    merits, which is the whole point of running it).
+    overlay, a compaction empties it (so the verify round evaluates the PRD on its own merits,
+    which is the whole point of running it), and the coverage ledger it carries changes every
+    round by construction.
 
     Exits the process rather than returning if the session couldn't run — 3 on an
     authentication error, 1 on any other failure, matching what a failed manual round does.
     """
-    prompt = build_clarification_prompt(config, skip_minor, _log_pending_overlay(config, clar_dir))
+    prompt, carried_ledger, carried_ids = _build_evaluate_prompt(
+        config, clar_dir, skip_minor, severity_scope)
 
     start_ts = time.time()
     before_files = _clarification_dir_snapshot(clar_dir)
@@ -507,46 +1032,50 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, phas
         )
         sys.exit(1)
 
+    evidence = _ledger_evidence(clar_dir, carried_ledger, carried_ids)
     config = load_config()
     findings = config.get("last_clarification_findings", {})
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
-    _stamp_clean_evaluation_if_zero(config, critical, major, minor)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope)
     config["last_clarification_action"] = "evaluate"
+    config["last_evaluation_scope"] = severity_scope
     # Running total across every evaluate pass ever (manual `clarify` or one iteration
     # of `clarify --finalize`) — NOT reset here, unlike last_finalize_round below, so
     # it keeps counting across finalize runs and manual runs alike.
     config["last_clarification_round"] = config.get("last_clarification_round", 0) + 1
     config["last_finalize_round"] = run_number
-    config["last_finalize_phase"] = phase
+    config["last_finalize_phase"] = round_kind
     save_config(config)
     report_files = _clarification_report_files(clar_dir, before_files)
     _stamp_clarify_timing(report_files, "clarify_seconds", time.time() - start_ts)
 
-    log(f"Round #{run_number} ({phase}) findings: critical={critical}, major={major}, minor={minor}")
-    return critical, major, minor
+    log(f"Round #{run_number} ({round_kind}) findings: critical={critical}, major={major}, minor={minor}")
+    return critical, major, minor, evidence
 
 
 def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compactions: int,
-                                        minor: int) -> int:
-    """Nothing critical/major is left to ask, so write the whole accumulated overlay into
-    the PRD/spec in one apply pass. Returns the incremented compaction count.
+                                        phase_label: str = "critical/major") -> int | None:
+    """Nothing this phase is responsible for is left to ask, so write the whole accumulated
+    overlay into the PRD/spec in one apply pass. Returns the incremented compaction count.
 
-    Exits 0 instead if there was nothing left to write (the run is simply done), and 1 if
-    the apply failed or the PRD has already been rewritten MAX_COMPACTIONS times without the
-    verification round coming back clean — at that point the remaining findings need a human.
+    Returns None instead when there was nothing left to write. The caller decides what that
+    means, because it depends on where the phase machine is: at the end of the last phase it
+    means the run is finished, but at a phase boundary it only means this phase decided
+    nothing that isn't already in the documents, and the next phase still has to run.
+
+    Exits 1 if the apply failed or the PRD has already been rewritten MAX_COMPACTIONS times
+    without the verification round coming back clean — at that point the remaining findings
+    need a human. That budget is per phase (the caller resets it on a phase change): it bounds
+    the "verification came back dirty, rewrite again" loop, which is a thing that happens
+    within one phase's sweep, not across the run.
     """
     config = load_config()
     applied_hashes = config.get("clarify_applied_hashes", {}) or {}
     unanswered_files, unapplied_files = _clarification_backlog(clar_dir, applied_hashes)
     if not unanswered_files and not unapplied_files:
-        log("No critical/major findings, and every recorded answer is already in the "
-            "PRD/spec. Clarify (finalize) done.")
-        if minor > 0:
-            log(f"Still {minor} minor finding(s) — considered acceptable.")
-        _finalize_success_commit()
-        sys.exit(0)
+        return None
 
     compactions += 1
     if compactions > MAX_COMPACTIONS:
@@ -562,7 +1091,7 @@ def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compact
         )
         sys.exit(1)
 
-    log(f"No critical/major findings remain — writing {len(unanswered_files) + len(unapplied_files)} "
+    log(f"Nothing left in the {phase_label} — writing {len(unanswered_files) + len(unapplied_files)} "
         f"pending file(s) of resolutions into the PRD/spec documents "
         f"(compaction {compactions}/{MAX_COMPACTIONS})...")
     # Resume the evaluate session that just ran (see tempa_config.get_clarify_session_id /
@@ -588,13 +1117,19 @@ def _compact_resolutions_into_documents(clar_dir: Path, run_number: int, compact
     return compactions
 
 
-def _track_finalize_convergence(critical: int, major: int, prev_total: int | None,
+def _track_finalize_convergence(blocking: int, critical: int, major: int, prev_total: int | None,
                                 no_progress_rounds: int, no_progress_limit: int | float,
                                 max_run: int) -> tuple[int, int]:
-    """Convergence guard: if `no_progress_limit` rounds in a row fail to reduce the
-    critical+major count, evaluate+auto-answer has run out of resolutions it can make on its
-    own (e.g. every remaining finding genuinely needs a human decision) — exit 1 instead of
-    burning up to max_clarification_run rounds of full-PRD re-evaluation for no benefit.
+    """Convergence guard: if `no_progress_limit` rounds in a row fail to reduce `blocking` —
+    the count of findings in the severities the CURRENT phase is responsible for
+    (_phase_blocking_count) — evaluate+auto-answer has run out of resolutions it can make on
+    its own (e.g. every remaining finding genuinely needs a human decision) — exit 1 instead
+    of burning up to max_clarification_run rounds of full-PRD re-evaluation for no benefit.
+
+    Judged on the phase's own count rather than critical+major because those are different
+    numbers once phases exist: in the critical phase a round that traded one critical for
+    three majors has made progress on what that phase is for, and a round that changed
+    nothing about criticals has not, whatever happened to the majors it never looked at.
 
     `prev_total is None` means there is no comparable baseline yet, so this round is not
     judged. That skips ONE comparison and deliberately does not clear the counter — a caller
@@ -603,11 +1138,11 @@ def _track_finalize_convergence(critical: int, major: int, prev_total: int | Non
     silently disabling the guard by reaching for the baseline reset alone.
 
     Returns the updated (prev_total, no_progress_rounds) when the loop may continue."""
-    total = critical + major
+    total = blocking
     if prev_total is not None:
         no_progress_rounds = no_progress_rounds + 1 if total >= prev_total else 0
     if no_progress_rounds >= no_progress_limit:
-        log(f"No reduction in critical/major findings for {no_progress_rounds} round(s) in a row "
+        log(f"No reduction in this phase's findings for {no_progress_rounds} round(s) in a row "
             f"— stopping instead of continuing to {max_run} rounds. {critical} critical and {major} "
             "major finding(s) remain and likely need a human decision (see `tempa answer`).")
         notify_attention(
@@ -740,10 +1275,67 @@ def _run_checkpoint(clar_dir: Path, run_number: int) -> None:
                        f"tempa: clarification checkpoint — round {run_number}")
 
 
+def _advance_to_next_phase(clar_dir: Path, run_number: int, compactions: int,
+                           settled: str, following: str) -> None:
+    """Close out a settled severity phase: write everything it decided into the PRD/spec and
+    commit, so the phase boundary is a readable diff and a restorable point, then say what the
+    next phase will look for.
+
+    There is deliberately no verification round here, unlike at the end of the run. The next
+    phase's scope is this one's plus one severity (_PHASE_SCOPES widens rather than switches),
+    so the very next round re-checks this phase's severities over the freshly compacted
+    documents anyway — and a critical it turns up demotes the machine straight back. A
+    separate verification round would buy exactly what the next round already does."""
+    compacted = _compact_resolutions_into_documents(
+        clar_dir, run_number, compactions, _phase_label(settled))
+    if compacted is None:
+        log(f"The {_phase_label(settled)} is clean and confirmed, and every answer it recorded "
+            "is already in the PRD/spec.")
+    else:
+        _commit_checkpoint(load_config(),
+                           f"tempa: clarification — {_phase_label(settled)} clean")
+    log(f"Moving on to the {_phase_label(following)}.")
+
+
+def _exit_if_critical_phase_exhausted(rounds: int, limit: int | float, critical: int) -> None:
+    """Stop the run once the critical phase has spent `limit` answering rounds (config.json's
+    "critical_phase_max_rounds") without clearing.
+
+    Separate from the convergence guard because it catches the opposite case: a critical phase
+    that IS making progress, one or two criticals at a time, round after round. That is a
+    specification the rubric calls unbuildable in more ways than unattended answering should be
+    settling on its own, and every one of those rounds is a full re-read of the whole PRD."""
+    if rounds <= limit:
+        return
+    log(f"The critical sweep has spent {rounds} answering round(s) without clearing — stopping "
+        f"instead of answering criticals unattended for longer. {critical} critical finding(s) "
+        "remain, and a critical is the specification being unbuildable, which is worth a human "
+        "decision (see `tempa answer`).")
+    notify_attention(
+        AttentionEventType.CLARIFICATION_ANSWERS_REQUIRED, "Clarification",
+        "Clarification needs human answers",
+        "The critical sweep has run its round budget without clearing — review the remaining "
+        "critical findings by hand.",
+        details={"critical": critical, "critical_phase_rounds": rounds},
+    )
+    sys.exit(1)
+
+
 def run_clarify_finalize(skip_minor: bool = False) -> None:
-    """Unattended clarification: loop evaluate -> auto-answer until an evaluation reports no
-    critical/major findings, then write every accumulated answer into the PRD/spec in ONE
-    apply pass ("compaction"), then run one more evaluation to verify the updated documents.
+    """Unattended clarification: loop evaluate -> auto-answer until an evaluation reports
+    nothing left in the severity phase it is on, advancing a phase at a time, then write every
+    accumulated answer into the PRD/spec in ONE apply pass ("compaction"), then run one more
+    evaluation to verify the updated documents.
+
+    The phases (config.json's "clarify_severity_phases", on by default) are what stop the loop
+    sweeping a moving target. A round can only answer what it found, answering a major rewrites
+    the spec, and a rewritten spec grows new criticals — so a loop that looks for both at once
+    keeps re-deriving criticals from documents its own last round changed. Sweeping criticals
+    alone until they are exhausted, then widening to majors, means the expensive severity is
+    settled against a spec that is holding still. A critical that turns up later demotes the
+    machine straight back to the critical phase (_advance_phase), which is the case the widening
+    scope exists to catch. With the setting off, there is one phase, its scope is the pre-phases
+    critical+major, and the loop below behaves exactly as it did before phases existed.
 
     No apply runs *per round*. Each evaluate carries every answer recorded so far as the
     pending overlay (_pending_overlay), so the agent judges the spec as it will read once
@@ -793,9 +1385,18 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     # _FINALIZE_SNAPSHOT_LIMITS in dashboard_runs.py. The commit toggle is a per-action
     # switch instead, and _commit_checkpoint reads it fresh every time.
     checkpoint_rounds = get_finalize_checkpoint_rounds(config)
+    phases_on = get_clarify_severity_phases(config)
+    # Resumed from config rather than restarted at the critical phase: a finalize run picks up
+    # a sweep that manual rounds (or a stopped earlier run) already got part-way through, the
+    # same way it picks up their pending overlay.
+    severity_phase, clean_rounds = _load_phase_state(config, phases_on)
+    critical_phase_limit = get_critical_phase_max_rounds(config)
+    critical_phase_rounds = 0
     run_number = 0
     no_progress_rounds = 0
-    prev_total = None  # critical+major from the previous round, for the convergence guard
+    prev_total = None  # the phase's own finding count last round, for the convergence guard
+    # Per PHASE, not per run — the caller resets it at every phase boundary. See
+    # _compact_resolutions_into_documents.
     compactions = 0
     # Answering rounds whose results are still only in the overlay. Counted rather than
     # derived from run_number % checkpoint_rounds: what a checkpoint is for is "N rounds of
@@ -804,12 +1405,14 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     rounds_since_checkpoint = 0
     # "evaluate" while findings are still being found and answered; "verify" for the round
     # that checks the PRD right after a compaction (same prompt, but with an empty overlay
-    # in front of it, since applying just emptied it).
-    phase = "evaluate"
+    # in front of it, since applying just emptied it). Independent of the severity phase —
+    # every phase has both kinds of round.
+    round_kind = "evaluate"
 
     _banner(f"Clarify (finalize) started {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
             f"PRD={sources.get('prd', '?')} | clarifications={clarifications_path} | "
-            f"max_runs={max_run} | checkpoints={checkpoint_rounds or 'off'}")
+            f"max_runs={max_run} | checkpoints={checkpoint_rounds or 'off'} | "
+            f"phase={_phase_label(severity_phase) if phases_on else 'off'}")
 
     # Same reasoning as tempa_implement.main(): a stop is a request aimed at THIS run, so
     # a sentinel left behind by a previous one must not stop this one before it starts.
@@ -828,17 +1431,26 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
     while run_number < max_run:
         _exit_if_graceful_stop("starting another round")
         run_number += 1
+        severity_scope = _phase_scope(severity_phase, phases_on, skip_minor)
 
-        round_header = (f"ROUND {run_number}/{max_run} — {phase} — "
-                        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        round_header = (f"ROUND {run_number}/{max_run} — {_phase_label(severity_phase)} — "
+                        f"{round_kind} — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         _banner(round_header)
         log(round_header, to_console=False)
 
-        critical, major, minor = _finalize_evaluate_round(
-            load_config(), clar_dir, run_number, phase, skip_minor)
+        critical, major, minor, evidence = _finalize_evaluate_round(
+            load_config(), clar_dir, run_number, round_kind, skip_minor, severity_scope)
 
-        if critical == 0 and major == 0:
-            if phase == "verify":
+        blocking = _phase_blocking_count(severity_phase, critical, major, minor)
+        settled_phase = severity_phase
+        severity_phase, clean_rounds, transition = _advance_phase(
+            settled_phase, phases_on, skip_minor, critical, blocking, evidence, clean_rounds)
+        phase_config = load_config()
+        _save_phase_state(phase_config, severity_phase, clean_rounds)
+        save_config(phase_config)
+
+        if transition == "done":
+            if round_kind == "verify":
                 log("Verification round is clean — the PRD/spec documents now contain every "
                     "recorded resolution. Clarify (finalize) done.")
                 if minor > 0:
@@ -846,8 +1458,16 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
                 _finalize_success_commit()
                 sys.exit(0)
 
-            compactions = _compact_resolutions_into_documents(
-                clar_dir, run_number, compactions, minor)
+            compacted = _compact_resolutions_into_documents(
+                clar_dir, run_number, compactions, _phase_label(settled_phase))
+            if compacted is None:
+                log("Nothing left to ask about, and every recorded answer is already in the "
+                    "PRD/spec. Clarify (finalize) done.")
+                if minor > 0:
+                    log(f"Still {minor} minor finding(s) — considered acceptable.")
+                _finalize_success_commit()
+                sys.exit(0)
+            compactions = compacted
 
             # The apply just rewrote the PRD, so a finding count from before it says nothing
             # about whether the loop is still making progress — comparing the verify round
@@ -856,15 +1476,50 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             no_progress_rounds = 0
             # The compaction just wrote the whole overlay — nothing has piled up since.
             rounds_since_checkpoint = 0
-            phase = "verify"
+            round_kind = "verify"
             log("Resolutions written into the PRD/spec. Running a verification evaluation "
                 "against the updated documents...")
             continue
 
+        if transition == "advanced":
+            _advance_to_next_phase(clar_dir, run_number, compactions,
+                                   settled_phase, severity_phase)
+            # Every one of these is scoped to the phase that just ended: its compaction budget,
+            # its progress baseline, and the answers it piled into the overlay (which
+            # _advance_to_next_phase has just written out).
+            compactions = 0
+            prev_total = None
+            no_progress_rounds = 0
+            rounds_since_checkpoint = 0
+            round_kind = "evaluate"
+            continue
+
+        if transition == "demoted":
+            log(f"{critical} critical finding(s) turned up during the "
+                f"{_phase_label(settled_phase)} — narrowing back to criticals only until they "
+                "are clear again. Answering a major rewrites the spec, and this is that "
+                "rewrite's fallout.")
+            prev_total = None
+            no_progress_rounds = 0
+            compactions = 0
+        elif blocking == 0:
+            # Clean, but nothing checkable backs that up yet (_phase_may_advance). One more
+            # round at the same scope confirms it, and there is nothing to answer in between.
+            log(f"Nothing left in the {_phase_label(settled_phase)} this round, but no "
+                "coverage ledger complete enough to stand behind it (see the line above) — "
+                "running one more round at the same scope to confirm before moving on.")
+            round_kind = "evaluate"
+            continue
+
+        if phases_on and severity_phase == _PHASE_CRITICAL:
+            critical_phase_rounds += 1
+            _exit_if_critical_phase_exhausted(
+                critical_phase_rounds, critical_phase_limit, critical)
+
         prev_total, no_progress_rounds = _track_finalize_convergence(
-            critical, major, prev_total, no_progress_rounds, no_progress_limit, max_run)
+            blocking, critical, major, prev_total, no_progress_rounds, no_progress_limit, max_run)
         _auto_answer_finalize_round(clar_dir, run_number, critical, major)
-        phase = "evaluate"
+        round_kind = "evaluate"
         rounds_since_checkpoint += 1
         if checkpoint_rounds and rounds_since_checkpoint >= checkpoint_rounds:
             _run_checkpoint(clar_dir, run_number)
@@ -877,7 +1532,7 @@ def run_clarify_finalize(skip_minor: bool = False) -> None:
             # is clean by definition, so 0 -> anything would read as a round that lost ground.)
             # Resetting here would also make the guard unreachable at a low interval, since
             # every comparison would be the one being skipped.
-            # phase stays "evaluate". A clean next round then lands in
+            # round_kind stays "evaluate". A clean next round then lands in
             # _compact_resolutions_into_documents, which finds an empty backlog and exits 0
             # with an accurate message BEFORE spending a compaction — so nothing is wasted by
             # not calling it "verify".

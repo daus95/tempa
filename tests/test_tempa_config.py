@@ -978,3 +978,19 @@ def test_clear_active_workspace_root_leaves_history_untouched(tmp_path, isolate_
     assert tempa_config.read_workspace_history() == [
         {"root": str(root), "opened_at": tempa_config.read_workspace_history()[0]["opened_at"]}
     ]
+
+
+# ---------------------------------------------------------------------------
+# severity_sweep_pending — whether the last evaluate pass measured majors at all
+# ---------------------------------------------------------------------------
+
+def test_severity_sweep_pending_only_for_a_critical_only_round():
+    assert tempa_config.severity_sweep_pending({"last_evaluation_scope": "critical"}) is True
+    assert tempa_config.severity_sweep_pending({"last_evaluation_scope": "critical_major"}) is False
+    assert tempa_config.severity_sweep_pending({"last_evaluation_scope": "all"}) is False
+
+
+def test_a_config_predating_severity_phases_is_not_pending():
+    """Its last round was the old critical+major one, so an already-open Start Implementation
+    gate must not close just because this key does not exist yet."""
+    assert tempa_config.severity_sweep_pending({}) is False

@@ -85,11 +85,15 @@ def tree_payload(prd_dir: Path, clar_dir: Path, backends: dict) -> Response:
                         finalize_round, overlay["findings"]),
                     "implementReadiness": _implement_readiness_status(
                         findings, last_action is not None, implementation_requirement,
-                        overlay["findings"]),
+                        overlay["findings"],
+                        tempa_config.severity_sweep_pending(dashboard_config)),
                     "pendingOverlay": overlay,
                     "overlayWarnThreshold": tempa_config.get_clarify_overlay_warn_findings(
                         dashboard_config),
-                    "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config)},
+                    "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config),
+                    "severityPhase": (dashboard_config.get("last_severity_phase") or ""
+                                      if tempa_config.get_clarify_severity_phases(dashboard_config)
+                                      else "")},
         "principles": {"set": bool(tempa_config.read_principles())},
         "backends": backends,
     }
