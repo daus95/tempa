@@ -220,6 +220,11 @@ at.
 > Prefer the terminal, or need to script Tempa? Every action below has a matching CLI
 > command — skip ahead to [Command Line Interface (CLI)](#command-line-interface-cli).
 
+> **New to Tempa?** [docs/getting-started/dashboard-walkthrough.md](docs/getting-started/dashboard-walkthrough.md)
+> is a fully screenshotted, click-by-click walkthrough of this exact flow end to end, using
+> a real example PRD — start there if you'd rather follow along step by step than read a
+> summary.
+
 The dashboard walks you through the same specification → clarification → implementation
 flow as the CLI, but with buttons, inline file editing, and live progress instead of
 memorizing commands and flags. Start it with:

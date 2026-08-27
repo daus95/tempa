@@ -16,6 +16,11 @@ once the first tagged release is cut.
   drawer and "Decided elsewhere" flow), Finalized Clarification, Apply Answers, and Start
   Implementation through plan drafting, per-epic QA, and automatic fixing.
 
+### Changed
+
+- The dashboard user manual is now in English (matching the rest of `docs/`) and linked
+  from README.md's Dashboard (Recommended) section.
+
 ## [0.11.0] - 2026-08-26
 
 ### Added
