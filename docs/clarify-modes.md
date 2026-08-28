@@ -351,7 +351,10 @@ result file (everything except `claude.md`):
   looks exactly like the single-file view always has.)
 
 The UI parses each finding (delimited by `<!-- clarify:item ... -->` markers written by the
-`clarify` prompt) and renders the file as a formatted page. For every finding you can pick:
+`clarify` prompt) and renders the file as a formatted page. Every finding carries a
+`**Your answer:**` label above its answer block; the parser also tolerates a round that
+omits the label by falling back to the `clarify:answer-start` marker, so such findings
+still appear in the review UI instead of being silently dropped. For every finding you can pick:
 
 - **Follow the recommendation** — keeps the agent's suggested resolution as your answer.
 - **I'll write my own answer** — enables a text area (5+ rows) to type your own answer,
