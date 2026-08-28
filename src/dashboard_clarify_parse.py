@@ -115,8 +115,18 @@ def _parse_item_match(match: re.Match, text: str, path: Path, file_index: int) -
         seg_end = label_matches[i + 1].start() if i + 1 < len(label_matches) else len(body)
         segments[lm.group(1)] = (seg_start, seg_end)
 
-    if "Your answer" not in segments:
-        return None
+    if "Your answer" in segments:
+        ya_start, ya_end = segments["Your answer"]
+    else:
+        # Format-drift tolerance: evaluate rounds have been observed writing the
+        # answer block with no "**Your answer:**" label above it. The
+        # clarify:answer-start/end markers are the authoritative anchors, so fall
+        # back to the first answer block in the body instead of dropping the whole
+        # finding from the review UI.
+        am_full = ANSWER_RE.search(body)
+        if am_full is None:
+            return None
+        ya_start, ya_end = am_full.start(0), am_full.end(0)
 
     def seg_text(name: str) -> str:
         if name not in segments:
@@ -127,7 +137,6 @@ def _parse_item_match(match: re.Match, text: str, path: Path, file_index: int) -
     heading_m = HEADING_RE.search(preamble)
     title = heading_m.group(1).strip() if heading_m else f"Finding {raw_id}"
 
-    ya_start, ya_end = segments["Your answer"]
     ya_abs_start = body_abs_start + ya_start
     ya_abs_end = body_abs_start + ya_end
     ya_text = text[ya_abs_start:ya_abs_end]
