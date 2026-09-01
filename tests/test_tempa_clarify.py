@@ -1807,6 +1807,25 @@ def test_a_narrow_round_never_stamps_a_clean_evaluation():
     assert config["last_clean_evaluation_at"] > 0
 
 
+def test_a_critical_major_round_stamps_when_minors_are_skipped():
+    """With skip_minor on there is no minor phase, so "critical_major" is the widest scope the
+    workspace ever evaluates at. Withholding the stamp there means it never happens at all —
+    and since a clean round writes no file, the file-based gate stays pinned to the last
+    finding-bearing file and Start Implementation never unblocks."""
+    config = {}
+    tc._stamp_clean_evaluation_if_zero(config, 0, 0, 0, "critical", skip_minor=True)
+    assert config == {}
+    tc._stamp_clean_evaluation_if_zero(config, 0, 0, 0, "critical_major", skip_minor=True)
+    assert config["last_clean_evaluation_at"] > 0
+
+
+def test_a_round_with_findings_left_never_stamps_however_wide_its_scope():
+    config = {}
+    tc._stamp_clean_evaluation_if_zero(config, 0, 1, 0, "critical_major", skip_minor=True)
+    tc._stamp_clean_evaluation_if_zero(config, 1, 0, 0, "all")
+    assert config == {}
+
+
 # --- reading the ledger ----------------------------------------------------
 
 def test_coverage_summary_is_read_from_the_marker():

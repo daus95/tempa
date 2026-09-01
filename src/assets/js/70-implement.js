@@ -265,12 +265,18 @@ function renderImplementGate() {
         : ir.critical === 0
           ? "No critical findings remain"
           : `${ir.critical} critical finding(s) remain` },
-    { ok: !requiresMajor || ir.major === 0,
+    // ir.major reading 0 here doesn't mean majors were checked and found clean — a
+    // critical-only sweep round reports it that way without having looked (see
+    // severity_sweep_pending in tempa_config.py). Show that distinctly from an actual
+    // clean major sweep, otherwise this row reads "ok" while the button stays disabled.
+    { ok: !requiresMajor || (ir.major === 0 && !ir.severitySweepPending),
       label: !requiresMajor
         ? `${ir.major} major finding(s) — allowed by the current requirement`
-        : ir.major === 0
-          ? "No major findings remain"
-          : `${ir.major} major finding(s) remain` },
+        : ir.major !== 0
+          ? `${ir.major} major finding(s) remain`
+          : ir.severitySweepPending
+            ? "Major findings haven't been swept yet — the last round only checked criticals"
+            : "No major findings remain" },
   ]);
 }
 

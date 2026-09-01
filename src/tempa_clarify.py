@@ -534,7 +534,7 @@ def _stamp_clarify_timing(filenames: list[Path], key: str, seconds: float) -> No
 
 
 def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, minor: int,
-                                    severity_scope: str = "all") -> None:
+                                    severity_scope: str = "all", skip_minor: bool = False) -> None:
     """If a fresh evaluate pass found truly zero findings (every severity), stamp
     config["last_clean_evaluation_at"] with the current time (caller still has to
     save_config). This covers the one case the file-based readiness gate
@@ -546,12 +546,22 @@ def _stamp_clean_evaluation_if_zero(config: dict, critical: int, major: int, min
     been resolved. Any round with even one remaining finding (of any severity) still
     gets its own file, so this only fires for the all-zero case.
 
-    Only a round that actually looked for every severity may stamp it. A critical-only round
-    (`severity_scope` "critical", the critical phase — see _PHASE_SCOPES) reports major=0 and
-    minor=0 because it never looked for them, not because there are none; stamping on that
-    would zero out the readiness gate's findings and open Start Implementation on a spec
-    whose majors have never been evaluated."""
-    if severity_scope != "all":
+    Only a round that actually looked for every severity IN SCOPE FOR THIS WORKSPACE may
+    stamp it. A critical-only round (`severity_scope` "critical", the critical phase — see
+    _PHASE_SCOPES) reports major=0 and minor=0 because it never looked for them, not because
+    there are none; stamping on that would zero out the readiness gate's findings and open
+    Start Implementation on a spec whose majors have never been evaluated.
+
+    With `skip_minor` on, though, "critical_major" IS the widest scope this workspace will
+    ever evaluate at: there is no minor phase to follow (see _next_phase), so demanding an
+    "all" round before stamping meant the stamp could never happen at all — and since a clean
+    round writes no file, the file-based gate stayed pinned to the last finding-bearing file
+    forever, blocking Start Implementation with majors that had long since been answered,
+    applied and verified clean. minor is not consulted by any gate (see
+    _implement_readiness_status), so nothing is being waved through here that anybody
+    measured differently."""
+    full_sweep = severity_scope == "all" or (severity_scope == "critical_major" and skip_minor)
+    if not full_sweep:
         return
     if critical == 0 and major == 0 and minor == 0:
         config["last_clean_evaluation_at"] = time.time()
@@ -681,7 +691,7 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
-    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope, skip_minor)
     # Stamps *how* the current last_clarification_findings was produced — an
     # evaluate pass here, vs an apply pass in _run_apply_step() — so the dashboard's
     # finalize gate can tell "criticals were answered and applied" apart from "a
@@ -1038,7 +1048,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
     critical = findings.get("critical", 0)
     major = findings.get("major", 0)
     minor = findings.get("minor", 0)
-    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope)
+    _stamp_clean_evaluation_if_zero(config, critical, major, minor, severity_scope, skip_minor)
     config["last_clarification_action"] = "evaluate"
     config["last_evaluation_scope"] = severity_scope
     # Running total across every evaluate pass ever (manual `clarify` or one iteration
