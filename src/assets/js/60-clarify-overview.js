@@ -162,6 +162,10 @@ function implementBlockedMessage(ir) {
   if (ir.requirement === "no_critical") {
     return `Still ${ir.critical} critical finding(s) that must be resolved.`;
   }
+  if (ir.severitySweepPending && ir.critical === 0) {
+    return "The last clarification round only checked for critical findings — majors haven't " +
+      "been swept yet. Run Continue Clarification once more to sweep majors.";
+  }
   return `Still ${ir.critical} critical and ${ir.major} major finding(s) that must be resolved.`;
 }
 
@@ -171,6 +175,9 @@ function implementBlockedToast(ir) {
     return "Apply your answers to the PRD first — implementation reads the PRD, not the clarification files.";
   }
   if (ir.requirement === "no_critical") return "There are still critical findings — resolve clarification first.";
+  if (ir.severitySweepPending && ir.critical === 0) {
+    return "Majors haven't been swept yet — run Continue Clarification once more.";
+  }
   return "There are still critical/major findings — resolve clarification first.";
 }
 

@@ -8,6 +8,20 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Fixed
+
+- Start Implementation could never unblock in a workspace with "Only evaluate critical &
+  major findings" on (the default): a clean round writes no findings file, and the
+  clean-evaluation stamp that supersedes the last finding-bearing one was only written by a
+  full-severity ("all") round — which never happens when minors are skipped, since there is
+  no minor phase. The gate stayed pinned to majors that had already been answered, applied
+  and verified clean. A clean critical+major round now stamps it when minors are skipped.
+- Start Implementation's blocked message/toast and the Implementation gate checklist no
+  longer report "0 critical and 0 major findings remain" (or a green "no major findings"
+  row) while still refusing to start when a critical-only sweep round hasn't measured
+  majors yet. They now explain that the major sweep hasn't run and to run Continue
+  Clarification once more.
+
 ### Added
 
 - New step-by-step dashboard user manual (`docs/getting-started/dashboard-walkthrough.md`),

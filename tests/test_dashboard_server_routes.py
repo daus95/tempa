@@ -724,6 +724,23 @@ def test_implement_run_starts_once_clarification_is_clean(dash, monkeypatch):
     assert dash.post("/api/implement/run", {}) == (200, {"ok": True})
 
 
+def test_implement_run_blocked_message_explains_a_pending_major_sweep(dash):
+    # A critical-only round reports major=0 without having looked (see
+    # tempa_config.severity_sweep_pending) — the error here must say so instead of
+    # reporting "0 critical and 0 major findings remain", which reads as nothing being
+    # wrong while still refusing to start.
+    config = tempa_config.load_config()
+    config["last_clarification_action"] = "evaluate"
+    config["last_evaluation_scope"] = "critical"
+    tempa_config.save_config(config)
+    status, body = dash.post("/api/implement/run", {})
+    assert status == 409
+    assert body["error"] == (
+        "Cannot start implementation: the last clarification round only checked for "
+        "critical findings — majors haven't been swept yet. Run Continue Clarification "
+        "once more to sweep majors before implementing.")
+
+
 def test_implement_run_conflicts_when_already_running(dash, monkeypatch):
     config = tempa_config.load_config()
     config["last_clarification_action"] = "evaluate"

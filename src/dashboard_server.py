@@ -408,6 +408,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                          "PRD yet. Click Apply Answers first (it's a no-op if the PRD already matches).")
             elif requirement == "no_critical":
                 error = "Cannot start implementation while critical clarification findings remain."
+            elif status["severitySweepPending"] and status["critical"] == 0:
+                # The 0/0 the client already has is real but incomplete: the last round only
+                # swept criticals, so the plain "critical/major findings remain" wording below
+                # would report zero of something and still refuse to proceed — exactly the
+                # confusing state this branch exists to explain instead.
+                error = ("Cannot start implementation: the last clarification round only checked for "
+                         "critical findings — majors haven't been swept yet. Run Continue Clarification "
+                         "once more to sweep majors before implementing.")
             else:
                 error = "Cannot start implementation while critical/major clarification findings remain."
             self._send_json(409, {"ok": False, "error": error})
