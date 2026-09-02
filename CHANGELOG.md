@@ -8,13 +8,16 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-02
+
 ### Added
 
 - Clarification findings can now be written in a language other than English. The
   Clarification page's **Evaluation scope** card is now **Evaluation** and splits into two
   columns: the existing "Only evaluate critical & major findings" switch, and a new
   **Language** picker offering ten widely-spoken languages (English, Bahasa Indonesia,
-  中文, हिन्दी, Español, العربية, Português, Русский, 日本語, Français). It sets
+  中文, हिन्दी, Español, العربية, Português, Русский, 日本語, Français), with its
+  description behind the same inline **More…**/**Hide…** toggle Settings uses. It sets
   config.json's `clarification_language` and applies from the next round onwards; rounds
   already on disk are never rewritten, so a workspace that switches part-way keeps each round
   in the language it was written in. Only the prose a person reads is translated — each
@@ -1974,7 +1977,8 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/daus95/tempa/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/daus95/tempa/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/daus95/tempa/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/daus95/tempa/compare/v0.10.1...v0.10.2
