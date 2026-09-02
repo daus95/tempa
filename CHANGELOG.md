@@ -8,48 +8,7 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
-### Added
-
-- Tempa now says when a reasoning-effort level won't do anything on the configured model.
-  The five Claude levels are what the flag *accepts*; which ones a model honours varies, and
-  Anthropic's docs are explicit about it (*"Not every model that supports `max` supports
-  `xhigh`"*) — Opus 4.6 and Sonnet 4.6 have `max` but not `xhigh`, and Haiku 4.5 supports no
-  effort setting at all. A **note, not a rejection**: verified live against `claude` 2.1.258,
-  `--effort max` on Haiku 4.5 runs with no error, so refusing it would block a configuration
-  that works — it simply does nothing, which is the point of saying so. Shown under the model
-  field in Settings → AI Models (plain, not red: red means the save is blocked and this one
-  isn't), and marked `[!] ignored by this model` with the reason underneath in
-  `tempa show-efforts`, which `tempa set-effort` prints on its way out. A model Tempa has no data for gets no note, so a stale table costs a
-  note rather than a working setup. Codex stays a hard rejection, since its API returns a real
-  error for an unsupported level.
-
-### Changed
-
-- The model picker now offers **Claude Fable 5.1**, first, matching how Claude Code's own
-  model picker orders it.
-- The model list is documented as a **recommendation, not each backend's catalog**, in the
-  Settings help and in [docs/ai-models.md](docs/ai-models.md). Tempa runs implementation and
-  QA unattended, where a small or previous-generation model doesn't fail visibly — it quietly
-  writes worse code with nobody reviewing it as it goes, so only current frontier reasoning
-  models are suggested. Claude Haiku 4.5 (small, and the API's `effort` parameter doesn't
-  apply to it at all) and Codex's `gpt-5.6-luna` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` are
-  absent on purpose, and now say so rather than looking like an out-of-date list. Any of them
-  is still reachable through *Other model id…*.
-- The bare `fable` model alias now resolves to `claude-fable-5-1` rather than
-  `claude-fable-5`. A bare family alias means the latest of that family — the contract the
-  `claude` CLI documents for its own `--model` aliases, and what `opus`/`sonnet` already did
-  here. `tempa set-model --implement fable` was quietly configuring the previous generation.
-  `fable-5` still resolves exactly, and `fable-5.1` was added alongside it.
-
-- Settings → AI Models now picks the model from a **dropdown** listing what the chosen
-  backend serves, instead of a bare text box. The suggestions were always there, behind an
-  HTML `<datalist>`, but a datalist has no visible affordance at all — users could not tell
-  there was anything to pick from and had to already know an id in order to type one. The
-  list is still a shortcut rather than a limit: **Other model id…** accepts any id the CLI
-  takes, including one released after Tempa's list. A model already configured but absent
-  from the list — set with `tempa set-model`, hand-edited into `config.json`, or simply
-  newer — loads as *Other model id…* with its value intact rather than being silently
-  swapped for a list entry, and switching a stage's backend still never discards its model.
+## [0.12.0] - 2026-09-02
 
 ### Added
 
@@ -70,7 +29,18 @@ once the first tagged release is cut.
   no access to — Tempa now recognizes the CLI's own model-rejection output and stops with a
   readable message instead of failing opaquely, the same way it already handles authentication
   failures.
-
+- Tempa now says when a reasoning-effort level won't do anything on the configured model.
+  The five Claude levels are what the flag *accepts*; which ones a model honours varies, and
+  Anthropic's docs are explicit about it (*"Not every model that supports `max` supports
+  `xhigh`"*) — Opus 4.6 and Sonnet 4.6 have `max` but not `xhigh`, and Haiku 4.5 supports no
+  effort setting at all. A **note, not a rejection**: verified live against `claude` 2.1.258,
+  `--effort max` on Haiku 4.5 runs with no error, so refusing it would block a configuration
+  that works — it simply does nothing, which is the point of saying so. Shown under the model
+  field in Settings → AI Models (plain, not red: red means the save is blocked and this one
+  isn't), and marked `[!] ignored by this model` with the reason underneath in
+  `tempa show-efforts`, which `tempa set-effort` prints on its way out. A model Tempa has no
+  data for gets no note, so a stale table costs a note rather than a working setup. Codex
+  stays a hard rejection, since its API returns a real error for an unsupported level.
 - The dashboard now recognizes when there is nothing left to clarify. Once every finding is
   answered and the latest round reports no critical or major findings (with majors actually
   swept, and minors either resolved or out of scope via "Only evaluate critical & major
@@ -81,9 +51,38 @@ once the first tagged release is cut.
   "No critical findings" or "No condition" and the clarification buttons stay live while
   findings remain open. Advisory only: the server still accepts either run, so re-verifying
   after an out-of-band edit is always possible.
+- New step-by-step dashboard user manual (`docs/getting-started/dashboard-walkthrough.md`),
+  screenshotted end-to-end against a real workspace: opening the dashboard, creating a new
+  workspace, uploading a PRD, answering clarification findings (including the PRD-reference
+  drawer and "Decided elsewhere" flow), Finalized Clarification, Apply Answers, and Start
+  Implementation through plan drafting, per-epic QA, and automatic fixing.
 
 ### Changed
 
+- Settings → AI Models now picks the model from a **dropdown** listing what the chosen
+  backend serves, instead of a bare text box. The suggestions were always there, behind an
+  HTML `<datalist>`, but a datalist has no visible affordance at all — users could not tell
+  there was anything to pick from and had to already know an id in order to type one. The
+  list is still a shortcut rather than a limit: **Other model id…** accepts any id the CLI
+  takes, including one released after Tempa's list. A model already configured but absent
+  from the list — set with `tempa set-model`, hand-edited into `config.json`, or simply
+  newer — loads as *Other model id…* with its value intact rather than being silently
+  swapped for a list entry, and switching a stage's backend still never discards its model.
+- The model picker now offers **Claude Fable 5.1**, first, matching how Claude Code's own
+  model picker orders it.
+- The model list is documented as a **recommendation, not each backend's catalog**, in the
+  Settings help and in [docs/ai-models.md](docs/ai-models.md). Tempa runs implementation and
+  QA unattended, where a small or previous-generation model doesn't fail visibly — it quietly
+  writes worse code with nobody reviewing it as it goes, so only current frontier reasoning
+  models are suggested. Claude Haiku 4.5 (small, and the API's `effort` parameter doesn't
+  apply to it at all) and Codex's `gpt-5.6-luna` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` are
+  absent on purpose, and now say so rather than looking like an out-of-date list. Any of them
+  is still reachable through *Other model id…*.
+- The bare `fable` model alias now resolves to `claude-fable-5-1` rather than
+  `claude-fable-5`. A bare family alias means the latest of that family — the contract the
+  `claude` CLI documents for its own `--model` aliases, and what `opus`/`sonnet` already did
+  here. `tempa set-model --implement fable` was quietly configuring the previous generation.
+  `fable-5` still resolves exactly, and `fable-5.1` was added alongside it.
 - The Clarification page's **Unanswered** table now explains why it is empty instead of
   always saying "No unanswered files." — it distinguishes never run, nothing left to
   clarify, the specification having changed since the last round, everything answered but
@@ -92,6 +91,8 @@ once the first tagged release is cut.
 - The dashboard now re-syncs from the server on page load. The served HTML is rendered once
   at startup, so after a browser reload every gate, count and button used to reflect
   whatever was true when the dashboard was launched until you pressed Refresh.
+- The dashboard user manual is now in English (matching the rest of `docs/`) and linked
+  from README.md's Dashboard (Recommended) section.
 
 ### Fixed
 
@@ -103,7 +104,6 @@ once the first tagged release is cut.
   PRD writes deliberately don't trigger it.
 - Saving a PRD file from the dashboard editor left every clarification-derived gate on
   screen stale — it never refreshed the tree afterwards.
-
 - Start Implementation could never unblock in a workspace with "Only evaluate critical &
   major findings" on (the default): a clean round writes no findings file, and the
   clean-evaluation stamp that supersedes the last finding-bearing one was only written by a
@@ -115,19 +115,6 @@ once the first tagged release is cut.
   row) while still refusing to start when a critical-only sweep round hasn't measured
   majors yet. They now explain that the major sweep hasn't run and to run Continue
   Clarification once more.
-
-### Added
-
-- New step-by-step dashboard user manual (`docs/getting-started/dashboard-walkthrough.md`),
-  screenshotted end-to-end against a real workspace: opening the dashboard, creating a new
-  workspace, uploading a PRD, answering clarification findings (including the PRD-reference
-  drawer and "Decided elsewhere" flow), Finalized Clarification, Apply Answers, and Start
-  Implementation through plan drafting, per-epic QA, and automatic fixing.
-
-### Changed
-
-- The dashboard user manual is now in English (matching the rest of `docs/`) and linked
-  from README.md's Dashboard (Recommended) section.
 
 ## [0.11.0] - 2026-08-26
 
@@ -1958,7 +1945,9 @@ Initial tagged release.
 - A path-traversal test (`_resolve_within`) that only reflected Windows path semantics,
   failing on non-Windows CI runners.
 
-[Unreleased]: https://github.com/daus95/tempa/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/daus95/tempa/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/daus95/tempa/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/daus95/tempa/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/daus95/tempa/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/daus95/tempa/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/daus95/tempa/compare/v0.9.0...v0.10.0
