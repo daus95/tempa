@@ -165,9 +165,14 @@ each stage's model field only offers the valid choices for whatever's currently 
 on the CLI (`set-effort` rejects an unsupported value with the list of what *is* valid). An
 invalid combination never reaches the CLI.
 
+Claude Code's desktop app shows friendlier names for two of these: its slider reads
+**Low · Medium · High · Extra · Max**, where "Extra" is `xhigh`. The **Ultracode** position at
+the far right of that slider is not an effort level at all — it's `xhigh` plus workflow
+orchestration, a session mode with no `--effort` spelling — so it can't be configured here.
+
 | Backend | Levels | Per-model? |
 |---|---|---|
-| `claude` (Claude Code) | `low`, `medium`, `high`, `xhigh`, `max` | No — same list for every model. |
+| `claude` (Claude Code) | `low`, `medium`, `high`, `xhigh`, `max` | The flag accepts all five for every model, but which ones a model honours varies — see below. |
 | `copilot` (GitHub Copilot CLI) | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | No — same list for every model. |
 | `codex` (OpenAI Codex CLI) | depends on the model — see below | **Yes.** |
 
@@ -180,6 +185,38 @@ Codex is the only backend that actually varies by model (verified live against
 | `gpt-5.6-luna` / `codex-auto-review` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | any other/future Codex model | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (conservative fallback) |
+
+### Levels a model accepts but doesn't honour
+
+The five Claude levels above are what `claude --help` documents and what the flag **accepts**.
+Which of them a given model actually honours is a separate question, and Anthropic's docs are
+explicit that it varies: *"Not every model that supports `max` supports `xhigh`."*
+
+| Level | Claude models that support it |
+|---|---|
+| `low`, `medium`, `high` | every model that supports effort at all |
+| `xhigh` | Fable 5.1/5, Mythos 5.1/5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5 |
+| `max` | all of the above, **plus** Opus 4.6, Sonnet 4.6, Mythos Preview |
+
+Some models — Haiku 4.5 and Sonnet 4.5 among them — support no effort setting at all.
+
+Tempa **notes** these rather than rejecting them, and the difference matters. Verified live
+against `claude` 2.1.258: `--effort max` on Haiku 4.5 and `--effort xhigh` on Opus 4.6 both
+run with no error, while `--effort banana` prints `Unknown --effort value`. The CLI validates
+the level's *name*, not its pairing with the model. So an unhonoured level costs nothing
+visible and does nothing — refusing it would block a configuration that genuinely works.
+
+You'll see the note in Settings → AI Models under the model field (plain text, not red — red
+means the save is blocked, and this one isn't), and marked `[!] ignored by this model` with
+the reason spelled out underneath in `tempa show-efforts` — which `tempa set-effort` prints
+on its way out, so setting one reports it immediately.
+
+A model Tempa has no effort data for gets no note at all. Guessing would produce a
+confidently wrong warning about a configuration that's fine, so a stale table here costs a
+note, never a working setup.
+
+**Codex is the opposite case and stays a hard rejection**: its API returns a real
+`[reasoning.effort]` error for an unsupported level, so there's something to prevent.
 
 Claude sets this via `--effort <level>`, Copilot via `--reasoning-effort <level>`, Codex via
 a config override (`-c model_reasoning_effort="<level>"` — there's no dedicated CLI flag).

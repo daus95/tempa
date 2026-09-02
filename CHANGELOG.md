@@ -8,6 +8,21 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- Tempa now says when a reasoning-effort level won't do anything on the configured model.
+  The five Claude levels are what the flag *accepts*; which ones a model honours varies, and
+  Anthropic's docs are explicit about it (*"Not every model that supports `max` supports
+  `xhigh`"*) — Opus 4.6 and Sonnet 4.6 have `max` but not `xhigh`, and Haiku 4.5 supports no
+  effort setting at all. A **note, not a rejection**: verified live against `claude` 2.1.258,
+  `--effort max` on Haiku 4.5 runs with no error, so refusing it would block a configuration
+  that works — it simply does nothing, which is the point of saying so. Shown under the model
+  field in Settings → AI Models (plain, not red: red means the save is blocked and this one
+  isn't), and marked `[!] ignored by this model` with the reason underneath in
+  `tempa show-efforts`, which `tempa set-effort` prints on its way out. A model Tempa has no data for gets no note, so a stale table costs a
+  note rather than a working setup. Codex stays a hard rejection, since its API returns a real
+  error for an unsupported level.
+
 ### Changed
 
 - The model picker now offers **Claude Fable 5.1**, first, matching how Claude Code's own

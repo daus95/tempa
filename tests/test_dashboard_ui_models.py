@@ -150,6 +150,66 @@ def test_fixing_the_pair_clears_the_warning(page, dashboard_server):
 
 
 # ---------------------------------------------------------------------------
+# The "this effort level does nothing here" advisory
+# ---------------------------------------------------------------------------
+
+def test_an_effort_the_model_will_not_honour_is_noted_but_not_blocked(page, dashboard_server):
+    """Claude Code accepts `--effort max` on Haiku 4.5 and runs, so this must never block a
+    save — the user just gets nothing for the setting, which is what the note is for."""
+    _open_ai_models_tab(page, dashboard_server)
+    _set_stage(page, "claude", "claude-haiku-4-5-20251001")
+    page.select_option("#settingsEffortClarify", "max")
+    page.wait_for_timeout(50)
+
+    note = _note(page)
+    assert note.is_visible()
+    assert "Anthropic documents no effort support" in note.inner_text()
+    # Plain, not red: red means "you cannot save this", and you can.
+    assert "warn" not in (note.get_attribute("class") or "")
+
+    page.click("#settingsSaveBtn")
+    page.wait_for_function(
+        "() => document.getElementById('settingsSaveStatus').textContent.trim().length > 0")
+    saved = tempa_config.load_config()
+    assert saved["models"]["clarify"] == "claude-haiku-4-5-20251001"
+    assert saved["reasoning_efforts"]["clarify"] == "max"
+
+
+def test_a_level_the_model_does_honour_produces_no_note(page, dashboard_server):
+    _open_ai_models_tab(page, dashboard_server)
+    _set_stage(page, "claude", "claude-opus-5")
+    page.select_option("#settingsEffortClarify", "max")
+    page.wait_for_timeout(50)
+    assert _note(page).is_hidden()
+
+
+def test_a_blocking_mismatch_outranks_the_advisory(page, dashboard_server):
+    """One note element, and the two can co-occur. The mismatch stops the save, so it wins —
+    telling someone a setting is inert while hiding the reason they cannot save at all would
+    send them to the wrong field."""
+    _open_ai_models_tab(page, dashboard_server)
+    _set_stage(page, "codex", "claude-haiku-4-5-20251001")
+    page.wait_for_timeout(50)
+
+    note = _note(page)
+    assert "warn" in (note.get_attribute("class") or "")
+    assert "cannot run it" in note.inner_text()
+
+
+def test_clearing_the_effort_clears_the_advisory(page, dashboard_server):
+    """"" means the model's own default, which every model has."""
+    _open_ai_models_tab(page, dashboard_server)
+    _set_stage(page, "claude", "claude-haiku-4-5-20251001")
+    page.select_option("#settingsEffortClarify", "max")
+    page.wait_for_timeout(50)
+    assert _note(page).is_visible()
+
+    page.select_option("#settingsEffortClarify", "")
+    page.wait_for_timeout(50)
+    assert _note(page).is_hidden()
+
+
+# ---------------------------------------------------------------------------
 # The model picker itself
 # ---------------------------------------------------------------------------
 

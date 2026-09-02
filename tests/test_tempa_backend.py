@@ -267,6 +267,83 @@ def test_is_valid_reasoning_effort_valid_and_invalid_per_backend():
 
 
 # ---------------------------------------------------------------------------
+# reasoning_effort_advisory
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("model,effort", [
+    ("claude-haiku-4-5-20251001", "max"),   # no effort support at all
+    ("claude-haiku-4-5-20251001", "low"),
+    ("claude-opus-4-6", "xhigh"),           # supports max, but not xhigh
+    ("claude-sonnet-4-6", "xhigh"),
+    ("claude-opus-4-5-20251101", "max"),    # neither of the top two
+])
+def test_claude_advises_on_a_level_the_model_does_not_honour(model, effort):
+    advisory = tb.CLAUDE.reasoning_effort_advisory(model, effort)
+    assert advisory is not None
+    assert model in advisory
+
+
+@pytest.mark.parametrize("model,effort", [
+    ("claude-opus-5", "max"),
+    ("claude-opus-5", "xhigh"),
+    ("claude-fable-5-1", "max"),
+    ("claude-sonnet-5", "xhigh"),
+    ("claude-opus-4-6", "max"),
+    ("claude-opus-4-5-20251101", "high"),
+])
+def test_claude_says_nothing_about_a_supported_pair(model, effort):
+    assert tb.CLAUDE.reasoning_effort_advisory(model, effort) is None
+
+
+def test_claude_says_nothing_about_a_model_it_does_not_know():
+    """Guessing would produce a confidently wrong note about a configuration that is fine.
+    Going stale therefore costs a note, never a working setup."""
+    assert tb.CLAUDE.reasoning_effort_advisory("claude-opus-9", "max") is None
+    assert tb.CLAUDE.reasoning_effort_advisory("some-future-model", "xhigh") is None
+
+
+def test_an_empty_effort_is_never_advised_about():
+    """"" means "use the model's own default", which every model has."""
+    assert tb.CLAUDE.reasoning_effort_advisory("claude-haiku-4-5-20251001", "") is None
+    assert tb.CLAUDE.reasoning_effort_advisory("claude-opus-4-6", "  ") is None
+
+
+def test_the_advisory_never_becomes_a_rejection():
+    """The distinction the whole feature rests on. Verified live against claude 2.1.258:
+    `--effort max` on Haiku 4.5 runs fine with no error, so refusing it here would block a
+    configuration the CLI itself accepts. It just quietly does nothing."""
+    assert tb.CLAUDE.reasoning_effort_advisory("claude-haiku-4-5-20251001", "max") is not None
+    assert tb.is_valid_reasoning_effort(tb.CLAUDE, "claude-haiku-4-5-20251001", "max") is True
+
+
+def test_codex_stays_a_hard_rejection_rather_than_an_advisory():
+    """The opposite case, and why this is per-backend: Codex's API returns a real
+    `[reasoning.effort]` error for an unsupported level, so there is something to prevent."""
+    assert tb.is_valid_reasoning_effort(tb.CODEX, "gpt-5.4", "ultra") is False
+    assert tb.CODEX.reasoning_effort_advisory("gpt-5.4", "ultra") is None
+
+
+@pytest.mark.parametrize("backend", [tb.COPILOT, tb.CODEX], ids=lambda b: b.name)
+def test_backends_without_published_per_model_effort_data_advise_nothing(backend):
+    assert backend.reasoning_effort_advisory("claude-opus-5", "max") is None
+
+
+def test_claude_effort_table_models_are_all_anthropic():
+    """Ties the effort table to the vendor table: a model Claude has effort data for had
+    better be one Claude is allowed to run."""
+    for model in tb.CLAUDE_MODEL_EFFORT_LEVELS:
+        assert tb.model_backend_mismatch(tb.CLAUDE, model) is None, model
+
+
+def test_every_claude_effort_level_listed_is_a_real_cli_value():
+    """The table says which of the CLI's levels a model honours — it can never introduce a
+    level the flag would reject outright."""
+    for model, levels in tb.CLAUDE_MODEL_EFFORT_LEVELS.items():
+        for level in levels:
+            assert level in tb.CLAUDE_EFFORT_LEVELS, (model, level)
+
+
+# ---------------------------------------------------------------------------
 # model_vendor / model_backend_mismatch
 # ---------------------------------------------------------------------------
 

@@ -149,6 +149,30 @@ def test_set_efforts_clarify_apply_independent_of_clarify(isolate_tempa_paths):
     assert config["reasoning_efforts"]["clarify_apply"] == "low"
 
 
+def test_set_efforts_notes_but_saves_a_level_the_model_will_not_honour(isolate_tempa_paths, capsys):
+    """A note, never a refusal: Claude Code accepts `--effort max` on Haiku 4.5 and runs, so
+    rejecting it would block a configuration that works — it just quietly does nothing."""
+    tempa_config.save_config({
+        "backends": {"implement": "claude"},
+        "models": {"implement": "claude-haiku-4-5-20251001"},
+    })
+    tcmd.set_efforts(_args(implement="max"))
+    assert tempa_config.load_config()["reasoning_efforts"]["implement"] == "max"
+    out = capsys.readouterr().out
+    assert "[!] ignored by this model" in out          # the row is marked
+    assert "no effort support" in out                  # ...and the reason is spelled out
+    assert out.count("no effort support") == 1, "reported once, not once per reporting site"
+
+
+def test_set_efforts_is_silent_about_a_pair_the_model_supports(isolate_tempa_paths, capsys):
+    tempa_config.save_config({
+        "backends": {"implement": "claude"},
+        "models": {"implement": "claude-opus-5"},
+    })
+    tcmd.set_efforts(_args(implement="max"))
+    assert "[!]" not in capsys.readouterr().out
+
+
 def test_set_efforts_rejects_effort_unsupported_by_clarify_apply_backend_model(isolate_tempa_paths):
     import pytest
     # copilot's valid levels don't include "ultra".
