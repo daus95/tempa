@@ -366,7 +366,7 @@
         <div class="tab-panel" id="settingsTabModelsPanel">
           <div class="settings-group">
             <h3>AI Backend &amp; Model</h3>
-            <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> The model field is free text; picking the backend just changes which suggestions are offered, so you can always type a different model id than what's suggested. Reasoning Effort's options depend on the model typed — an unsupported combination is rejected when you save. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
+            <p class="settings-field-desc">Which agentic coding CLI drives each stage — Claude Code, GitHub Copilot CLI, or OpenAI Codex CLI — which model it uses, and how much reasoning effort to ask for. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> The model list shows what each backend serves, and changes with the backend you pick. It is a shortcut, not a limit — choose <strong>Other model id…</strong> to enter any id the CLI accepts, including one newer than this list. A model belonging to a different vendor than the backend can run is rejected when you save. Reasoning Effort's options depend on the chosen model — an unsupported combination is rejected when you save too. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
             <div class="settings-backend-status">
               <ul class="gate-checklist" id="settingsBackendStatusList"></ul>
               <button type="button" class="clarify-run-btn secondary" id="settingsDetectBackendsBtn">
@@ -375,7 +375,7 @@
             </div>
           <div class="settings-inline-row settings-stage-head" aria-hidden="true">
             <span class="settings-backend-select">Backend</span>
-            <span class="settings-model-input">Model</span>
+            <span class="settings-model-field">Model</span>
             <span class="settings-effort-select">Reasoning effort</span>
           </div>
             <div class="settings-field">
@@ -383,8 +383,10 @@
               <p class="settings-field-desc">Used for the Clarification stage — analyzes the specification for ambiguities and conflicts. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> It runs only a handful of times per project, but its output determines the validity of every plan and implementation that follows, so it defaults to the most capable model. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
               <div class="settings-inline-row">
                 <select id="settingsBackendClarify" class="settings-backend-select"></select>
-                <input type="text" id="settingsModelClarify" class="settings-model-input" list="modelSuggestionsClarify" autocomplete="off">
-                <datalist id="modelSuggestionsClarify"></datalist>
+                <div class="settings-model-field">
+                  <select id="settingsModelSelectClarify" class="settings-model-select"></select>
+                  <input type="text" id="settingsModelClarify" class="settings-model-input hidden" autocomplete="off" placeholder="Type the model id exactly as the CLI expects it" aria-label="Custom model id">
+                </div>
                 <select id="settingsEffortClarify" class="settings-effort-select"></select>
               </div>
               <p class="settings-model-note hidden" id="settingsModelNoteClarify"></p>
@@ -394,8 +396,10 @@
               <p class="settings-field-desc">Used to apply already-decided answers/recommendations to the PRD/spec (<code>clarify --apply</code>, the apply half of <code>--finalize</code>) and to auto-answer unanswered findings — mechanical work compared to evaluating the PRD, so it defaults to a cheaper model. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Backend/model/effort are independent of the Clarifications stage above — mechanical apply work doesn't need the same reasoning strength (or even the same CLI) as evaluate. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
               <div class="settings-inline-row">
                 <select id="settingsBackendClarifyApply" class="settings-backend-select"></select>
-                <input type="text" id="settingsModelClarifyApply" class="settings-model-input" list="modelSuggestionsClarifyApply" autocomplete="off">
-                <datalist id="modelSuggestionsClarifyApply"></datalist>
+                <div class="settings-model-field">
+                  <select id="settingsModelSelectClarifyApply" class="settings-model-select"></select>
+                  <input type="text" id="settingsModelClarifyApply" class="settings-model-input hidden" autocomplete="off" placeholder="Type the model id exactly as the CLI expects it" aria-label="Custom model id">
+                </div>
                 <select id="settingsEffortClarifyApply" class="settings-effort-select"></select>
               </div>
               <p class="settings-model-note hidden" id="settingsModelNoteClarifyApply"></p>
@@ -405,8 +409,10 @@
               <p class="settings-field-desc">Used to automatically draft the epic/feature/task plan before implementation starts (via Start Implementation, or a replan). <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Runs frequently and unattended, so speed and cost usually matter more here than for Clarification. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
               <div class="settings-inline-row">
                 <select id="settingsBackendPlan" class="settings-backend-select"></select>
-                <input type="text" id="settingsModelPlan" class="settings-model-input" list="modelSuggestionsPlan" autocomplete="off">
-                <datalist id="modelSuggestionsPlan"></datalist>
+                <div class="settings-model-field">
+                  <select id="settingsModelSelectPlan" class="settings-model-select"></select>
+                  <input type="text" id="settingsModelPlan" class="settings-model-input hidden" autocomplete="off" placeholder="Type the model id exactly as the CLI expects it" aria-label="Custom model id">
+                </div>
                 <select id="settingsEffortPlan" class="settings-effort-select"></select>
               </div>
               <p class="settings-model-note hidden" id="settingsModelNotePlan"></p>
@@ -416,8 +422,10 @@
               <p class="settings-field-desc">Used for the Implementation stage — writing code, running QA, and verifying each feature. Runs repeatedly at high volume, per epic/feature/session.</p>
               <div class="settings-inline-row">
                 <select id="settingsBackendImplement" class="settings-backend-select"></select>
-                <input type="text" id="settingsModelImplement" class="settings-model-input" list="modelSuggestionsImplement" autocomplete="off">
-                <datalist id="modelSuggestionsImplement"></datalist>
+                <div class="settings-model-field">
+                  <select id="settingsModelSelectImplement" class="settings-model-select"></select>
+                  <input type="text" id="settingsModelImplement" class="settings-model-input hidden" autocomplete="off" placeholder="Type the model id exactly as the CLI expects it" aria-label="Custom model id">
+                </div>
                 <select id="settingsEffortImplement" class="settings-effort-select"></select>
               </div>
               <p class="settings-model-note hidden" id="settingsModelNoteImplement"></p>

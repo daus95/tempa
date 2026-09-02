@@ -57,9 +57,16 @@ function updateSettingsSaveBar() {
   settingsNothingToSave.classList.toggle("hidden", !nothingToSave);
 }
 
-// Each backend's model field stays free text (typing any id always works), but which
-// suggestions the <datalist> offers depends on the backend picked for that stage — see
-// populateModelDatalist / the "change" listener wired in wireBackendModelStage below.
+// What each backend's model picker offers, per stage. This used to feed a <datalist>
+// behind a text input, which is technically a suggestion list but has no visible affordance
+// at all — users could not tell there was anything to pick from, and had to already know an
+// id in order to type one. It now populates a real <select>.
+//
+// That makes this list load-bearing in a way it was not before, so CUSTOM_MODEL_VALUE below
+// is not a footnote: a model released after this list still has to be reachable, or a stale
+// catalog turns into a wall rather than a missing hint. The list is a shortcut, never the
+// set of ids Tempa accepts — the server takes any id whose vendor the backend can serve
+// (see tempa_backend.model_backend_mismatch).
 const MODEL_OPTIONS_BY_BACKEND = {
   claude: [
     { value: "claude-opus-5", label: "Opus 5" },
@@ -77,6 +84,10 @@ const MODEL_OPTIONS_BY_BACKEND = {
     { value: "gpt-5.6-terra", label: "GPT 5.6 Terra" },
   ],
 };
+
+// Sentinel <option> value for "the id I want is not in this list". Deliberately shaped so
+// no real model id could collide with it, since the same <select> holds both.
+const CUSTOM_MODEL_VALUE = "__custom__";
 
 // Shown under the model field only for backends whose model access can be restricted by
 // an organization admin (Copilot's model list is governed by the org's Copilot policy).
@@ -265,16 +276,47 @@ function populateEffortSelect(selectEl, backendName, model, currentValue) {
   }
 }
 
-function populateModelDatalist(datalistEl, backendName) {
-  if (!datalistEl) return;
-  datalistEl.innerHTML = "";
+// Fills a stage's model picker for `backendName` and selects whatever `currentModel` is.
+// An id the catalog does not list — set from the CLI, hand-edited into config.json, saved by
+// an older Tempa, or simply newer than this list — falls to the custom option ("Other model
+// id…") and keeps its value in the text input rather than being silently dropped, so what
+// the form shows is always what is configured. Same choice populateEffortSelect
+// already makes for an effort level that stopped being valid: show what is actually
+// configured, never quietly replace it.
+function populateModelSelect(selectEl, modelInput, backendName, currentModel) {
+  if (!selectEl) return;
   const options = MODEL_OPTIONS_BY_BACKEND[backendName] || MODEL_OPTIONS_BY_BACKEND.claude;
+  const model = (currentModel || "").trim();
+  const known = options.some((opt) => opt.value === model);
+
+  selectEl.innerHTML = "";
   for (const opt of options) {
     const el = document.createElement("option");
     el.value = opt.value;
-    el.label = opt.label;
-    datalistEl.appendChild(el);
+    el.textContent = opt.label + " (" + opt.value + ")";
+    selectEl.appendChild(el);
   }
+  const custom = document.createElement("option");
+  custom.value = CUSTOM_MODEL_VALUE;
+  // Spelled out rather than a bare "Custom…": this is the escape hatch that keeps a model
+  // newer than the list above usable, so it has to read as an ordinary choice, not an
+  // expert one someone would hesitate over. Kept short enough to survive the column width
+  // too — a truncated "Custom — enter another model i" is exactly the wrong thing to
+  // half-say about the option that stops a stale catalog becoming a wall.
+  custom.textContent = "Other model id…";
+  selectEl.appendChild(custom);
+
+  selectEl.value = known ? model : CUSTOM_MODEL_VALUE;
+  syncCustomModelInput(selectEl, modelInput);
+}
+
+// The text input stays the single source of truth for the saved value (buildSettingsPayload
+// reads it, and always did), so picking from the list writes through to it. It is only
+// visible in Custom mode — in list mode the <select> is already showing the same thing.
+function syncCustomModelInput(selectEl, modelInput) {
+  const isCustom = selectEl.value === CUSTOM_MODEL_VALUE;
+  modelInput.classList.toggle("hidden", !isCustom);
+  if (!isCustom) modelInput.value = selectEl.value;
 }
 
 // The mismatch warning takes precedence over the availability note, though the two can
@@ -318,26 +360,36 @@ function populateBackendSelect(selectEl, currentValue) {
   }
 }
 
-// Wires a stage's backend <select> + model <input> so either one changing refreshes that
-// same stage's model <datalist> suggestions/availability note and reasoning-effort options.
-// Never touches the model input's current value on a backend change — it's free text,
-// switching backends shouldn't clobber it — only the effort select's value can get flagged
-// (by populateEffortSelect) if it's no longer valid for the new backend/model.
-function wireBackendModelStage(backendSelect, modelInput, modelDatalist, modelNote, effortSelect) {
+// Wires a stage's backend <select> + model picker + custom-model <input> so any of the
+// three changing refreshes that stage's model options, availability/mismatch note, and
+// reasoning-effort options.
+//
+// A backend change still never clobbers the configured model — it is free text and
+// switching backends shouldn't discard it. What that means concretely now: a model absent
+// from the new backend's list falls through to Custom, keeping its value visible, and the
+// mismatch note (rather than a silent reset) is what tells the user the pair cannot run.
+function wireBackendModelStage(backendSelect, modelSelect, modelInput, modelNote, effortSelect) {
+  const refresh = () => {
+    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
+    populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
+  };
   backendSelect.addEventListener("change", () => {
-    populateModelDatalist(modelDatalist, backendSelect.value);
-    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
-    populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
+    populateModelSelect(modelSelect, modelInput, backendSelect.value, modelInput.value);
+    refresh();
   });
-  modelInput.addEventListener("input", () => {
-    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
-    populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
+  modelSelect.addEventListener("change", () => {
+    syncCustomModelInput(modelSelect, modelInput);
+    // Switching INTO Custom keeps whatever id was already there, so the user edits rather
+    // than retypes — and lands the caret where they are about to work.
+    if (modelSelect.value === CUSTOM_MODEL_VALUE) modelInput.focus();
+    refresh();
   });
+  modelInput.addEventListener("input", refresh);
 }
-wireBackendModelStage(settingsBackendClarify, settingsModelClarify, modelSuggestionsClarify, settingsModelNoteClarify, settingsEffortClarify);
-wireBackendModelStage(settingsBackendClarifyApply, settingsModelClarifyApply, modelSuggestionsClarifyApply, settingsModelNoteClarifyApply, settingsEffortClarifyApply);
-wireBackendModelStage(settingsBackendPlan, settingsModelPlan, modelSuggestionsPlan, settingsModelNotePlan, settingsEffortPlan);
-wireBackendModelStage(settingsBackendImplement, settingsModelImplement, modelSuggestionsImplement, settingsModelNoteImplement, settingsEffortImplement);
+wireBackendModelStage(settingsBackendClarify, settingsModelSelectClarify, settingsModelClarify, settingsModelNoteClarify, settingsEffortClarify);
+wireBackendModelStage(settingsBackendClarifyApply, settingsModelSelectClarifyApply, settingsModelClarifyApply, settingsModelNoteClarifyApply, settingsEffortClarifyApply);
+wireBackendModelStage(settingsBackendPlan, settingsModelSelectPlan, settingsModelPlan, settingsModelNotePlan, settingsEffortPlan);
+wireBackendModelStage(settingsBackendImplement, settingsModelSelectImplement, settingsModelImplement, settingsModelNoteImplement, settingsEffortImplement);
 
 function fillSettingsForm(config) {
   state.backendsStatus = config.backends_status || state.backendsStatus;
@@ -346,14 +398,17 @@ function fillSettingsForm(config) {
   populateBackendSelect(settingsBackendClarifyApply, config.backends.clarify_apply);
   populateBackendSelect(settingsBackendPlan, config.backends.plan);
   populateBackendSelect(settingsBackendImplement, config.backends.implement);
-  populateModelDatalist(modelSuggestionsClarify, config.backends.clarify);
-  populateModelDatalist(modelSuggestionsClarifyApply, config.backends.clarify_apply);
-  populateModelDatalist(modelSuggestionsPlan, config.backends.plan);
-  populateModelDatalist(modelSuggestionsImplement, config.backends.implement);
   settingsModelClarify.value = config.models.clarify;
   settingsModelClarifyApply.value = config.models.clarify_apply;
   settingsModelPlan.value = config.models.plan;
   settingsModelImplement.value = config.models.implement;
+  // Model inputs first: populateModelSelect reads the saved id to decide whether it can be
+  // offered as a list entry or has to land on Custom, so filling the pickers before the
+  // inputs would make every stage look Custom on load.
+  populateModelSelect(settingsModelSelectClarify, settingsModelClarify, config.backends.clarify, config.models.clarify);
+  populateModelSelect(settingsModelSelectClarifyApply, settingsModelClarifyApply, config.backends.clarify_apply, config.models.clarify_apply);
+  populateModelSelect(settingsModelSelectPlan, settingsModelPlan, config.backends.plan, config.models.plan);
+  populateModelSelect(settingsModelSelectImplement, settingsModelImplement, config.backends.implement, config.models.implement);
   // After the model inputs are populated, not before: the note now depends on the model as
   // well as the backend, so computing it first would hide a mismatch already saved in
   // config.json until the user happened to touch a field.

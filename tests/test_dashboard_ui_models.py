@@ -31,13 +31,25 @@ def _open_ai_models_tab(page, url):
     page.wait_for_selector("#settingsBackendClarify", state="visible")
 
 
+CUSTOM = "__custom__"
+
+
+def _model_options(page):
+    return page.locator("#settingsModelSelectClarify option").evaluate_all(
+        "els => els.map(e => e.value)")
+
+
 def _set_stage(page, backend, model):
-    """Point the Clarifications row at one backend/model pair, driving the same events a
-    real user's typing and selecting would."""
+    """Point the Clarifications row at one backend/model pair the way a user would: pick the
+    model from the list when it is offered there, otherwise switch to Custom and type it."""
     page.select_option("#settingsBackendClarify", backend)
-    page.fill("#settingsModelClarify", model)
-    # `fill` dispatches `input`, which is what the note listens on — but the select's
-    # `change` fired first, so settle before asserting.
+    if model in _model_options(page):
+        page.select_option("#settingsModelSelectClarify", model)
+    else:
+        page.select_option("#settingsModelSelectClarify", CUSTOM)
+        page.fill("#settingsModelClarify", model)
+    # `fill` and `select_option` dispatch the events the note listens on; settle before
+    # asserting on what they produced.
     page.wait_for_timeout(50)
 
 
@@ -127,6 +139,87 @@ def test_fixing_the_pair_clears_the_warning(page, dashboard_server):
     _set_stage(page, "codex", "claude-sonnet-5")
     assert "warn" in (_note(page).get_attribute("class") or "")
 
-    page.fill("#settingsModelClarify", "gpt-5.6-sol")
-    page.wait_for_timeout(50)
+    _set_stage(page, "codex", "gpt-5.6-sol")
     assert "warn" not in (_note(page).get_attribute("class") or "")
+
+
+# ---------------------------------------------------------------------------
+# The model picker itself
+# ---------------------------------------------------------------------------
+
+def test_the_picker_offers_only_models_the_backend_serves_plus_custom(page, dashboard_server):
+    """The reason the picker exists: a text input with a <datalist> had no visible
+    affordance, so a user who did not already know an id had nothing to go on."""
+    _open_ai_models_tab(page, dashboard_server)
+
+    page.select_option("#settingsBackendClarify", "codex")
+    codex = _model_options(page)
+    assert "gpt-5.6-sol" in codex
+    assert "claude-sonnet-5" not in codex
+    assert codex[-1] == CUSTOM, "Custom must be reachable, and last, on every backend"
+
+    page.select_option("#settingsBackendClarify", "claude")
+    claude = _model_options(page)
+    assert "claude-sonnet-5" in claude
+    assert "gpt-5.6-sol" not in claude
+
+    # Copilot proxies both vendors, so its list is the union.
+    page.select_option("#settingsBackendClarify", "copilot")
+    copilot = _model_options(page)
+    assert {"claude-sonnet-5", "gpt-5.6-sol", "auto"} <= set(copilot)
+
+
+def test_the_custom_field_is_hidden_until_custom_is_chosen(page, dashboard_server):
+    _open_ai_models_tab(page, dashboard_server)
+    page.select_option("#settingsBackendClarify", "claude")
+    page.select_option("#settingsModelSelectClarify", "claude-sonnet-5")
+    assert page.locator("#settingsModelClarify").is_hidden()
+
+    page.select_option("#settingsModelSelectClarify", CUSTOM)
+    assert page.locator("#settingsModelClarify").is_visible()
+
+
+def test_choosing_from_the_list_is_what_gets_saved(page, dashboard_server):
+    """The <select> writes through to the text input, which is what buildSettingsPayload
+    reads — so picking, with no typing at all, has to reach config.json."""
+    _open_ai_models_tab(page, dashboard_server)
+    page.select_option("#settingsBackendClarify", "claude")
+    page.select_option("#settingsModelSelectClarify", "claude-opus-5")
+
+    page.click("#settingsSaveBtn")
+    page.wait_for_function(
+        "() => document.getElementById('settingsSaveStatus').textContent.trim().length > 0")
+    assert tempa_config.load_config()["models"]["clarify"] == "claude-opus-5"
+
+
+def test_a_model_id_the_catalog_does_not_list_loads_as_custom(page, dashboard_server):
+    """A stale catalog must not become a wall. An id set from the CLI, hand-edited in, or
+    simply newer than this list has to come back visible and editable, not silently
+    replaced by whatever happened to be first in the dropdown."""
+    config = tempa_config.load_config()
+    config["backends"] = {**config.get("backends", {}), "clarify": "codex"}
+    config["models"] = {**config.get("models", {}), "clarify": "gpt-6-unreleased"}
+    tempa_config.save_config(config)
+
+    _open_ai_models_tab(page, dashboard_server)
+
+    assert page.locator("#settingsModelSelectClarify").input_value() == CUSTOM
+    assert page.locator("#settingsModelClarify").is_visible()
+    assert page.locator("#settingsModelClarify").input_value() == "gpt-6-unreleased"
+    # Unplaceable vendor, so no mismatch warning either — free text stays free text.
+    assert "warn" not in (_note(page).get_attribute("class") or "")
+
+
+def test_switching_backend_keeps_the_model_instead_of_clobbering_it(page, dashboard_server):
+    """Long-standing deliberate behaviour (see wireBackendModelStage): switching backends
+    never discards the configured model. With a picker that means falling through to
+    Custom, with the mismatch note — not a silent reset — explaining the problem."""
+    _open_ai_models_tab(page, dashboard_server)
+    page.select_option("#settingsBackendClarify", "claude")
+    page.select_option("#settingsModelSelectClarify", "claude-sonnet-5")
+
+    page.select_option("#settingsBackendClarify", "codex")
+
+    assert page.locator("#settingsModelSelectClarify").input_value() == CUSTOM
+    assert page.locator("#settingsModelClarify").input_value() == "claude-sonnet-5"
+    assert "warn" in (_note(page).get_attribute("class") or "")

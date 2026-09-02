@@ -84,6 +84,20 @@ tempa show-models                              # show the model per stage
   as given, since those CLIs' model catalogs aren't hardcoded into Tempa.
 - A stage that isn't specified keeps its previous/default value.
 
+## Choosing a model in the dashboard
+
+Settings → AI Models gives each stage a **model picker** listing what that stage's backend
+serves, plus **Other model id…** for anything else. The list is a shortcut, not the set of
+ids Tempa accepts — pick *Other model id…* and type any id the CLI takes, including one
+released after this list was written.
+
+A model already configured but absent from the list — set with `tempa set-model`, edited
+into `config.json` by hand, saved by an older Tempa, or simply newer — loads as *Other model
+id…* with its value intact. It is never silently swapped for something from the list.
+Switching a stage's backend does not discard its model either: one the new backend does not
+list falls through to *Other model id…*, and the compatibility warning below (rather than a
+silent reset) is what tells you the pair cannot run.
+
 ## Backend/model compatibility
 
 The model field is free text, but Tempa refuses one specific mistake: **pointing a backend at
@@ -107,7 +121,7 @@ Where it applies:
 
 | Where | Behaviour |
 |---|---|
-| Dashboard → Settings → AI Models | An inline red note appears under the model field as soon as the pair goes wrong, and **Save Settings** is refused with a message naming the stage. |
+| Dashboard → Settings → AI Models | The model picker only offers models the chosen backend serves, so the common case cannot go wrong at all. Choosing **Other model id…** and entering a mismatched id shows an inline red note under the field, and **Save Settings** is refused with a message naming the stage. |
 | `tempa set-backend` | **Refused.** The stage's model is already whatever you want it to be, so a mismatch here means the pair is simply wrong. The message names the `tempa set-model` command to run first. |
 | `tempa set-model` | **Warned, but saved.** Blocking both commands would make migrating a stage impossible — each would reject the half-finished pair the other one needs first. So `set-model` then `set-backend` always works, and the transitional pair still cannot run. |
 | `tempa show-models` / `show-backends` | A mismatched stage's row is marked `[!] not runnable on <backend>`. |
