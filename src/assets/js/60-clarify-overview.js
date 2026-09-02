@@ -55,7 +55,7 @@ function renderClarifyOverviewRows(tbody, files, emptyMessage) {
   }
   for (const file of files) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${escapeHtml(file.name)}</td>` +
+    tr.innerHTML = `<td><span class="clarify-file-name">${escapeHtml(file.name)}</span></td>` +
       `<td>${formatClarifyStartedAt(file.started_at)}</td>` +
       `<td>${findingsCell(file)}</td>` +
       `<td>${statusCell(file)}</td>`;
@@ -97,8 +97,23 @@ async function openClarifyRowDetail(file) {
   if (openFile) openClarifyFile(file);
 }
 
+// The Evaluation card's Language picker. Its options come from the server
+// (CLARIFY_LANGUAGES, from tempa_config.CLARIFICATION_LANGUAGES) so adding a language is a
+// one-place change; a code the server no longer offers falls back to the first option rather
+// than leaving the select showing nothing.
+function renderClarifyLanguage() {
+  const languages = CLARIFY_LANGUAGES || [{ code: "en", label: "English" }];
+  if (clarifyLanguageSelect.options.length !== languages.length) {
+    clarifyLanguageSelect.innerHTML = languages.map((l) =>
+      `<option value="${escapeHtml(l.code)}">${escapeHtml(l.label)}</option>`).join("");
+  }
+  const known = languages.some((l) => l.code === state.clarifyLanguage);
+  clarifyLanguageSelect.value = known ? state.clarifyLanguage : languages[0].code;
+}
+
 function renderClarifyOverview() {
   skipMinorFindingsToggle.checked = !!state.skipMinorFindings;
+  renderClarifyLanguage();
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
     clarifyUnansweredEmptyMessage(state.clarifySettled));
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
@@ -303,6 +318,33 @@ skipMinorFindingsToggle.addEventListener("change", async () => {
     state.skipMinorFindings = !checked;
     skipMinorFindingsToggle.checked = !checked;
     toast("Network error while saving.", true);
+  }
+});
+
+// Same optimistic save + roll-back-on-failure shape as the toggle above. Only rounds run
+// AFTER this is saved are written in the new language — clarification files already on disk
+// are a record and are never rewritten, so a workspace that switches mid-way keeps both.
+clarifyLanguageSelect.addEventListener("change", async () => {
+  const previous = state.clarifyLanguage;
+  const chosen = clarifyLanguageSelect.value;
+  state.clarifyLanguage = chosen;
+  const revert = (message) => {
+    state.clarifyLanguage = previous;
+    clarifyLanguageSelect.value = previous;
+    toast(message, true);
+  };
+  try {
+    const res = await fetch("/api/clarify/language", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clarification_language: chosen }),
+    });
+    const data = await res.json();
+    if (!data.ok) { revert(data.error || "Could not save this setting."); return; }
+    toast("Clarification findings will be written in " +
+      (clarifyLanguageSelect.selectedOptions[0] || {}).text + " from the next round.");
+  } catch (e) {
+    revert("Network error while saving.");
   }
 });
 

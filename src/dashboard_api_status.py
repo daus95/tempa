@@ -103,6 +103,7 @@ def tree_payload(prd_dir: Path, clar_dir: Path, backends: dict) -> Response:
                     "overlayWarnThreshold": tempa_config.get_clarify_overlay_warn_findings(
                         dashboard_config),
                     "skipMinorFindings": skip_minor_findings,
+                    "language": tempa_config.get_clarification_language(dashboard_config),
                     "severityPhase": (dashboard_config.get("last_severity_phase") or ""
                                       if tempa_config.get_clarify_severity_phases(dashboard_config)
                                       else "")},

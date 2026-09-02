@@ -29,6 +29,7 @@ const treeEl = $("tree"), treeBottomEl = $("treeBottom"), specViewer = $("specVi
   finalizeGateHint = $("finalizeGateHint"), clarifyRoundBadge = $("clarifyRoundBadge"),
   finalizeRoundProgress = $("finalizeRoundProgress"),
   skipMinorFindingsToggle = $("skipMinorFindingsToggle"),
+  clarifyLanguageSelect = $("clarifyLanguageSelect"),
   clarifyOverlayCard = $("clarifyOverlayCard"), clarifyOverlayBadge = $("clarifyOverlayBadge"),
   clarifyOverlayHint = $("clarifyOverlayHint"),
   homeClarifyRoundBadge = $("homeClarifyRoundBadge"),
@@ -199,6 +200,10 @@ const state = {
   principlesSet: !!INITIAL_PRINCIPLES_SET,
   backendsStatus: INITIAL_BACKENDS_STATUS || {},
   skipMinorFindings: INITIAL_SKIP_MINOR_FINDINGS ?? true,
+  // Which language clarification findings are written in (config.json's
+  // "clarification_language"). "en" is what every workspace that never touched the picker
+  // has, and what the server falls back to for an unknown code.
+  clarifyLanguage: INITIAL_CLARIFY_LANGUAGE || "en",
   epics: [],
   // Which epics' QA-history block is expanded, by epic_name. renderImplementStatus rebuilds
   // every card from scratch on each 1s poll tick, so — same reasoning as expandedSpecDirs —
@@ -245,6 +250,7 @@ function applyTreePayload(data) {
   state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
   state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
   state.skipMinorFindings = !!data.clarify.skipMinorFindings;
+  state.clarifyLanguage = data.clarify.language || "en";
   state.principlesSet = !!(data.principles && data.principles.set);
   state.backendsStatus = data.backends || state.backendsStatus;
 }

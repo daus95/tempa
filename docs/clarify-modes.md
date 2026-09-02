@@ -54,6 +54,34 @@ manually** (editing the PRD/spec per your decisions), then run `clarify --apply`
 those answers into the PRD/spec, or call `clarify` again to re-evaluate for the next
 iteration.
 
+## Output language
+
+The dashboard Clarification page's **Evaluation** card carries a **Language** picker beside
+the severity switch (config.json's `clarification_language`, default `en`). It decides the
+language a round *writes its findings in* — each finding's title, its two explanatory
+paragraphs, its question and its recommendation — plus the answers `--auto-answer` fills in,
+since those are read in the same review UI.
+
+Everything a machine reads stays in English no matter which language is picked, because
+translating any of it would lose data rather than reword it:
+
+- the `clarify:` markers and the `**Where:**` / `**Question:**` / `**Recommendation:**` /
+  `**Your answer:**` labels — a finding whose labels were translated wouldn't parse, so it
+  would vanish from the answer UI and could never be answered;
+- requirement, rule, entity and field ids quoted from the PRD, and the PRD file paths — those
+  are what the reference links resolve against (see **Reading the spec a finding cites**), so
+  a translated one would link to nothing;
+- the coverage ledger, which is a record of what a round checked rather than something the
+  user reads.
+
+The PRD itself is never translated either: `clarify --apply` writes each decision into a PRD
+document in the language that document already uses, whatever language the answer was
+written in.
+
+Only rounds run *after* the picker is changed are affected. Clarification files already on
+disk are a historical record and are never rewritten, so a workspace that switches language
+part-way keeps each round in the language it was written in.
+
 ## Severity phases
 
 Clarification sweeps the severities **one phase at a time** — every critical first, then
@@ -664,6 +692,6 @@ start and then killing it mid-way.
 The Clarification page itself splits into an **Overview** tab (the Unanswered/Fully answered
 tables above) and a **Log** tab (raw streamed console output for whichever run is in
 progress), the same Status/Log split the Implementation page uses. The run buttons and
-readiness panels (Evaluation scope, Pending resolutions, Finalize readiness) stay pinned above
+readiness panels (Evaluation, Pending resolutions, Finalize readiness) stay pinned above
 both tabs, with a spinning status badge next to the run buttons reflecting live progress
 regardless of which tab is open.

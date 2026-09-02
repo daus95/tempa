@@ -1,4 +1,4 @@
-Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has every finding answered, so it does NOT need to be read again:
+${output_language}Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has every finding answered, so it does NOT need to be read again:
 ${clarification_files}
 
 For EVERY clarification finding/question in these files, the blank line(s) under that finding's "Your answer:" label are EMPTY (that's why the file was selected).

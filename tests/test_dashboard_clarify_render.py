@@ -209,3 +209,26 @@ def test_a_followed_recommendation_says_so_rather_than_rendering_blank():
 
 def test_an_unanswered_peeked_finding_says_so():
     assert "Not answered yet." in dcr.render_finding_peek_html(_item())
+
+
+# ---------------------------------------------------------------------------
+# Direction — the finding's prose is in the workspace's clarification language
+# ---------------------------------------------------------------------------
+
+def test_finding_prose_carries_dir_auto_so_rtl_languages_lay_out_correctly():
+    """A finding is written in whichever language the Evaluation card picks, so its direction
+    belongs to the content, not to the page: without this an Arabic finding renders
+    left-to-right. Every left-to-right language, English included, is unaffected."""
+    html = dcr._render_item_html(_item(existing_answer="typed"))
+    # title, where, question, recommendation, and the answer box the reader types into
+    assert html.count('dir="auto"') == 5
+    peek = dcr.render_finding_peek_html(_item(existing_answer="typed"))
+    assert peek.count('dir="auto"') == 5   # ...and the Decided block, minus the textarea
+
+
+def test_the_dashboards_own_labels_keep_the_pages_direction():
+    """Only the agent-written prose is direction-agnostic. Where/Question/Recommendation are
+    the dashboard's own English chrome, so they must NOT pick up the content's direction."""
+    html = dcr._render_item_html(_item())
+    for label in ("<h4>Where</h4>", "<h4>Question</h4>", "<h4>Recommendation</h4>"):
+        assert label in html

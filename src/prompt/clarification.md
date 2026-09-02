@@ -139,7 +139,7 @@ Rules for using it — follow all five:
 
 === END COVERAGE LEDGER ===
 
-For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
+${output_language}For EVERY finding (${finding_scope}), wrap it in HTML comment markers and write it using exactly this structure and order, so it can also be read/answered through the clarification-answer UI:
 
 ```
 <!-- clarify:item id="<unique-id>" severity="critical|major|minor" -->

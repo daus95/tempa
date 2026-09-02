@@ -251,6 +251,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         "/api/clarify/stop-graceful": "_handle_clarify_stop_graceful",
         "/api/clarify/stop-graceful/cancel": "_handle_clarify_stop_graceful_cancel",
         "/api/clarify/skip-minor": "_handle_clarify_skip_minor_save",
+        "/api/clarify/language": "_handle_clarify_language_save",
         "/api/implement/run": "_handle_implement_run_start",
         "/api/implement/stop": "_handle_implement_run_stop",
         "/api/implement/stop-graceful": "_handle_implement_stop_graceful",
@@ -390,6 +391,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _handle_clarify_skip_minor_save(self) -> None:
         self._send_json(*dashboard_api_clarify.save_skip_minor(self._read_json_body()))
+
+    def _handle_clarify_language_save(self) -> None:
+        self._send_json(*dashboard_api_clarify.save_clarify_language(self._read_json_body()))
 
     def _handle_implement_run_start(self) -> None:
         # Server-side gate, not just a disabled button client-side — tempa.py's

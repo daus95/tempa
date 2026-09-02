@@ -166,6 +166,17 @@ lines being written:
 
 ![Clarification running — Running status with elapsed time and line count](assets/09-clarification-running.png)
 
+#### Choosing the language findings are written in
+
+Findings are written in English by default. To read and answer them in another language,
+open the **Clarification** page in the left navigation and use the **Language** picker on
+its **Evaluation** card (ten languages, Bahasa Indonesia among them). It applies from the
+next round onwards — rounds already on disk keep the language they were written in.
+
+Only what you read changes. Requirement ids, file paths and any wording quoted from the PRD
+stay exactly as the PRD writes them, so the reference links in section 5.3 keep working, and
+the PRD itself is never translated when your answers are applied to it.
+
 ### 5.2 The Log tab
 
 While the evaluation runs (or at any other time), click the **Log** tab to watch the raw
