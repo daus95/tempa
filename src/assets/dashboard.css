@@ -595,7 +595,12 @@
     background: var(--bg); color: var(--text); }
   .settings-inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: 640px; }
   .settings-inline-row .settings-backend-select { flex: 1 1 170px; min-width: 150px; max-width: 220px; }
-  .settings-inline-row .settings-model-input { flex: 2 1 200px; min-width: 150px; max-width: none; }
+  /* The model cell holds a picker and, only when "Custom" is chosen, a free-text id
+     below it — so the row keeps its three columns whichever mode the stage is in. */
+  .settings-inline-row .settings-model-field { flex: 2 1 200px; min-width: 150px; max-width: none;
+    display: flex; flex-direction: column; gap: 6px; }
+  .settings-model-field .settings-model-select,
+  .settings-model-field .settings-model-input { width: 100%; max-width: none; }
   .settings-inline-row .settings-effort-select { flex: 1 1 150px; min-width: 130px; max-width: 220px; }
   .settings-model-note { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
   .settings-model-note.warn { color: var(--danger); }

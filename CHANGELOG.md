@@ -8,6 +8,18 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Changed
+
+- Settings → AI Models now picks the model from a **dropdown** listing what the chosen
+  backend serves, instead of a bare text box. The suggestions were always there, behind an
+  HTML `<datalist>`, but a datalist has no visible affordance at all — users could not tell
+  there was anything to pick from and had to already know an id in order to type one. The
+  list is still a shortcut rather than a limit: **Other model id…** accepts any id the CLI
+  takes, including one released after Tempa's list. A model already configured but absent
+  from the list — set with `tempa set-model`, hand-edited into `config.json`, or simply
+  newer — loads as *Other model id…* with its value intact rather than being silently
+  swapped for a list entry, and switching a stage's backend still never discards its model.
+
 ### Added
 
 - Tempa now checks that a stage's AI model can actually run on that stage's CLI backend, and
