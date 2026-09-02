@@ -131,6 +131,45 @@ const CODEX_MODEL_REASONING_LEVELS = {
 };
 const CODEX_DEFAULT_EFFORT_LEVELS = [...CODEX_UNIVERSAL_LEVELS, "low", "medium", "high", "xhigh"];
 
+// What Anthropic documents per Claude model, mirroring tempa_backend.CLAUDE_MODEL_EFFORT_LEVELS.
+// Unlike the lists above, this drives an ADVISORY and never a rejection: Claude Code accepts a
+// level its model does not honour and runs anyway, so the level is still saved and still sent.
+// A model absent from this table gets no advisory at all — guessing would produce a confidently
+// wrong note about a configuration that is fine.
+const CLAUDE_LOWER_EFFORT_LEVELS = ["low", "medium", "high"];
+const CLAUDE_MODEL_EFFORT_LEVELS = {
+  "claude-fable-5-1": CLAUDE_EFFORT_LEVELS,
+  "claude-mythos-5-1": CLAUDE_EFFORT_LEVELS,
+  "claude-fable-5": CLAUDE_EFFORT_LEVELS,
+  "claude-mythos-5": CLAUDE_EFFORT_LEVELS,
+  "claude-opus-5": CLAUDE_EFFORT_LEVELS,
+  "claude-opus-4-8": CLAUDE_EFFORT_LEVELS,
+  "claude-opus-4-7": CLAUDE_EFFORT_LEVELS,
+  "claude-sonnet-5": CLAUDE_EFFORT_LEVELS,
+  "claude-mythos-preview": [...CLAUDE_LOWER_EFFORT_LEVELS, "max"],
+  "claude-opus-4-6": [...CLAUDE_LOWER_EFFORT_LEVELS, "max"],
+  "claude-sonnet-4-6": [...CLAUDE_LOWER_EFFORT_LEVELS, "max"],
+  "claude-opus-4-5-20251101": CLAUDE_LOWER_EFFORT_LEVELS,
+  "claude-haiku-4-5-20251001": [],
+  "claude-sonnet-4-5": [],
+};
+
+// The note text when `effort` will not do anything on `model`, else null.
+function effortAdvisory(backendName, model, effort) {
+  if (backendName !== "claude") return null;
+  const level = (effort || "").trim().toLowerCase();
+  if (!level) return null;
+  const key = (model || "").trim().toLowerCase();
+  if (!(key in CLAUDE_MODEL_EFFORT_LEVELS)) return null;
+  const supported = CLAUDE_MODEL_EFFORT_LEVELS[key];
+  if (supported.includes(level)) return null;
+  const tail = supported.length
+    ? `Anthropic does not document '${level}' for ${model} (documented: ${supported.join(", ")})`
+    : `Anthropic documents no effort support for ${model} at all`;
+  return `${tail}. Claude Code accepts it without complaint, so this setting fails quietly `
+    + "rather than visibly — leave it at (default), or pick a model that supports the level you want.";
+}
+
 // Vendor families — mirrors tempa_backend.py's MODEL_VENDOR_PREFIXES / MODEL_VENDOR_EXACT_IDS
 // and each Backend.model_vendors. As with the effort catalogs above, the server is the
 // authoritative validator (dashboard_api_settings._validate_stage_settings rejects the save);
@@ -330,10 +369,15 @@ function syncCustomModelInput(selectEl, modelInput) {
   if (!isCustom) modelInput.value = selectEl.value;
 }
 
-// The mismatch warning takes precedence over the availability note, though the two can
-// never actually collide: copilot is the only backend with a note, and it serves every
-// vendor this table knows about, so it never mismatches.
-function updateModelAvailabilityNote(noteEl, backendName, model) {
+// One note element per stage, three things that might want it. Ordered by how much the
+// user needs to act: a mismatch BLOCKS the save, so it outranks an effort advisory, which
+// only means a setting will do nothing, which outranks Copilot's standing availability note.
+// Only the mismatch is styled as a warning — red for "you cannot save this", plain for
+// "this is worth knowing" — so the colour keeps meaning one thing.
+//
+// The first two can never actually collide with Copilot's note: it is the only backend with
+// one, it serves every vendor this table knows, and the advisory is Claude-only.
+function updateModelAvailabilityNote(noteEl, backendName, model, effort) {
   if (!noteEl) return;
   const vendor = modelBackendMismatch(backendName, model);
   if (vendor) {
@@ -344,7 +388,7 @@ function updateModelAvailabilityNote(noteEl, backendName, model) {
     noteEl.classList.remove("hidden");
     return;
   }
-  const note = MODEL_AVAILABILITY_NOTES[backendName];
+  const note = effortAdvisory(backendName, model, effort) || MODEL_AVAILABILITY_NOTES[backendName];
   noteEl.textContent = note || "";
   noteEl.classList.remove("warn");
   noteEl.classList.toggle("hidden", !note);
@@ -381,8 +425,10 @@ function populateBackendSelect(selectEl, currentValue) {
 // mismatch note (rather than a silent reset) is what tells the user the pair cannot run.
 function wireBackendModelStage(backendSelect, modelSelect, modelInput, modelNote, effortSelect) {
   const refresh = () => {
-    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
     populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
+    // After populateEffortSelect, not before: it can change the effort select's value, and
+    // the note now reads that value.
+    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value, effortSelect.value);
   };
   backendSelect.addEventListener("change", () => {
     populateModelSelect(modelSelect, modelInput, backendSelect.value, modelInput.value);
@@ -396,6 +442,10 @@ function wireBackendModelStage(backendSelect, modelSelect, modelInput, modelNote
     refresh();
   });
   modelInput.addEventListener("input", refresh);
+  // The third control that can change the note: picking a level the model does not honour.
+  effortSelect.addEventListener("change", () => {
+    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value, effortSelect.value);
+  });
 }
 wireBackendModelStage(settingsBackendClarify, settingsModelSelectClarify, settingsModelClarify, settingsModelNoteClarify, settingsEffortClarify);
 wireBackendModelStage(settingsBackendClarifyApply, settingsModelSelectClarifyApply, settingsModelClarifyApply, settingsModelNoteClarifyApply, settingsEffortClarifyApply);
@@ -420,17 +470,17 @@ function fillSettingsForm(config) {
   populateModelSelect(settingsModelSelectClarifyApply, settingsModelClarifyApply, config.backends.clarify_apply, config.models.clarify_apply);
   populateModelSelect(settingsModelSelectPlan, settingsModelPlan, config.backends.plan, config.models.plan);
   populateModelSelect(settingsModelSelectImplement, settingsModelImplement, config.backends.implement, config.models.implement);
-  // After the model inputs are populated, not before: the note now depends on the model as
-  // well as the backend, so computing it first would hide a mismatch already saved in
-  // config.json until the user happened to touch a field.
-  updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify, config.models.clarify);
-  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply, config.models.clarify_apply);
-  updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan, config.models.plan);
-  updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement, config.models.implement);
   populateEffortSelect(settingsEffortClarify, config.backends.clarify, config.models.clarify, config.reasoning_efforts.clarify);
   populateEffortSelect(settingsEffortClarifyApply, config.backends.clarify_apply, config.models.clarify_apply, config.reasoning_efforts.clarify_apply);
   populateEffortSelect(settingsEffortPlan, config.backends.plan, config.models.plan, config.reasoning_efforts.plan);
   populateEffortSelect(settingsEffortImplement, config.backends.implement, config.models.implement, config.reasoning_efforts.implement);
+  // Last of the three, not first: the note depends on the backend, the model AND the effort,
+  // so anything computed before all of them are on the form would be stale — which is how a
+  // mismatch already saved in config.json used to stay invisible until a field was touched.
+  updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify, config.models.clarify, config.reasoning_efforts.clarify);
+  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply, config.models.clarify_apply, config.reasoning_efforts.clarify_apply);
+  updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan, config.models.plan, config.reasoning_efforts.plan);
+  updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement, config.models.implement, config.reasoning_efforts.implement);
   settingsFeaturesPerSession.value = config.features_per_session == null ? "" : config.features_per_session;
   settingsMaxSessionRun.value = config.max_session_run == null ? "" : config.max_session_run;
   settingsMaxClarificationRun.value = config.max_clarification_run == null ? "" : config.max_clarification_run;

@@ -60,10 +60,49 @@ AUTONOMOUS_SYSTEM_PROMPT = (
 )
 
 # Reasoning-effort levels each backend's own CLI flag documents (`claude --help` /
-# `copilot --help`) — uniform across every model of that backend, since neither CLI exposes
-# a finer-grained per-model breakdown the way Codex does below.
+# `copilot --help`) — the values the flag ACCEPTS, uniform across every model, since neither
+# CLI exposes a finer-grained per-model breakdown the way Codex does below. Which of them a
+# given model actually honours is a separate question for Claude; see below.
 CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 COPILOT_EFFORT_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+# What Anthropic documents per model, which is NOT the flat list above: "Not every model that
+# supports `max` supports `xhigh`", and several models have no effort support at all.
+#
+# This drives an ADVISORY, never a rejection, and the distinction is the whole point. Verified
+# live against claude 2.1.258: `--effort max` on Haiku 4.5 and `--effort xhigh` on Opus 4.6
+# both run fine with no error, while `--effort banana` prints "Unknown --effort value". So the
+# CLI validates the NAME and not the pairing — meaning a level a model does not honour costs
+# the user nothing visible and does nothing, which is exactly the kind of silent nothing worth
+# a note. Rejecting instead would refuse a configuration the CLI itself accepts.
+#
+# Codex is the opposite case and stays a hard rejection (see is_valid_reasoning_effort): its
+# API returns a real `[reasoning.effort]` error for an unsupported level.
+#
+# Sourced from platform.claude.com/docs/en/build-with-claude/effort. Like every catalog in
+# this file it can go stale — an unlisted model gets no advisory at all (see
+# _claude_effort_advisory), so going stale costs a note, never a working configuration.
+_CLAUDE_LOWER_EFFORT_LEVELS = ("low", "medium", "high")
+CLAUDE_MODEL_EFFORT_LEVELS = {
+    # The full ladder, xhigh and max included.
+    "claude-fable-5-1": CLAUDE_EFFORT_LEVELS,
+    "claude-mythos-5-1": CLAUDE_EFFORT_LEVELS,
+    "claude-fable-5": CLAUDE_EFFORT_LEVELS,
+    "claude-mythos-5": CLAUDE_EFFORT_LEVELS,
+    "claude-opus-5": CLAUDE_EFFORT_LEVELS,
+    "claude-opus-4-8": CLAUDE_EFFORT_LEVELS,
+    "claude-opus-4-7": CLAUDE_EFFORT_LEVELS,
+    "claude-sonnet-5": CLAUDE_EFFORT_LEVELS,
+    # max, but no xhigh.
+    "claude-mythos-preview": _CLAUDE_LOWER_EFFORT_LEVELS + ("max",),
+    "claude-opus-4-6": _CLAUDE_LOWER_EFFORT_LEVELS + ("max",),
+    "claude-sonnet-4-6": _CLAUDE_LOWER_EFFORT_LEVELS + ("max",),
+    # Effort applies, but neither of the top two levels.
+    "claude-opus-4-5-20251101": _CLAUDE_LOWER_EFFORT_LEVELS,
+    # No effort support at all — the parameter simply does not apply to these models.
+    "claude-haiku-4-5-20251001": (),
+    "claude-sonnet-4-5": (),
+}
 
 # Codex DOES expose a real per-model reasoning catalog (`codex debug models`), and live
 # testing (feeding a deliberately-invalid value to `codex exec -c model_reasoning_effort=...`
@@ -127,6 +166,13 @@ MODEL_VENDOR_EXACT_IDS: dict[str, str] = {
 }
 
 
+def _no_effort_advisory(model: str, effort: str) -> str | None:
+    """Default `Backend.reasoning_effort_advisory`: a backend with no published per-model
+    effort data has nothing to advise about. Copilot documents one list for every model, and
+    Codex's per-model data is enforced as a hard rejection instead."""
+    return None
+
+
 def _no_background_wait_env(seconds: int | float) -> dict[str, str]:
     """Default `Backend.background_wait_env`: a CLI with no documented knob for how long it
     waits on its own background work gets no environment override at all."""
@@ -175,6 +221,10 @@ class Backend:
     # How to list the model ids this CLI accepts, quoted at the user by both the static
     # mismatch message and the runtime model-rejection one so they give the same next step.
     model_catalog_hint: str = ""
+    # Says when a reasoning-effort level is accepted by this CLI but not documented for the
+    # model it is paired with. Advisory only — the value still saves and still runs. Returns
+    # None when there is nothing to say.
+    reasoning_effort_advisory: Callable[[str, str], str | None] = _no_effort_advisory
 
 
 def resolve_exe(backend: Backend) -> str | None:
@@ -371,6 +421,34 @@ def _claude_friendly_auth_error_message(text: str) -> str:
     return f"Authentication to the Claude API failed — {cause}. Fix: {fix}."
 
 
+def _claude_effort_advisory(model: str, effort: str) -> str | None:
+    """Warn that a level will not do anything on this model, without standing in its way.
+
+    Returns None for a model this table has never heard of. That is deliberate rather than
+    conservative: a new model almost certainly supports the full ladder, so guessing would
+    produce a confidently wrong note about a configuration that is fine — worse than saying
+    nothing, because a note nobody can act on teaches people to ignore the next one."""
+    value = effort.strip().lower()
+    if not value:
+        return None
+    key = model.strip().lower()
+    if key not in CLAUDE_MODEL_EFFORT_LEVELS:
+        return None
+    supported = CLAUDE_MODEL_EFFORT_LEVELS[key]
+    if value in supported:
+        return None
+    tail = (
+        f"Anthropic documents no effort support for {model} at all"
+        if not supported
+        else f"Anthropic does not document '{value}' for {model} (documented: {', '.join(supported)})"
+    )
+    return (
+        f"{tail}. Claude Code accepts the value without complaint, so this setting fails "
+        f"quietly rather than visibly — leave it empty to use the model's own default, or "
+        f"choose a model that supports the level you want."
+    )
+
+
 CLAUDE = Backend(
     name="claude",
     label="Claude Code",
@@ -427,6 +505,7 @@ CLAUDE = Backend(
     ),
     friendly_auth_error_message=_claude_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CLAUDE_EFFORT_LEVELS,
+    reasoning_effort_advisory=_claude_effort_advisory,
     model_vendors=frozenset({"anthropic"}),
     background_wait_env=_claude_background_wait_env,
     # Printed verbatim (plain stderr, merged into the stream) when the ceiling above expires:

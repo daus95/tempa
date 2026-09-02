@@ -459,10 +459,21 @@ def print_efforts(config: dict | None = None) -> None:
     if config is None:
         config = load_config()
     efforts = get_reasoning_efforts(config)
+    models = get_models(config)
+    backends = get_backends(config)
     _banner("AI REASONING EFFORT PER STAGE")
+    notes = []
     for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = efforts.get(stage) or "(default)"
-        print(f"  {STAGE_LABELS[stage]:<34} {value}", flush=True)
+        backend_def = get_backend_def(backends.get(stage, "claude"))
+        advisory = backend_def.reasoning_effort_advisory(models.get(stage, ""), efforts.get(stage) or "")
+        # Marked, not hidden: the value really is configured, it just will not do anything.
+        print(f"  {STAGE_LABELS[stage]:<34} {value}"
+              f"{'   [!] ignored by this model' if advisory else ''}", flush=True)
+        if advisory:
+            notes.append(f"  [!] {stage}: {advisory}")
+    for note in notes:
+        print(note, flush=True)
 
 
 def set_efforts(args: argparse.Namespace) -> None:
@@ -476,6 +487,10 @@ def set_efforts(args: argparse.Namespace) -> None:
     up to xhigh/max/ultra depending on the OpenAI Codex CLI model. Pass an empty string
     ("") to clear it (use the CLI/model's own default). Stages omitted keep their
     current/default value.
+
+    A level that IS accepted by the CLI but is not documented for the configured model (e.g.
+    any level on Claude Haiku 4.5, or xhigh on Claude Opus 4.6) is saved with a note rather
+    than refused: Claude Code takes it and runs, it simply has no effect.
     """
     config = load_config()
     efforts = get_reasoning_efforts(config)
@@ -494,6 +509,12 @@ def set_efforts(args: argparse.Namespace) -> None:
                 log(f"ERROR: '{value}' is not a supported reasoning effort for {backend_def.label} model "
                     f"'{model}' — must be empty or one of: {choices}")
                 sys.exit(1)
+            # No advisory logged here: this command always ends by calling print_efforts,
+            # which reports it for every stage — including one that was already misconfigured
+            # before this call. Logging it here too would print the same paragraph twice.
+            # It is an advisory rather than a refusal because Claude Code accepts a level its
+            # model does not honour and runs anyway, so rejecting would block a configuration
+            # that works. It just quietly does nothing, which is why it is worth saying.
             efforts[stage] = value
             changed = True
 
