@@ -100,7 +100,7 @@ async function openClarifyRowDetail(file) {
 function renderClarifyOverview() {
   skipMinorFindingsToggle.checked = !!state.skipMinorFindings;
   renderClarifyOverviewRows(clarifyUnansweredTbody, state.clarifyUnanswered,
-    "No unanswered files.");
+    clarifyUnansweredEmptyMessage(state.clarifySettled));
   renderClarifyOverviewRows(clarifyAnsweredTbody, state.clarifyAnswered,
     "No fully answered files yet.");
   setClarifyRunButtonsDisabled(state.clarifyRun.running);
@@ -134,6 +134,83 @@ function renderPendingOverlayCard() {
   clarifyOverlayHint.textContent = text;
 }
 
+// Shared copy for state.clarifySettled (see _clarification_settled_status in
+// dashboard_clarify_parse.py), used by the Clarification overview, its Finalize readiness
+// panel, and the Home page's step 2 — the same reason implementReadyMessage below is shared:
+// three surfaces that must never word the same state differently.
+function findingsPhrase(critical, major) {
+  const parts = [];
+  if (critical > 0) parts.push(`${critical} critical`);
+  if (major > 0) parts.push(`${major} major`);
+  return parts.length ? parts.join(" and ") + " finding(s)" : "no findings";
+}
+
+// Plain text only — renderClarifyOverviewRows puts this through escapeHtml.
+function clarifyUnansweredEmptyMessage(cs) {
+  switch (cs.reason) {
+    case "settled":
+      return "Nothing left to clarify — the latest clarification round found no open findings " +
+        "in your specification.";
+    case "spec_changed":
+      return "The specification changed since the last clarification round — run Continue " +
+        "Clarification to re-check it.";
+    case "needs_recheck":
+      return "Every finding has been answered, but the latest evaluation still lists " +
+        `${findingsPhrase(cs.critical, cs.major)}. Answering doesn't update that count — run ` +
+        "Continue Clarification to re-check them.";
+    case "apply_only":
+      return "Your answers were applied to the PRD, but nothing has been re-evaluated since. " +
+        "Run Continue Clarification to confirm what's left.";
+    case "sweep_pending":
+      return "The last round only swept critical findings — majors haven't been checked yet. " +
+        "Run Continue Clarification once more to sweep majors.";
+    case "minors_open":
+      return `The latest evaluation still lists ${cs.minor} minor finding(s). Turn on "Only ` +
+        'evaluate critical & major findings" above to skip them, or run Continue Clarification ' +
+        "to work through them.";
+    case "never_run":
+      return "No clarification has run yet — click Start Clarification to find the open " +
+        "questions in your specification.";
+    default:
+      // "unanswered" — unreachable as an empty state (the table has rows), kept so the
+      // switch stays total against _clarification_settled_status's reason enum.
+      return "No unanswered files.";
+  }
+}
+
+// Appended to the success toast of the four /api/spec/* mutation routes. The server sets
+// "clarificationStale" only when there was a clarification result to invalidate (see
+// _send_spec_mutation in dashboard_server.py), so a fresh workspace's first upload stays
+// quiet. One toast rather than two — they auto-dismiss in 2.2s and would collide.
+function clarifyStaleToastSuffix(data) {
+  return data && data.clarificationStale
+    ? " — the specification changed, so clarification needs another round."
+    : "";
+}
+
+// The <button title> on the two buttons settled disables. Mentions Apply Answers when the
+// overlay is the only thing left, since that button deliberately stays enabled.
+function clarifySettledTitle(overlay) {
+  const base = "Nothing left to clarify — the latest round found no open findings. " +
+    "Edit the specification to re-open clarification.";
+  return overlay.findings
+    ? `${base} ${overlay.findings} answered finding(s) still need writing into the PRD — ` +
+      "click Apply Answers."
+    : base;
+}
+
+// The persistent explanation under "Finalize readiness", and the basis for Home step 2's
+// status line.
+function clarifySettledHint(overlay) {
+  const base = "Clarification is settled: every finding is answered and the latest round " +
+    "found nothing new. Start Clarification and Finalized Clarification stay disabled until " +
+    "the specification changes.";
+  return overlay.findings
+    ? `${base} Click Apply Answers to write the remaining ${overlay.findings} answered ` +
+      "finding(s) into the PRD before starting implementation."
+    : base;
+}
+
 // Shared copy for state.implementReadiness (see _implement_readiness_status in
 // dashboard_clarify_parse.py), used by the Home page's step 3, the Clarification
 // overview's ready-for-implementation banner, and the toast shown if Start
@@ -159,6 +236,10 @@ function implementBlockedMessage(ir) {
   if (ir.pendingOverlay && ir.critical === 0 && ir.major === 0) {
     return `${ir.pendingOverlay} answered finding(s) still need writing into the PRD — click Apply Answers.`;
   }
+  if (ir.specChanged) {
+    return "The specification changed after the last clarification round, so it hasn't been " +
+      "evaluated in its current form. Run Continue Clarification to re-check it.";
+  }
   if (ir.requirement === "no_critical") {
     return `Still ${ir.critical} critical finding(s) that must be resolved.`;
   }
@@ -174,6 +255,7 @@ function implementBlockedToast(ir) {
   if (ir.pendingOverlay && ir.critical === 0 && ir.major === 0) {
     return "Apply your answers to the PRD first — implementation reads the PRD, not the clarification files.";
   }
+  if (ir.specChanged) return "The specification changed — run Continue Clarification to re-check it.";
   if (ir.requirement === "no_critical") return "There are still critical findings — resolve clarification first.";
   if (ir.severitySweepPending && ir.critical === 0) {
     return "Majors haven't been swept yet — run Continue Clarification once more.";

@@ -44,12 +44,16 @@ function renderHomeWorkflow() {
   // touch the spec/PRD — never let the user start one while the other is in progress
   // (mirrors setClarifyRunButtonsDisabled/renderFinalizeGate on the Clarification page).
   const homeImplementRunning = state.implementRun.running;
+  // Nothing left for another round to find — the same advisory gate the Clarification page
+  // applies (see setClarifyRunButtonsDisabled / _clarification_settled_status).
+  const homeSettled = state.clarifySettled.settled;
   homeStartClarifyBtn.querySelector("span:last-child").textContent =
     homeNeedsContinue ? "Continue Clarification" : "Start Clarification";
   homeStartClarifyBtn.disabled = step2Locked || state.clarifyRun.running || homeBlockedByAnswers ||
-    homeImplementRunning;
+    homeImplementRunning || homeSettled;
   homeStartClarifyBtn.title = homeImplementRunning
     ? "Implementation is running."
+    : homeSettled ? clarifySettledTitle(state.clarifyPendingOverlay)
     : homeBlockedByAnswers ? "Answer the remaining findings first." : "";
   homeApplyAnswersBtn.disabled = step2Locked || state.clarifyRun.running || !homeHasUnapplied ||
     homeImplementRunning;
@@ -59,20 +63,28 @@ function renderHomeWorkflow() {
   // Settings override is on) — state.clarifyFinalize.ready, computed server-side by
   // _clarify_finalize_status in dashboard_clarify_parse.py.
   homeFinalizeClarifyBtn.disabled = step2Locked || state.clarifyRun.running || !state.clarifyFinalize.ready ||
-    homeImplementRunning;
-  homeFinalizeClarifyBtn.title = homeImplementRunning ? "Implementation is running." : "";
+    homeImplementRunning || homeSettled;
+  homeFinalizeClarifyBtn.title = homeImplementRunning
+    ? "Implementation is running."
+    : homeSettled ? clarifySettledTitle(state.clarifyPendingOverlay) : "";
   const allClarifyFiles = state.clarifyUnanswered.concat(state.clarifyAnswered);
   const totalFindings = allClarifyFiles.reduce((sum, f) => sum + f.total, 0);
   const unansweredFindings = allClarifyFiles.reduce((sum, f) => sum + (f.total - f.answered), 0);
   const criticalCount = state.clarifyFindings.critical;
   const criticalOverrideNote = criticalCount > 0 && state.clarifyFinalize.allowFinalizeWithCritical
     ? " Finalizing is allowed anyway via the Settings override." : "";
+  // The settled branch has to come BEFORE the totalFindings check: a workspace whose clean
+  // round wrote no clarification file at all has zero findings, and would otherwise read
+  // "No clarification results yet — click Start Clarification" next to a disabled Start
+  // Clarification button.
   homeStep2Status.textContent = step2Locked
     ? "Upload a specification first (step 1)."
-    : totalFindings === 0
-      ? "No clarification results yet — click Start Clarification to begin."
-      : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).` +
-        criticalOverrideNote;
+    : homeSettled
+      ? clarifySettledHint(state.clarifyPendingOverlay)
+      : totalFindings === 0
+        ? "No clarification results yet — click Start Clarification to begin."
+        : `${unansweredFindings} of ${totalFindings} finding(s) not yet answered (${criticalCount} critical).` +
+          criticalOverrideNote;
 
   const findings = state.clarifyFindings;
   const needsClarification = !step2Locked && (findings.critical > 0 || findings.major > 0);

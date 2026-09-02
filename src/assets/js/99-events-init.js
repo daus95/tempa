@@ -27,32 +27,31 @@ window.addEventListener("beforeunload", (e) => {
   if (state.specDirty || state.clarifyDirty) { e.preventDefault(); e.returnValue = ""; }
 });
 
-$("refreshBtn").addEventListener("click", async () => {
+// Pull /api/tree and repaint whichever pane is on screen. Shared by the Refresh button and
+// by the initial load below; returns whether the sync actually landed so the button can
+// report failure and the silent load-time sync can stay silent.
+async function syncTreeFromServer() {
   try {
     const res = await fetch("/api/tree");
     const data = await res.json();
-    if (data.ok) {
-      state.specTree = data.spec.tree;
-      state.clarifyUnanswered = data.clarify.unanswered || [];
-      state.clarifyAnswered = data.clarify.answered || [];
-      state.workspaceInitialized = !!data.workspace.initialized;
-      state.workspaceRoot = data.workspace.root || "";
-      state.workspaceCanClose = !!data.workspace.canClose;
-      state.recentWorkspaces = data.workspace.recent || [];
-      state.clarifyFindings = data.clarify.findings;
-      state.clarifyFinalize = data.clarify.finalize;
-      state.implementReadiness = data.clarify.implementReadiness;
-      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
-      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
-      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
-      state.principlesSet = !!(data.principles && data.principles.set);
-      renderSidebar();
-      if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
-      if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
-      if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
-      toast("Rescanned.");
-    }
-  } catch (e) { toast("Could not refresh.", true); }
+    if (!data.ok) return false;
+    applyTreePayload(data);
+    // The three Start Implementation buttons are driven by updateImplementControls,
+    // whose own poll only ticks while a run is active — without this, a payload that
+    // just changed implementReadiness would repaint the ready banner while leaving the
+    // button inside it disabled (or vice versa).
+    updateImplementControls();
+    renderSidebar();
+    if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
+    if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
+    if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
+    return true;
+  } catch (e) { return false; }
+}
+
+$("refreshBtn").addEventListener("click", async () => {
+  const ok = await syncTreeFromServer();
+  toast(ok ? "Rescanned." : "Could not refresh.", !ok);
 });
 
 // splitter drag-to-resize
@@ -143,3 +142,10 @@ if (INITIAL_VIEW === "specification") {
 checkClarifyRunOnLoad();
 refreshImplementRun();
 checkForSidebarUpdate();
+// The served HTML is rendered ONCE at server start (dashboard_ui.run_dashboard) and handed
+// out unchanged for the life of the process, so every INITIAL_* constant above is a snapshot
+// from whenever the dashboard was launched. That was already wrong for the finding counts;
+// now that a settled workspace DISABLES Start Clarification and Finalized Clarification, a
+// stale snapshot would disable live buttons (or leave dead ones clickable) until the user
+// happened to press Refresh. One request on load, and the first paint is real.
+syncTreeFromServer();

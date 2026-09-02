@@ -168,7 +168,17 @@ const state = {
       finalizeRound: 0, allowFinalizeWithCritical: false },
   implementReadiness: INITIAL_IMPLEMENT_READINESS ||
     { hasRun: false, critical: 0, major: 0, requirement: "no_critical_or_major", ready: false,
-      pendingOverlay: 0 },
+      severitySweepPending: false, specChanged: false, pendingOverlay: 0 },
+  // Is there anything left to clarify? (see _clarification_settled_status in
+  // dashboard_clarify_parse.py). Advisory: when `settled`, Start/Continue Clarification and
+  // Finalized Clarification are disabled because another round could only confirm what the
+  // last one found — the server deliberately does NOT reject such a run. `reason` is a total
+  // enum and is what the Unanswered table's empty state renders from. The fallback below
+  // must stay in the server's shape; it is only ever seen if a payload arrives without it.
+  clarifySettled: INITIAL_CLARIFY_SETTLED ||
+    { settled: false, reason: "never_run", hasRun: false, lastAction: null, critical: 0,
+      major: 0, minor: 0, unansweredFiles: 0, majorSweepPending: false,
+      skipMinorFindings: true, specChanged: false },
   // Answered clarification findings not yet written into the PRD ({files, findings, chars}).
   // They're carried into every clarification round as already-decided resolutions, so they
   // don't block clarifying — but they DO block Start Implementation, which reads the PRD.
@@ -215,3 +225,26 @@ const state = {
   verifyDetailPollTimer: null,
 };
 
+// Every /api/tree consumer funnels through here: the Refresh button (99-events-init.js),
+// refreshClarifyList (94-clarify-answers.js), refreshSpecTree (90-spec.js) and the initial
+// load sync. They used to each unpack the payload themselves, which is how a field could be
+// added in one place and go stale in the other two. Callers keep their own side effects
+// (SPEC_PEEK_CACHE, toasts) and decide which panes to re-render; this only assigns state.
+function applyTreePayload(data) {
+  state.specTree = data.spec.tree;
+  state.clarifyUnanswered = data.clarify.unanswered || [];
+  state.clarifyAnswered = data.clarify.answered || [];
+  state.workspaceInitialized = !!data.workspace.initialized;
+  state.workspaceRoot = data.workspace.root || "";
+  state.workspaceCanClose = !!data.workspace.canClose;
+  state.recentWorkspaces = data.workspace.recent || [];
+  state.clarifyFindings = data.clarify.findings;
+  state.clarifyFinalize = data.clarify.finalize;
+  state.implementReadiness = data.clarify.implementReadiness;
+  if (data.clarify.settled) state.clarifySettled = data.clarify.settled;
+  state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
+  state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
+  state.skipMinorFindings = !!data.clarify.skipMinorFindings;
+  state.principlesSet = !!(data.principles && data.principles.set);
+  state.backendsStatus = data.backends || state.backendsStatus;
+}

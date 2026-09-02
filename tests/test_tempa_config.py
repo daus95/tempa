@@ -994,3 +994,16 @@ def test_a_config_predating_severity_phases_is_not_pending():
     """Its last round was the old critical+major one, so an already-open Start Implementation
     gate must not close just because this key does not exist yet."""
     assert tempa_config.severity_sweep_pending({}) is False
+
+
+def test_stamp_spec_changed_records_a_timestamp_and_always_saves():
+    config = {}
+    assert tempa_config.stamp_spec_changed(config) is True
+    assert isinstance(config["spec_changed_at"], float)
+    assert config["spec_changed_at"] > 0
+
+
+def test_a_fresh_workspace_records_no_spec_change():
+    """0 has to mean "nothing has changed the spec yet", not "changed at the epoch" — every
+    reader treats a truthy value as a real edit."""
+    assert tempa_config.DEFAULT_CONFIG["spec_changed_at"] == 0

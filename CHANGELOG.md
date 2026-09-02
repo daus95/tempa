@@ -8,7 +8,40 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- The dashboard now recognizes when there is nothing left to clarify. Once every finding is
+  answered and the latest round reports no critical or major findings (with majors actually
+  swept, and minors either resolved or out of scope via "Only evaluate critical & major
+  findings"), **Start Clarification** and **Finalized Clarification** go disabled on both the
+  Clarification page and Home step 2, with a tooltip and a hint explaining why, instead of
+  inviting a paid round that could only confirm what the last one already found. Computed
+  from the real finding counts, never from the Start Implementation guardrail — relax that to
+  "No critical findings" or "No condition" and the clarification buttons stay live while
+  findings remain open. Advisory only: the server still accepts either run, so re-verifying
+  after an out-of-band edit is always possible.
+
+### Changed
+
+- The Clarification page's **Unanswered** table now explains why it is empty instead of
+  always saying "No unanswered files." — it distinguishes never run, nothing left to
+  clarify, the specification having changed since the last round, everything answered but
+  the latest evaluation still listing N critical / M major, answers applied without a
+  re-evaluation, majors not swept yet, and minors still open.
+- The dashboard now re-syncs from the server on page load. The served HTML is rendered once
+  at startup, so after a browser reload every gate, count and button used to reflect
+  whatever was true when the dashboard was launched until you pressed Refresh.
+
 ### Fixed
+
+- Adding, editing, renaming or deleting a specification file through the dashboard now
+  re-opens clarification and re-closes the Start Implementation gate, instead of leaving the
+  workspace pinned to a clean result measured against a document that has since changed. The
+  new `spec_changed_at` timestamp in `config.json` records it; `"No condition"` under
+  Settings → Guardrails bypasses the implementation half. Epic specs and clarification's own
+  PRD writes deliberately don't trigger it.
+- Saving a PRD file from the dashboard editor left every clarification-derived gate on
+  screen stale — it never refreshed the tree afterwards.
 
 - Start Implementation could never unblock in a workspace with "Only evaluate critical &
   major findings" on (the default): a clean round writes no findings file, and the

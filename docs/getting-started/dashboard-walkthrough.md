@@ -357,6 +357,31 @@ pauses to **apply** (write what's been answered so far into the PRD) and, if ena
 
 ![Settings Runs, the Finalize Checkpoints card with the Checkpoint Every N Rounds field](assets/24-settings-finalize-checkpoint.png)
 
+#### When there's nothing left to clarify
+
+The opposite outcome is the happy one. Once every finding is answered and a round comes
+back with **no critical or major findings** (with majors actually swept, and minors either
+resolved or turned off via *Only evaluate critical & major findings*), Tempa treats
+clarification as **settled**: **Start Clarification** and **Finalized Clarification** both
+go grey, on the Clarification page and on Home step 2 alike, and the **Unanswered** table
+says so instead of the usual "No unanswered files.":
+
+> Nothing left to clarify — the latest clarification round found no open findings in your
+> specification.
+
+Nothing is broken — another round could only confirm what the last one already found, and
+it would cost a full agent session to do it. **Start Implementation** is the next step.
+
+Note this is decided from the *actual* finding counts, not from the Start Implementation
+guardrail below: relax that to "No critical findings" or "No condition" and the two
+clarification buttons stay live while findings are still open, because the questions
+haven't been answered — you've only chosen to carry them into implementation.
+
+To re-open clarification, change the specification. Adding, editing, renaming or deleting
+a PRD file from the dashboard re-enables both buttons and re-closes the Start
+Implementation gate, because the round that came back clean was looking at the older text.
+The toast after the save says so.
+
 ### 5.7 When clarification never quite settles
 
 A true story from the session used to build this guide: after switching to **Finalized
@@ -388,6 +413,11 @@ finding, we changed it to **"No condition"**:
 > critical to the features you're about to build. For a real project, the safest option is
 > still to keep answering manually until it's genuinely 0/0/0 before moving on to
 > implementation.
+
+Worth knowing: "No condition" is also the way past the *specification changed* block. If
+you edit a PRD file after clarification came back clean, Start Implementation locks again
+until you run another round — "No critical findings" does **not** waive that (a changed
+spec means the criticals are unmeasured, not zero), but "No condition" does.
 
 Worth knowing: **relaxing this requirement does NOT remove the obligation to Apply
 Answers.** Even at "No condition", Tempa still requires every saved answer to be written

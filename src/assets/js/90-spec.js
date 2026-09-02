@@ -104,7 +104,11 @@ async function saveSpecFile() {
     SPEC_PEEK_CACHE.delete(state.selectedSpecPath);
     updateToolbar();
     if (state.specMode === "view") renderSpecViewer();
-    toast("Saved " + state.selectedSpecPath);
+    toast("Saved " + state.selectedSpecPath + clarifyStaleToastSuffix(data));
+    // Editing a PRD file re-opens clarification and re-closes the Start Implementation gate
+    // (see _spec_changed_since_evaluation), so every clarify-derived gate on screen is now
+    // stale. Epic specs don't invalidate anything, but they go through the same refresh.
+    await refreshSpecTree();
   } catch (e) {
     toast("Network error while saving.", true);
     updateToolbar();
@@ -139,22 +143,18 @@ async function refreshSpecTree() {
     const res = await fetch("/api/tree");
     const data = await res.json();
     if (data.ok) {
-      state.specTree = data.spec.tree;
-      state.workspaceInitialized = !!data.workspace.initialized;
-      state.workspaceRoot = data.workspace.root || "";
-      state.workspaceCanClose = !!data.workspace.canClose;
-      state.recentWorkspaces = data.workspace.recent || [];
-      state.clarifyFindings = data.clarify.findings;
-      state.clarifyFinalize = data.clarify.finalize;
-      state.implementReadiness = data.clarify.implementReadiness;
-      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
-      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
-      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
-      state.principlesSet = !!(data.principles && data.principles.set);
-      state.backendsStatus = data.backends || {};
+      applyTreePayload(data);
+      // The three Start Implementation buttons are driven by updateImplementControls,
+      // whose own poll only ticks while a run is active — without this, a payload that
+      // just changed implementReadiness would repaint the ready banner while leaving the
+      // button inside it disabled (or vice versa).
+      updateImplementControls();
       renderSidebar();
       renderBackendStatus();
       if (!$("specOverviewPane").classList.contains("hidden")) renderSpecOverview();
+      // A spec change re-opens clarification (see _spec_changed_since_evaluation), so the
+      // Clarification overview's buttons and Unanswered note have to repaint from here too.
+      if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();
     }
   } catch (e) { /* keep stale tree on network error */ }
@@ -167,7 +167,7 @@ async function uploadToSpec(entries) {
     `Add ${label} to Specification (${PRD_NAME})? Existing files with the same name will be overwritten.`,
     { title: "Add to Specification", okLabel: "Add" });
   if (!ok) return;
-  let okCount = 0, failCount = 0;
+  let okCount = 0, failCount = 0, stale = false;
   for (const { file, relPath } of entries) {
     try {
       const buf = await file.arrayBuffer();
@@ -178,9 +178,13 @@ async function uploadToSpec(entries) {
       });
       const data = await res.json();
       if (data.ok) okCount++; else failCount++;
+      if (clarifyStaleToastSuffix(data)) stale = true;
     } catch (e) { failCount++; }
   }
-  toast(failCount ? `Added ${okCount} file(s), ${failCount} failed.` : `Added ${okCount} file(s).`, failCount > 0);
+  toast(failCount
+    ? `Added ${okCount} file(s), ${failCount} failed.`
+    : `Added ${okCount} file(s)` + (stale ? clarifyStaleToastSuffix({ clarificationStale: true }) : "."),
+    failCount > 0);
   await refreshSpecTree();
 }
 

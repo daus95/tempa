@@ -355,7 +355,7 @@ def _clarify_finalize_status(
 
 def _implement_readiness_status(
     findings: dict, has_run: bool, requirement: str, pending_overlay_findings: int = 0,
-    severity_sweep_pending: bool = False,
+    severity_sweep_pending: bool = False, spec_changed: bool = False,
 ) -> dict:
     """Whether "Start Implementation" is currently allowed to run, per config.json's
     "implementation_start_requirement" (the dashboard Settings "Start Implementation
@@ -388,6 +388,14 @@ def _implement_readiness_status(
     opening implementation on a spec whose majors have never been evaluated. One more round
     (the major phase's first) is what clears it.
 
+    `spec_changed` (_spec_changed_since_evaluation below) gates every requirement EXCEPT
+    "none". A specification edited since the last evaluation has never been checked in its
+    current form, so its critical/major counts are unmeasured rather than zero — the same
+    reasoning as `severity_sweep_pending`, one level up. "no_critical" does not bypass it:
+    that setting says majors may stay open, not that unmeasured criticals may. "none" does,
+    which makes it the documented escape hatch for anyone who tweaks the PRD mid-run and
+    does not want to re-clarify first.
+
     This is the single source of truth shared by the server-side gate
     (_handle_implement_run_start in dashboard_server.py) and every dashboard surface
     that shows Start Implementation readiness (Home step 3, the Clarification
@@ -396,14 +404,126 @@ def _implement_readiness_status(
     critical_ok = requirement == "none" or findings["critical"] == 0
     major_ok = requirement in ("none", "no_critical") or (
         findings["major"] == 0 and not severity_sweep_pending)
+    spec_ok = requirement == "none" or not spec_changed
     return {
         "hasRun": has_run,
         "critical": findings["critical"],
         "major": findings["major"],
         "requirement": requirement,
         "severitySweepPending": severity_sweep_pending and requirement == "no_critical_or_major",
+        "specChanged": spec_changed and requirement != "none",
         "pendingOverlay": pending_overlay_findings,
-        "ready": has_run and critical_ok and major_ok and pending_overlay_findings == 0,
+        "ready": has_run and critical_ok and major_ok and spec_ok
+                 and pending_overlay_findings == 0,
+    }
+
+
+def _spec_changed_since_evaluation(
+    files: list[dict], clean_since: float = 0, spec_changed_at: float = 0,
+) -> bool:
+    """Has the PRD/specification folder been edited since the most recent clarification
+    round looked at it? `spec_changed_at` is config.json's "spec_changed_at", stamped by
+    tempa_config.stamp_spec_changed from the dashboard's /api/spec/* mutation routes.
+
+    "The most recent round" is the same pair of values _latest_evaluation_findings already
+    compares — the newest file's "started_at" and `clean_since` (a clean round writes no
+    file) — so the two functions can never disagree about when the last evaluation was.
+
+    "started_at" is when the round STARTED (_file_started_at parses it out of the filename,
+    never the mtime), so a spec edit made while a round was running counts as newer than
+    that round. That is the safe direction: the round did not see the edit.
+
+    A workspace that has never had a spec change through the dashboard has
+    "spec_changed_at" == 0 and is never stale, so this can only ever close a gate that a
+    real edit opened — it cannot close one on a config predating the key."""
+    if not spec_changed_at:
+        return False
+    latest_started_at = max((f.get("started_at", 0) for f in files), default=0)
+    return spec_changed_at > max(latest_started_at, clean_since or 0)
+
+
+def _clarification_settled_status(
+    findings: dict, last_action: str | None, unanswered_files: int,
+    major_sweep_pending: bool = False, skip_minor_findings: bool = True,
+    spec_changed: bool = False,
+) -> dict:
+    """Is there anything left to clarify? "settled" is what disables Start/Continue
+    Clarification and Finalized Clarification on both the Clarification overview
+    (setClarifyRunButtonsDisabled / renderFinalizeGate) and Home step 2
+    (renderHomeWorkflow), and what the Unanswered table's empty state explains itself with
+    (clarifyUnansweredEmptyMessage) — see assets/js/.
+
+    Advisory, not a gate. Unlike _clarify_finalize_status and _implement_readiness_status
+    there is deliberately no matching 409 in dashboard_server.py: a clarification round run
+    on a settled specification is harmless (it finds nothing), and there are legitimate
+    reasons to want one — re-verifying after an edit made outside the dashboard, or after
+    turning skip_minor_findings off. This says "that run would be wasted", not "that run is
+    not allowed".
+
+    Deliberately takes NO `requirement` argument. "implementation_start_requirement" says
+    how much risk the user will carry into implementation, not that the open questions got
+    answered: with two criticals still open and the requirement relaxed to "none",
+    _implement_readiness_status reports ready (Start Implementation appears) while this
+    reports NOT settled (both clarification buttons stay live). Driving this off
+    implementReadiness instead would silently disable clarification the moment someone
+    relaxed the guardrail — the exact opposite of what they asked for.
+
+    `major_sweep_pending` must be the RAW tempa_config.severity_sweep_pending(config), NOT
+    _implement_readiness_status's "severitySweepPending", which is masked with
+    `requirement == "no_critical_or_major"` and reads False under a relaxed guardrail. The
+    two keys are named differently on purpose so one payload can carry both without them
+    being mistaken for each other.
+
+    `reason` is total — every state maps to exactly one slug, so the client renders copy
+    with a lookup rather than by re-deriving the logic. The precedence of "unanswered"
+    before the finding counts, and those before "apply_only", mirrors renderFinalizeGate's
+    existing finalizeGateHint branch order so the two never contradict each other on screen:
+
+      never_run     nothing has ever run
+      unanswered    a clarification file still has findings without an answer
+      spec_changed  the specification was edited after the last round looked at it
+      needs_recheck every finding is answered, but the latest round's file still lists
+                    criticals/majors — answering does not remove a severity tag, only a
+                    fresh evaluate pass can retire it
+      apply_only    the last thing that ran was `clarify --apply`, which does not re-evaluate
+      sweep_pending the last round was critical-only, so major == 0 is unmeasured
+      minors_open   minors are in scope (skip_minor_findings off) and some are still listed
+      settled       nothing left to clarify
+
+    Note "settled" strictly implies _clarify_finalize_status's non-override "ready" (both
+    require last_action == "evaluate" and critical == 0), so disabling on it can never
+    fight the enable logic underneath it."""
+    critical = findings["critical"]
+    major = findings["major"]
+    minor = findings["minor"]
+    if last_action is None:
+        reason = "never_run"
+    elif unanswered_files > 0:
+        reason = "unanswered"
+    elif spec_changed:
+        reason = "spec_changed"
+    elif critical > 0 or major > 0:
+        reason = "needs_recheck"
+    elif last_action != "evaluate":
+        reason = "apply_only"
+    elif major_sweep_pending:
+        reason = "sweep_pending"
+    elif minor > 0 and not skip_minor_findings:
+        reason = "minors_open"
+    else:
+        reason = "settled"
+    return {
+        "settled": reason == "settled",
+        "reason": reason,
+        "hasRun": last_action is not None,
+        "lastAction": last_action,
+        "critical": critical,
+        "major": major,
+        "minor": minor,
+        "unansweredFiles": unanswered_files,
+        "majorSweepPending": major_sweep_pending,
+        "skipMinorFindings": skip_minor_findings,
+        "specChanged": spec_changed,
     }
 
 

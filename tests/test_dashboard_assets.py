@@ -38,6 +38,7 @@ DATA_PLACEHOLDERS = [
     "/*__CLARIFY_FINDINGS__*/null",
     "/*__CLARIFY_FINALIZE__*/null",
     "/*__IMPLEMENT_READINESS__*/null",
+    "/*__CLARIFY_SETTLED__*/null",
     "/*__CLARIFY_PENDING_OVERLAY__*/null",
     "/*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null",
     "/*__BACKENDS_STATUS__*/null",
