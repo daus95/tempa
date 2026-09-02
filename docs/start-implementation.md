@@ -35,6 +35,26 @@ re-stamps `clarify_applied_hashes`. There is deliberately no override.
 Running `tempa implement` from the CLI bypasses this (the command itself has no awareness of
 clarification state), so apply first when driving it by hand.
 
+### Editing the specification re-closes the gate
+
+Adding, editing, renaming or deleting a file in the PRD/specification folder **through the
+dashboard** stamps `spec_changed_at` in `config.json`. Once that timestamp is newer than the
+most recent clarification round, the current specification has never actually been evaluated
+— its critical/major counts are unmeasured rather than zero, the same way a critical-only
+sweep leaves majors unmeasured. Start Implementation blocks with a message saying so, and
+the two clarification buttons (which a settled round had disabled) come back so you can
+re-check.
+
+Unlike the pending-overlay condition above, this one **does** follow
+`implementation_start_requirement`: `"none"` bypasses it, which is the intended escape hatch
+if you tweak the PRD mid-run and don't want another clarification round first. `"no_critical"`
+does not bypass it — that setting says majors may stay open, not that unmeasured criticals may.
+
+Epic specs are exempt: they're `plan-epics` output rather than clarification input, so
+editing one never re-closes the gate. So are the PRD writes `clarify --apply` and
+`clarify --finalize` make themselves, which would otherwise invalidate the round that just
+produced them.
+
 ## Flow
 
 When run, the harness first checks `config.json`: if there's no task yet (epic/feature) —

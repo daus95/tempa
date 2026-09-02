@@ -149,6 +149,8 @@ def test_reset_clarify_config_state_clears_tracked_keys():
         "last_clarification_action": "evaluate",
         "last_clarification_findings": {"critical": 1},
         "clarify_applied_hashes": {"f.md": "hash"},
+        "last_clean_evaluation_at": 1234.5,
+        "spec_changed_at": 2345.6,
         "last_auto_answer": 5,
         "last_clarification_round": 7,
         "last_finalize_round": 3,
@@ -161,6 +163,8 @@ def test_reset_clarify_config_state_clears_tracked_keys():
     assert "last_clarification_action" not in config
     assert "last_clarification_findings" not in config
     assert "clarify_applied_hashes" not in config
+    assert "last_clean_evaluation_at" not in config
+    assert "spec_changed_at" not in config
     assert "clarify_session_id" not in config
     assert "clarify_session_backend" not in config
     assert "clarify_apply_session_id" not in config

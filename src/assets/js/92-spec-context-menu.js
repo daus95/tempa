@@ -64,7 +64,7 @@ rowMenuRename.addEventListener("click", async () => {
     // a folder that merely contains the open file is not tracked (rare edge case) — a
     // later Save would just fail gracefully with "File no longer exists".
     if (state.selectedSpecPath === node.path) state.selectedSpecPath = data.path;
-    toast(`Renamed to "${newName}".`);
+    toast(`Renamed to "${newName}"` + (clarifyStaleToastSuffix(data) || "."));
     await refreshSpecTree();
   } catch (e) {
     toast("Network error while renaming.", true);
@@ -96,7 +96,7 @@ rowMenuDelete.addEventListener("click", async () => {
       state.specShowingOverview = true;
       showPane("specOverview");
     }
-    toast(`Deleted "${node.name}".`);
+    toast(`Deleted "${node.name}"` + (clarifyStaleToastSuffix(data) || "."));
     await refreshSpecTree();
   } catch (e) {
     toast("Network error while deleting.", true);

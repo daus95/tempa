@@ -15,10 +15,12 @@ import tempa_backend
 import tempa_config
 import tempa_update
 from dashboard_clarify_parse import (
+    _clarification_settled_status,
     _clarify_files_overview,
     _clarify_finalize_status,
     _implement_readiness_status,
     _latest_evaluation_findings,
+    _spec_changed_since_evaluation,
     pending_overlay_stats,
 )
 from dashboard_config import (
@@ -73,6 +75,14 @@ def tree_payload(prd_dir: Path, clar_dir: Path, backends: dict) -> Response:
     allow_finalize_with_critical = bool(dashboard_config.get("allow_finalize_with_critical"))
     implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
     overlay = pending_overlay_stats(clar_dir, _load_clarify_applied_hashes())
+    # Raw, unmasked (see _clarification_settled_status) — _implement_readiness_status is
+    # what applies the requirement mask to its own copy of these two.
+    major_sweep_pending = tempa_config.severity_sweep_pending(dashboard_config)
+    skip_minor_findings = tempa_config.get_skip_minor_findings(dashboard_config)
+    spec_changed = _spec_changed_since_evaluation(
+        unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0),
+        dashboard_config.get("spec_changed_at", 0),
+    )
     return 200, {
         "ok": True,
         "workspace": {"initialized": _workspace_initialized(), "root": _workspace_root(),
@@ -85,12 +95,14 @@ def tree_payload(prd_dir: Path, clar_dir: Path, backends: dict) -> Response:
                         finalize_round, overlay["findings"]),
                     "implementReadiness": _implement_readiness_status(
                         findings, last_action is not None, implementation_requirement,
-                        overlay["findings"],
-                        tempa_config.severity_sweep_pending(dashboard_config)),
+                        overlay["findings"], major_sweep_pending, spec_changed),
+                    "settled": _clarification_settled_status(
+                        findings, last_action, len(unanswered), major_sweep_pending,
+                        skip_minor_findings, spec_changed),
                     "pendingOverlay": overlay,
                     "overlayWarnThreshold": tempa_config.get_clarify_overlay_warn_findings(
                         dashboard_config),
-                    "skipMinorFindings": tempa_config.get_skip_minor_findings(dashboard_config),
+                    "skipMinorFindings": skip_minor_findings,
                     "severityPhase": (dashboard_config.get("last_severity_phase") or ""
                                       if tempa_config.get_clarify_severity_phases(dashboard_config)
                                       else "")},

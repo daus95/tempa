@@ -14,9 +14,11 @@ validation logic.
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import threading
+import time
 from http.server import ThreadingHTTPServer
 
 import pytest
@@ -215,7 +217,7 @@ def test_tree_returns_the_full_first_paint_payload(dash):
     assert set(body["workspace"]) == {"initialized", "root", "canClose", "recent"}
     assert body["spec"]["tree"]["name"] == dash.prd_dir.name
     assert set(body["clarify"]) == {
-        "unanswered", "answered", "findings", "finalize", "implementReadiness",
+        "unanswered", "answered", "findings", "finalize", "implementReadiness", "settled",
         "pendingOverlay", "overlayWarnThreshold", "skipMinorFindings", "severityPhase",
     }
     assert body["backends"] == FAKE_BACKEND_STATUS
@@ -1289,3 +1291,159 @@ def test_config_save_leaves_the_checkpoint_settings_alone_when_the_fields_are_ab
     saved = tempa_config.load_config()
     assert saved["finalize_checkpoint_rounds"] == 4
     assert saved["finalize_checkpoint_commit"] is True
+
+
+# ---------------------------------------------------------------------------
+# clarify.settled — "is there anything left to clarify?"
+# ---------------------------------------------------------------------------
+def _make_settled(dash) -> None:
+    """The state the dashboard reads as a finished clarification: a fresh evaluate pass,
+    scoped wide enough to have measured majors, that found nothing (and so wrote no file)."""
+    config = tempa_config.load_config()
+    config["last_clarification_action"] = "evaluate"
+    config["last_evaluation_scope"] = "critical_major"
+    config["skip_minor_findings"] = True
+    config["last_clean_evaluation_at"] = time.time()
+    tempa_config.save_config(config)
+
+
+def test_tree_reports_a_clean_workspace_as_settled(dash):
+    _make_settled(dash)
+    _, body = dash.get("/api/tree")
+    assert body["clarify"]["settled"]["settled"] is True
+    assert body["clarify"]["settled"]["reason"] == "settled"
+
+
+def test_tree_reports_an_unclarified_workspace_as_never_run(dash):
+    _, body = dash.get("/api/tree")
+    assert body["clarify"]["settled"] == {
+        "settled": False, "reason": "never_run", "hasRun": False, "lastAction": None,
+        "critical": 0, "major": 0, "minor": 0, "unansweredFiles": 0,
+        "majorSweepPending": False, "skipMinorFindings": True, "specChanged": False,
+    }
+
+
+def test_tree_reports_the_unmasked_sweep_flag_in_settled(dash):
+    """implementReadiness masks its copy with the requirement; settled must not, or relaxing
+    the guardrail would silently declare an unswept workspace finished."""
+    config = tempa_config.load_config()
+    config["last_clarification_action"] = "evaluate"
+    config["last_evaluation_scope"] = "critical"
+    config["implementation_start_requirement"] = "none"
+    tempa_config.save_config(config)
+    _, body = dash.get("/api/tree")
+    assert body["clarify"]["implementReadiness"]["severitySweepPending"] is False
+    assert body["clarify"]["settled"]["majorSweepPending"] is True
+    assert body["clarify"]["settled"]["reason"] == "sweep_pending"
+
+
+def test_relaxing_the_guardrail_does_not_settle_an_open_workspace(dash):
+    """Start Implementation opens up while the clarification buttons stay live — the
+    guardrail is about risk carried into implementation, not about questions being answered."""
+    path = dash.clar_dir / "clarification-20250101-101010.md"
+    path.write_text(_item("c1", "critical", "answered"), encoding="utf-8")
+    config = tempa_config.load_config()
+    config["last_clarification_action"] = "evaluate"
+    config["last_evaluation_scope"] = "critical_major"
+    config["implementation_start_requirement"] = "none"
+    config["clarify_applied_hashes"] = {
+        path.name: hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()}
+    tempa_config.save_config(config)
+    _, body = dash.get("/api/tree")
+    assert body["clarify"]["implementReadiness"]["ready"] is True
+    assert body["clarify"]["settled"]["settled"] is False
+    assert body["clarify"]["settled"]["reason"] == "needs_recheck"
+
+
+@pytest.mark.parametrize("mode", ["run", "finalize"])
+def test_a_settled_workspace_can_still_start_a_clarification_run(dash, monkeypatch, mode):
+    """settled is advisory — it disables buttons, it is deliberately NOT a server-side gate.
+    Re-verifying after an out-of-band edit has to stay possible."""
+    _make_settled(dash)
+    monkeypatch.setattr(dashboard_server, "_start_clarify_run", lambda server, mode: True)
+    assert dash.post("/api/clarify/run", {"mode": mode}) == (200, {"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/spec/* — a spec change re-opens clarification
+# ---------------------------------------------------------------------------
+def _spec_mutations(dash):
+    (dash.prd_dir / "PRD.md").write_text("# PRD\n", encoding="utf-8")
+    return {
+        "save": lambda: dash.post("/api/spec/save", {"path": "PRD.md", "content": "# PRD v2\n"}),
+        "upload": lambda: dash.post("/api/spec/upload?path=new.md", raw=b"# New\n"),
+        "delete": lambda: dash.post("/api/spec/delete", {"path": "PRD.md"}),
+        "rename": lambda: dash.post("/api/spec/rename", {"path": "PRD.md", "new_name": "PRD2.md"}),
+    }
+
+
+@pytest.mark.parametrize("route", ["save", "upload", "delete", "rename"])
+def test_a_spec_change_reopens_clarification(dash, route):
+    mutate = _spec_mutations(dash)[route]
+    _make_settled(dash)
+    status, body = mutate()
+    assert status == 200
+    assert body["clarificationStale"] is True
+    assert tempa_config.load_config()["spec_changed_at"] > 0
+    _, tree = dash.get("/api/tree")
+    assert tree["clarify"]["settled"]["reason"] == "spec_changed"
+    assert tree["clarify"]["implementReadiness"]["ready"] is False
+
+
+def test_saving_an_epic_spec_does_not_reopen_clarification(dash):
+    """Epic specs are plan-epics OUTPUT, downstream of clarification — and they go through
+    the very same dashboard_api_spec.save_file, so this is the case that has to stay quiet."""
+    (dash.epics_dir / "epic-1.md").write_text("# Epic\n", encoding="utf-8")
+    _make_settled(dash)
+    status, body = dash.post("/api/epic/spec/save", {"epic": "epic-1", "content": "# Edited\n"})
+    assert status == 200
+    assert "clarificationStale" not in body
+    assert tempa_config.load_config().get("spec_changed_at", 0) == 0
+    _, tree = dash.get("/api/tree")
+    assert tree["clarify"]["settled"]["settled"] is True
+
+
+def test_answering_a_clarification_file_does_not_reopen_clarification(dash):
+    name = "clarification-20250101-101010.md"
+    (dash.clar_dir / name).write_text(_item("c1", "critical", ""), encoding="utf-8")
+    _make_settled(dash)
+    status, _ = dash.post("/api/clarify/save", {"path": name, "answers": {"c1": "do it"}})
+    assert status == 200
+    assert tempa_config.load_config().get("spec_changed_at", 0) == 0
+
+
+def test_a_rejected_spec_mutation_leaves_clarification_alone(dash):
+    """Only a 200 changed anything on disk, so only a 200 may invalidate."""
+    _make_settled(dash)
+    status, _ = dash.post("/api/spec/delete", {"path": "gone.md"})
+    assert status == 404
+    assert tempa_config.load_config().get("spec_changed_at", 0) == 0
+
+
+def test_a_fresh_workspace_is_not_told_clarification_went_stale(dash):
+    """Nothing has been clarified yet, so the first upload has nothing to invalidate — the
+    response body stays exactly what it was before this feature existed."""
+    assert dash.post("/api/spec/upload?path=first.md", raw=b"# First\n") == (
+        200, {"ok": True, "path": "first.md"})
+
+
+def test_a_spec_change_closes_the_start_implementation_gate_again(dash, monkeypatch):
+    monkeypatch.setattr(dashboard_server, "_start_implement_run", lambda server: True)
+    (dash.prd_dir / "PRD.md").write_text("# PRD\n", encoding="utf-8")
+    _make_settled(dash)
+    assert dash.post("/api/implement/run", {}) == (200, {"ok": True})
+
+    dash.post("/api/spec/save", {"path": "PRD.md", "content": "# PRD v2\n"})
+    status, body = dash.post("/api/implement/run", {})
+    assert status == 409
+    assert body["error"] == (
+        "Cannot start implementation: the specification changed after the last clarification "
+        "round, so it hasn't been evaluated in its current form. Run Continue Clarification "
+        'to re-check it, or set Settings > Guardrails > "Start Implementation requires" to '
+        '"No condition".')
+
+    # ...and "No condition" is the documented way out.
+    config = tempa_config.load_config()
+    config["implementation_start_requirement"] = "none"
+    tempa_config.save_config(config)
+    assert dash.post("/api/implement/run", {}) == (200, {"ok": True})

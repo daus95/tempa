@@ -396,6 +396,7 @@ DEFAULT_CONFIG = {
     "last_clarification_findings": {"critical": 0, "major": 0, "minor": 0},
     "last_clarification_round": 0,
     "last_clean_evaluation_at": 0,
+    "spec_changed_at": 0,
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
@@ -803,6 +804,28 @@ def severity_sweep_pending(config: dict) -> bool:
     "last_evaluation_scope" at all predates severity phases: its last round was the old
     critical+major one, so it is NOT pending and an already-open gate stays open."""
     return config.get("last_evaluation_scope", "all") not in ("critical_major", "all")
+
+
+def stamp_spec_changed(config: dict) -> bool:
+    """Record that the PRD/specification folder just changed, as config.json's
+    "spec_changed_at". Written for update_config (always returns True, so the write always
+    happens) rather than load_config()/save_config(): a spec edit can arrive from the
+    dashboard while a clarification run is writing config.json, and a plain
+    load-modify-save would drop the runner's write.
+
+    Every clarification result is a claim about the specification as it was when the round
+    started. Once this timestamp is newer than the most recent evaluation, that claim no
+    longer describes the documents on disk — see
+    dashboard_clarify_parse._spec_changed_since_evaluation, which is what re-opens the
+    clarification buttons and re-closes the Start Implementation gate. Only mutations made
+    THROUGH the dashboard's /api/spec/* routes stamp this; `clarify --apply` and
+    `clarify --finalize` rewrite the PRD too, and stamping those would make the
+    clarification loop invalidate itself every round.
+
+    Deliberately not stamped for epic specs (sources.epics): those are plan-epics output,
+    downstream of clarification, and clarification never reads them."""
+    config["spec_changed_at"] = time.time()
+    return True
 
 
 def get_critical_phase_max_rounds(config: dict) -> int | float:

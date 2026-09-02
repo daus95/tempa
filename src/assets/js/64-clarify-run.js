@@ -34,6 +34,9 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   } else {
     finalizeRoundProgress.classList.add("hidden");
   }
+  // Nothing left for another round to find (see _clarification_settled_status in
+  // dashboard_clarify_parse.py). Advisory only — the server still accepts the run.
+  const settled = state.clarifySettled.settled;
   const criticalOk = st.critical === 0 || st.allowFinalizeWithCritical;
   // The Settings override waives every requirement below, not just the critical-findings
   // one — see _clarify_finalize_status in dashboard_clarify_parse.py, where `ready` is
@@ -62,14 +65,21 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
           : `${st.critical} critical finding(s) from your last evaluation haven't been re-checked ` +
             "yet — answering them doesn't update this count" },
     { ok: true, label: finalizeBacklogLabel(hasUnanswered) },
+    // Only when settled: four green ticks above a disabled button would read as a bug, so
+    // the checklist has to name the thing that is actually holding it shut.
+    ...(settled
+      ? [{ ok: false, label: "There are open findings for Finalized Clarification to resolve" }]
+      : []),
   ]);
   // Disabled while a run is in progress OR the checklist above isn't fully satisfied yet
   // (st.ready — see _clarify_finalize_status in dashboard_clarify_parse.py). While a
   // finalize run specifically is in progress, swap it for Stop Finalize entirely
   // (same Start/Stop toggle Implementation already has) rather than just disabling it.
   const finalizeRunning = runDisabled && state.clarifyRun.mode === "finalize";
-  finalizeClarifyBtn.disabled = runDisabled || !st.ready || state.implementRun.running;
-  finalizeClarifyBtn.title = state.implementRun.running ? "Implementation is running." : "";
+  finalizeClarifyBtn.disabled = runDisabled || !st.ready || state.implementRun.running || settled;
+  finalizeClarifyBtn.title = state.implementRun.running
+    ? "Implementation is running."
+    : settled ? clarifySettledTitle(state.clarifyPendingOverlay) : "";
   finalizeClarifyBtn.classList.toggle("hidden", finalizeRunning);
   // The wrapper, not the button: Stop Now and its chevron have to appear together.
   stopFinalizeClarifySplit.classList.toggle("hidden", !finalizeRunning);
@@ -78,10 +88,17 @@ function renderFinalizeGate(runDisabled, hasUnanswered, hasUnapplied) {
   // Start Clarification -> Continue Clarification and explain why in plain language,
   // so users who just finished answering/applying don't get stuck wondering why
   // Finalize/Implement are still blocked.
+  // Left as "Start Clarification" when settled: needsContinue is false there (settled
+  // implies st.ready), and there is nothing to continue anyway.
   const needsContinue = st.hasRun && !st.ready;
   startClarifyBtn.querySelector("span:last-child").textContent =
     needsContinue ? "Continue Clarification" : "Start Clarification";
-  if (!needsContinue) {
+  // Settled is checked FIRST: it always implies st.ready, so the !needsContinue branch
+  // below would otherwise hide the hint in exactly the state that most needs explaining.
+  if (settled) {
+    finalizeGateHint.textContent = clarifySettledHint(state.clarifyPendingOverlay);
+    finalizeGateHint.classList.remove("hidden");
+  } else if (!needsContinue) {
     finalizeGateHint.classList.add("hidden");
   } else if (hasUnanswered) {
     // Deliberately NOT `|| hasUnapplied`: saved-but-unapplied answers are carried into the
@@ -115,9 +132,13 @@ function setClarifyRunButtonsDisabled(disabled) {
   // Clarification and implementation are two independent background runs that both
   // touch the spec/PRD — never let the user start one while the other is in progress.
   const implementRunning = state.implementRun.running;
-  startClarifyBtn.disabled = disabled || blockedByAnswers || implementRunning;
+  // settled and blockedByAnswers are mutually exclusive (settled requires
+  // unansweredFiles === 0), so their order below only decides which loses to a live run.
+  const settled = state.clarifySettled.settled;
+  startClarifyBtn.disabled = disabled || blockedByAnswers || implementRunning || settled;
   startClarifyBtn.title = implementRunning
     ? "Implementation is running."
+    : settled ? clarifySettledTitle(state.clarifyPendingOverlay)
     : blockedByAnswers ? "Answer the remaining findings first." : "";
   applyAnswersBtn.disabled = disabled || !hasUnapplied || implementRunning;
   applyAnswersBtn.title = implementRunning ? "Implementation is running." : "";

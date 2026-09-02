@@ -169,19 +169,12 @@ async function refreshClarifyList() {
     const res = await fetch("/api/tree");
     const data = await res.json();
     if (data.ok) {
-      state.clarifyUnanswered = data.clarify.unanswered || [];
-      state.clarifyAnswered = data.clarify.answered || [];
-      state.workspaceInitialized = !!data.workspace.initialized;
-      state.workspaceRoot = data.workspace.root || "";
-      state.workspaceCanClose = !!data.workspace.canClose;
-      state.recentWorkspaces = data.workspace.recent || [];
-      state.clarifyFindings = data.clarify.findings;
-      state.clarifyFinalize = data.clarify.finalize;
-      state.implementReadiness = data.clarify.implementReadiness;
-      state.clarifyPendingOverlay = data.clarify.pendingOverlay || { files: 0, findings: 0, chars: 0 };
-      state.clarifyOverlayWarnThreshold = data.clarify.overlayWarnThreshold || 25;
-      state.skipMinorFindings = !!data.clarify.skipMinorFindings;
-      state.principlesSet = !!(data.principles && data.principles.set);
+      applyTreePayload(data);
+      // The three Start Implementation buttons are driven by updateImplementControls,
+      // whose own poll only ticks while a run is active — without this, a payload that
+      // just changed implementReadiness would repaint the ready banner while leaving the
+      // button inside it disabled (or vice versa).
+      updateImplementControls();
       renderSidebar();
       if (!$("clarifyOverviewPane").classList.contains("hidden")) renderClarifyOverview();
       if (!$("homePane").classList.contains("hidden")) renderHomeWorkflow();

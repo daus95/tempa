@@ -592,3 +592,142 @@ def test_clarify_finalize_status_reports_overlay_without_gating_on_it():
     result = dcp._clarify_finalize_status({"critical": 0}, "evaluate", pending_overlay_findings=7)
     assert result["pendingOverlay"] == 7
     assert result["ready"] is True
+
+
+# ---------------------------------------------------------------------------
+# _implement_readiness_status — a specification edited since the last round
+# ---------------------------------------------------------------------------
+def test_implement_readiness_blocked_when_the_spec_changed_since_the_last_round():
+    """The counts describe a document that has since been edited, so they're unmeasured for
+    the text actually on disk — the same reasoning as severity_sweep_pending, one level up."""
+    for requirement in ("no_critical_or_major", "no_critical"):
+        result = dcp._implement_readiness_status(_CLEAN, True, requirement, 0, spec_changed=True)
+        assert result["ready"] is False, requirement
+        assert result["specChanged"] is True, requirement
+
+
+def test_no_condition_is_the_escape_hatch_for_a_changed_spec():
+    """"none" is the only setting that says "don't gate on clarification at all" — it has to
+    keep letting implementation start after a PRD tweak, or there'd be no way out."""
+    result = dcp._implement_readiness_status(_CLEAN, True, "none", 0, spec_changed=True)
+    assert result["ready"] is True
+    assert result["specChanged"] is False
+
+
+def test_implement_readiness_spec_changed_defaults_to_unchanged():
+    # Callers that don't pass it keep their previous behavior.
+    assert dcp._implement_readiness_status(_CLEAN, True, "no_critical_or_major")["specChanged"] is False
+
+
+# ---------------------------------------------------------------------------
+# _spec_changed_since_evaluation
+# ---------------------------------------------------------------------------
+def _file(started_at):
+    return {"started_at": started_at}
+
+
+def test_a_spec_edited_after_the_latest_round_is_stale():
+    assert dcp._spec_changed_since_evaluation([_file(100)], 0, 200) is True
+
+
+def test_a_spec_edited_before_the_latest_round_is_not_stale():
+    assert dcp._spec_changed_since_evaluation([_file(300)], 0, 200) is False
+
+
+def test_a_clean_round_after_the_edit_supersedes_it():
+    """A clean round writes no file, so the newest file can be older than the edit while the
+    round that actually saw the edit left only last_clean_evaluation_at behind."""
+    assert dcp._spec_changed_since_evaluation([_file(100)], 300, 200) is False
+
+
+def test_a_spec_change_with_no_clarification_files_at_all_is_stale():
+    assert dcp._spec_changed_since_evaluation([], 0, 200) is True
+
+
+def test_a_config_predating_spec_changed_at_is_never_stale():
+    # 0 means "no spec change has ever been recorded", not "changed at the epoch".
+    assert dcp._spec_changed_since_evaluation([_file(100)], 0, 0) is False
+
+
+# ---------------------------------------------------------------------------
+# _clarification_settled_status — is there anything left to clarify?
+# ---------------------------------------------------------------------------
+def test_clarification_is_settled_after_a_clean_round():
+    assert dcp._clarification_settled_status(_CLEAN, "evaluate", 0) == {
+        "settled": True, "reason": "settled", "hasRun": True, "lastAction": "evaluate",
+        "critical": 0, "major": 0, "minor": 0, "unansweredFiles": 0,
+        "majorSweepPending": False, "skipMinorFindings": True, "specChanged": False,
+    }
+
+
+def test_clarification_is_not_settled_before_anything_has_run():
+    """A workspace with no clarification files has zero findings by simple absence — the
+    same trap _implement_readiness_status's has_run check exists for."""
+    result = dcp._clarification_settled_status(_CLEAN, None, 0)
+    assert result["settled"] is False
+    assert result["reason"] == "never_run"
+
+
+def test_clarification_is_not_settled_while_a_finding_is_unanswered():
+    result = dcp._clarification_settled_status(_CLEAN, "evaluate", 1)
+    assert result["reason"] == "unanswered"
+
+
+def test_unanswered_files_outrank_open_findings_in_the_reason():
+    # Mirrors renderFinalizeGate's hint order: answer what's in front of you first.
+    result = dcp._clarification_settled_status(
+        {"critical": 2, "major": 0, "minor": 0}, "evaluate", 1)
+    assert result["reason"] == "unanswered"
+
+
+def test_clarification_is_not_settled_when_the_spec_changed_since_the_round():
+    result = dcp._clarification_settled_status(_CLEAN, "evaluate", 0, spec_changed=True)
+    assert result["settled"] is False
+    assert result["reason"] == "spec_changed"
+
+
+def test_clarification_is_not_settled_while_the_latest_round_still_lists_findings():
+    """Answering a finding never removes its severity tag, so an all-answered backlog can
+    still report criticals until a fresh evaluate pass retires them."""
+    result = dcp._clarification_settled_status(
+        {"critical": 2, "major": 1, "minor": 0}, "evaluate", 0)
+    assert result["reason"] == "needs_recheck"
+    assert (result["critical"], result["major"]) == (2, 1)
+
+
+def test_clarification_is_not_settled_after_a_bare_apply():
+    result = dcp._clarification_settled_status(_CLEAN, "apply", 0)
+    assert result["reason"] == "apply_only"
+
+
+def test_settled_reads_the_unmasked_sweep_flag():
+    """Regression guard: implementReadiness's "severitySweepPending" is masked with
+    requirement == "no_critical_or_major" and reads False under a relaxed guardrail, so it
+    must never be what gets passed in here."""
+    result = dcp._clarification_settled_status(_CLEAN, "evaluate", 0, major_sweep_pending=True)
+    assert result["settled"] is False
+    assert result["reason"] == "sweep_pending"
+    assert result["majorSweepPending"] is True
+
+
+def test_minor_findings_settle_only_when_they_are_being_skipped():
+    findings = {"critical": 0, "major": 0, "minor": 3}
+    assert dcp._clarification_settled_status(
+        findings, "evaluate", 0, skip_minor_findings=False)["reason"] == "minors_open"
+    assert dcp._clarification_settled_status(
+        findings, "evaluate", 0, skip_minor_findings=True)["settled"] is True
+
+
+def test_relaxing_the_implementation_requirement_does_not_settle_clarification():
+    """The guardrail says how much risk to carry into implementation, not that the open
+    questions got answered. Asserted against the other function so the two can't drift."""
+    findings = {"critical": 2, "major": 0, "minor": 0}
+    assert dcp._implement_readiness_status(findings, True, "none", 0)["ready"] is True
+    assert dcp._clarification_settled_status(findings, "evaluate", 0)["settled"] is False
+
+
+def test_settled_clarification_is_always_finalize_ready():
+    """The invariant the disable logic leans on: settled requires a fresh evaluate with zero
+    criticals, which is exactly _clarify_finalize_status's non-override "ready"."""
+    assert dcp._clarification_settled_status(_CLEAN, "evaluate", 0)["settled"] is True
+    assert dcp._clarify_finalize_status(_CLEAN, "evaluate")["ready"] is True

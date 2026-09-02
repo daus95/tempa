@@ -16,9 +16,11 @@ from pathlib import Path
 import tempa_backend
 import tempa_config
 from dashboard_clarify_parse import (
+    _clarification_settled_status,
     _clarify_finalize_status,
     _implement_readiness_status,
     _latest_evaluation_findings,
+    _spec_changed_since_evaluation,
     pending_overlay_stats,
 )
 from dashboard_config import (
@@ -169,17 +171,32 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
         ensure_ascii=False,
     )
     implementation_requirement = tempa_config.get_implementation_start_requirement(dashboard_config)
+    # Same raw/masked split as tree_payload — keep these two computations identical or the
+    # first paint and the first refresh will disagree about a disabled button.
+    major_sweep_pending = tempa_config.severity_sweep_pending(dashboard_config)
+    skip_minor_findings = tempa_config.get_skip_minor_findings(dashboard_config)
+    spec_changed = _spec_changed_since_evaluation(
+        clarify_unanswered + clarify_answered,
+        dashboard_config.get("last_clean_evaluation_at", 0),
+        dashboard_config.get("spec_changed_at", 0),
+    )
     implement_readiness_json = json.dumps(
         _implement_readiness_status(
             latest_findings, last_action is not None, implementation_requirement,
-            overlay["findings"], tempa_config.severity_sweep_pending(dashboard_config)),
+            overlay["findings"], major_sweep_pending, spec_changed),
+        ensure_ascii=False,
+    )
+    clarify_settled_json = json.dumps(
+        _clarification_settled_status(
+            latest_findings, last_action, len(clarify_unanswered), major_sweep_pending,
+            skip_minor_findings, spec_changed),
         ensure_ascii=False,
     )
     backends_status_json = json.dumps(
         tempa_backend.get_backend_status(tempa_config.workspace_is_writable(_workspace_root())),
         ensure_ascii=False,
     )
-    skip_minor_findings_json = json.dumps(tempa_config.get_skip_minor_findings(dashboard_config))
+    skip_minor_findings_json = json.dumps(skip_minor_findings)
     return (
         _page_template()
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -195,6 +212,7 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
         .replace("/*__CLARIFY_FINDINGS__*/null", clarify_findings_json)
         .replace("/*__CLARIFY_FINALIZE__*/null", clarify_finalize_json)
         .replace("/*__IMPLEMENT_READINESS__*/null", implement_readiness_json)
+        .replace("/*__CLARIFY_SETTLED__*/null", clarify_settled_json)
         .replace("/*__CLARIFY_PENDING_OVERLAY__*/null", pending_overlay_json)
         .replace("/*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null", overlay_warn_threshold_json)
         .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)

@@ -104,6 +104,11 @@ def _reset_clarify_config_state(config: dict) -> None:
     config.pop("last_clarification_findings", None)
     config.pop("clarify_applied_hashes", None)
     config.pop("last_clean_evaluation_at", None)
+    # The other half of the "has the current specification been evaluated?" pair (see
+    # tempa_config.stamp_spec_changed). Dropped alongside last_clean_evaluation_at so a
+    # cleared workspace reads as never-clarified rather than as one whose spec changed
+    # after an evaluation that no longer has any files.
+    config.pop("spec_changed_at", None)
     # Where the severity phase machine had got to (see tempa_clarify._load_phase_state). A
     # wiped workspace has to restart at the critical sweep, and "last_evaluation_scope" left
     # at "critical" would go on holding the Start Implementation gate shut over a round whose
@@ -250,6 +255,7 @@ def run_clear_all() -> None:
         or config.get("last_clarification_round", 0) != 0
         or config.get("last_finalize_round", 0) != 0
         or config.get("last_clean_evaluation_at", 0) != 0
+        or config.get("spec_changed_at", 0) != 0
     )
 
     if not qa_files and not log_files and not plan_files and epic_count == 0 and not clar_to_delete and not stale_clarify_state:

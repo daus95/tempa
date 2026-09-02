@@ -28,6 +28,7 @@ from dashboard_clarify_parse import (
     _clarify_files_overview,
     _implement_readiness_status,
     _latest_evaluation_findings,
+    _spec_changed_since_evaluation,
     pending_overlay_stats,
 )
 from dashboard_config import (
@@ -285,22 +286,50 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return None
 
+    def _send_spec_mutation(self, status: int, body: dict) -> None:
+        """Answer one of the four routes that CHANGE the PRD/specification folder
+        (/api/spec/save, /upload, /delete, /rename), stamping "spec_changed_at" on the way
+        out (tempa_config.stamp_spec_changed).
+
+        Every clarification result is a claim about the specification as it was when that
+        round ran; a change to those documents makes the claim stale. That is what re-opens
+        Start/Continue Clarification and Finalized Clarification after a settled round (see
+        _clarification_settled_status) and what re-closes the Start Implementation gate
+        until the new text has been evaluated.
+
+        Only on 200 — a rejected mutation changed nothing on disk. And only the PRD folder:
+        /api/epic/spec/save writes sources.epics, which is plan-epics OUTPUT rather than
+        input to clarification, so it deliberately keeps plain _send_json even though it
+        shares dashboard_api_spec.save_file underneath.
+
+        "clarificationStale" is added to the body only when there is a clarification result
+        to invalidate, so the client can say so in its success toast without a fresh
+        workspace's first upload claiming something was undone."""
+        if status == 200:
+            tempa_config.update_config(tempa_config.stamp_spec_changed)
+            if _load_dashboard_config().get("last_clarification_action") is not None:
+                body = {**body, "clarificationStale": True}
+        self._send_json(status, body)
+
     def _handle_spec_save(self) -> None:
-        self._send_json(*dashboard_api_spec.save_file(self.server.prd_dir, self._read_json_body()))
+        self._send_spec_mutation(
+            *dashboard_api_spec.save_file(self.server.prd_dir, self._read_json_body()))
 
     def _handle_spec_upload(self) -> None:
         """Raw file bytes in the body (not JSON), so the body is read here rather than
         through _read_json_body."""
         length = int(self.headers.get("Content-Length", 0) or 0)
         data = self.rfile.read(length) if length else b""
-        self._send_json(*dashboard_api_spec.upload_file(
+        self._send_spec_mutation(*dashboard_api_spec.upload_file(
             self.server.prd_dir, self.query.get("path", [""])[0], data))
 
     def _handle_spec_delete(self) -> None:
-        self._send_json(*dashboard_api_spec.delete_path(self.server.prd_dir, self._read_json_body()))
+        self._send_spec_mutation(
+            *dashboard_api_spec.delete_path(self.server.prd_dir, self._read_json_body()))
 
     def _handle_spec_rename(self) -> None:
-        self._send_json(*dashboard_api_spec.rename_path(self.server.prd_dir, self._read_json_body()))
+        self._send_spec_mutation(
+            *dashboard_api_spec.rename_path(self.server.prd_dir, self._read_json_body()))
 
     def _handle_clarify_save(self) -> None:
         payload = self._read_json_body()
@@ -395,7 +424,10 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         overlay = pending_overlay_stats(self.server.clar_dir, _load_clarify_applied_hashes())
         status = _implement_readiness_status(
             findings, True, requirement, overlay["findings"],
-            tempa_config.severity_sweep_pending(dashboard_config))
+            tempa_config.severity_sweep_pending(dashboard_config),
+            _spec_changed_since_evaluation(
+                unanswered + answered, dashboard_config.get("last_clean_evaluation_at", 0),
+                dashboard_config.get("spec_changed_at", 0)))
         if not status["ready"]:
             # Wording matches the requirement actually configured (dashboard Settings'
             # "Start Implementation requires") rather than always assuming the strictest
@@ -406,6 +438,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 error = (f"Cannot start implementation: {overlay['findings']} answered clarification "
                          f"finding(s) across {overlay['files']} file(s) haven't been written into the "
                          "PRD yet. Click Apply Answers first (it's a no-op if the PRD already matches).")
+            elif status["specChanged"]:
+                # Checked before the findings wording below because those counts describe a
+                # document that has since been edited — quoting them would send the user
+                # hunting for findings that no longer correspond to anything on disk.
+                error = ("Cannot start implementation: the specification changed after the last "
+                         "clarification round, so it hasn't been evaluated in its current form. "
+                         "Run Continue Clarification to re-check it, or set Settings > Guardrails > "
+                         "\"Start Implementation requires\" to \"No condition\".")
             elif requirement == "no_critical":
                 error = "Cannot start implementation while critical clarification findings remain."
             elif status["severitySweepPending"] and status["critical"] == 0:

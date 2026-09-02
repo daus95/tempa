@@ -277,6 +277,14 @@ function renderImplementGate() {
           : ir.severitySweepPending
             ? "Major findings haven't been swept yet — the last round only checked criticals"
             : "No major findings remain" },
+    // Only when it's actually gating. Same reasoning as the sweep wording above: the two
+    // counts either side of this row describe the specification as it was BEFORE the edit,
+    // so without this the checklist reads all-green next to a disabled button.
+    ...(ir.specChanged
+      ? [{ ok: false,
+           label: "The specification has changed since the last clarification round — it " +
+             "hasn't been evaluated in its current form" }]
+      : []),
   ]);
 }
 
