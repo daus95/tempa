@@ -29,6 +29,12 @@ def _open_ai_models_tab(page, url):
     page.locator("#treeBottom").get_by_text("Settings", exact=True).click()
     page.click("#settingsTabModelsBtn")
     page.wait_for_selector("#settingsBackendClarify", state="visible")
+    # Visible is not the same as filled: the pane's controls exist in the markup from page
+    # load, and renderSettings populates them from an async /api/config fetch afterwards.
+    # Every test that reads a value straight off the freshly-opened form (rather than
+    # driving it first, which Playwright retries into place) races that fetch without this.
+    page.wait_for_function(
+        "() => document.getElementById('settingsModelSelectClarify').options.length > 0")
 
 
 CUSTOM = "__custom__"
