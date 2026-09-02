@@ -67,8 +67,19 @@ function updateSettingsSaveBar() {
 // catalog turns into a wall rather than a missing hint. The list is a shortcut, never the
 // set of ids Tempa accepts — the server takes any id whose vendor the backend can serve
 // (see tempa_backend.model_backend_mismatch).
+// Curated, NOT a mirror of each backend's catalog. Tempa runs implementation and QA
+// sessions unattended, so a small or previous-generation model here does not produce a
+// visible error — it produces worse code, quietly, with nobody watching. Every entry below
+// is a current frontier reasoning model suited to that. Deliberately absent, and not an
+// oversight: Claude Haiku 4.5 (small, and the API's effort parameter does not apply to it
+// at all), and Codex's gpt-5.6-luna / gpt-5.5 / gpt-5.4 / gpt-5.4-mini, whose own catalog
+// entries describe them as fast/affordable, previous-generation, or "for simpler coding
+// tasks". Any of them is still reachable through "Other model id…" for anyone who wants
+// one on purpose.
 const MODEL_OPTIONS_BY_BACKEND = {
   claude: [
+    // Ordered as Claude Code's own model picker orders them.
+    { value: "claude-fable-5-1", label: "Fable 5.1" },
     { value: "claude-opus-5", label: "Opus 5" },
     { value: "claude-sonnet-5", label: "Sonnet 5" },
   ],

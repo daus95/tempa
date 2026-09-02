@@ -123,6 +123,7 @@ MODEL_VENDOR_EXACT_IDS: dict[str, str] = {
     "haiku-4.5": "anthropic",
     "fable": "anthropic",
     "fable-5": "anthropic",
+    "fable-5.1": "anthropic",
 }
 
 

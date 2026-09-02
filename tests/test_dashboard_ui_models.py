@@ -175,6 +175,43 @@ def test_the_picker_offers_only_models_the_backend_serves_plus_custom(page, dash
     assert {"claude-sonnet-5", "gpt-5.6-sol", "auto"} <= set(copilot)
 
 
+def test_the_list_is_curated_to_models_fit_for_unattended_coding(page, dashboard_server):
+    """The picker is a recommendation, not each backend's catalog. Tempa runs
+    implementation and QA unattended, where a small or previous-generation model does not
+    fail visibly — it quietly writes worse code. These exclusions are decisions, not gaps,
+    so they are pinned: `codex debug models` lists all four absentees as visible, and a
+    future "the dropdown is missing models" tidy-up would otherwise silently undo this."""
+    _open_ai_models_tab(page, dashboard_server)
+
+    page.select_option("#settingsBackendClarify", "codex")
+    codex = _model_options(page)
+    assert "gpt-5.6-sol" in codex and "gpt-5.6-terra" in codex
+    for small in ("gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"):
+        assert small not in codex, f"{small} is not fit for unattended coding work"
+
+    page.select_option("#settingsBackendClarify", "claude")
+    claude = _model_options(page)
+    # Claude Code's own picker offers Fable 5.1 first; Tempa should too.
+    assert claude[0] == "claude-fable-5-1"
+    assert {"claude-opus-5", "claude-sonnet-5"} <= set(claude)
+    # Small, and the API's effort parameter does not apply to it at all.
+    assert not any("haiku" in value for value in claude)
+
+
+def test_an_excluded_model_is_still_reachable_on_purpose(page, dashboard_server):
+    """Curated is not restricted — someone who wants a cheap model for a trial run has to
+    be able to say so."""
+    _open_ai_models_tab(page, dashboard_server)
+    _set_stage(page, "codex", "gpt-5.4-mini")
+
+    assert page.locator("#settingsModelSelectClarify").input_value() == CUSTOM
+    assert "warn" not in (_note(page).get_attribute("class") or "")
+    page.click("#settingsSaveBtn")
+    page.wait_for_function(
+        "() => document.getElementById('settingsSaveStatus').textContent.trim().length > 0")
+    assert tempa_config.load_config()["models"]["clarify"] == "gpt-5.4-mini"
+
+
 def test_the_custom_field_is_hidden_until_custom_is_chosen(page, dashboard_server):
     _open_ai_models_tab(page, dashboard_server)
     page.select_option("#settingsBackendClarify", "claude")
