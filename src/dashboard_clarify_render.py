@@ -62,6 +62,14 @@ def render_markdown(text: str) -> str:
     return "\n".join(parts)
 
 
+# A finding's prose is written in the workspace's chosen clarification language (see
+# tempa_config.CLARIFICATION_LANGUAGES), so its direction is a property of the content rather
+# than of the dashboard: `dir="auto"` lets the browser lay an Arabic finding out right-to-left
+# while leaving every left-to-right language — English included — rendered exactly as before.
+# The labels around it stay the page's own direction, because they are the dashboard's UI.
+_DIR = ' dir="auto"'
+
+
 def _attr(s: str) -> str:
     return html_lib.escape(s, quote=True)
 
@@ -120,7 +128,7 @@ def render_finding_peek_html(item: ClarificationItem, linkify=_identity) -> str:
     recommendation" stores an empty body on disk, so say so in words rather than rendering a
     blank block (see ClarificationItem.resolved_answer)."""
     if item.existing_answer:
-        decided = f'<div class="md">{linkify(render_markdown(item.existing_answer))}</div>'
+        decided = f'<div class="md"{_DIR}>{linkify(render_markdown(item.existing_answer))}</div>'
     elif item.answer_mode == "recommendation":
         decided = "<p>Followed the recommendation above.</p>"
     else:
@@ -128,17 +136,17 @@ def render_finding_peek_html(item: ClarificationItem, linkify=_identity) -> str:
 
     recommendation_html = (
         f'<div class="field recommendation"><h4>Recommendation</h4>'
-        f'<div class="md">{linkify(render_markdown(item.recommendation))}</div></div>'
+        f'<div class="md"{_DIR}>{linkify(render_markdown(item.recommendation))}</div></div>'
         if item.recommendation else ""
     )
     return f"""
 <section class="item sev-{item.severity} peek-finding">
   <header>
     <span class="badge {item.severity}">{SEVERITY_LABELS.get(item.severity, item.severity)}</span>
-    <h3>{linkify(_md_inline(item.title))}</h3>
+    <h3{_DIR}>{linkify(_md_inline(item.title))}</h3>
   </header>
-  <div class="field"><h4>Where</h4><div class="md">{linkify(render_markdown(item.where))}</div></div>
-  <div class="field"><h4>Question</h4><div class="md">{linkify(render_markdown(item.question))}</div></div>
+  <div class="field"><h4>Where</h4><div class="md"{_DIR}>{linkify(render_markdown(item.where))}</div></div>
+  <div class="field"><h4>Question</h4><div class="md"{_DIR}>{linkify(render_markdown(item.question))}</div></div>
   {recommendation_html}
   <div class="field decided"><h4>Decided</h4>{decided}</div>
 </section>
@@ -180,7 +188,7 @@ def _render_item_html(item: ClarificationItem, linkify=_identity,
 
     recommendation_html = (
         f'<div class="field recommendation"><h4>Recommendation</h4>'
-        f'<div class="md">{linkify(render_markdown(item.recommendation))}</div></div>'
+        f'<div class="md"{_DIR}>{linkify(render_markdown(item.recommendation))}</div></div>'
         if has_recommendation else ""
     )
 
@@ -190,10 +198,10 @@ def _render_item_html(item: ClarificationItem, linkify=_identity,
 <section class="item sev-{item.severity}" data-key="{key}">
   <header>
     <span class="badge {item.severity}">{SEVERITY_LABELS.get(item.severity, item.severity)}</span>
-    <h3>{linkify(_md_inline(item.title))}</h3>
+    <h3{_DIR}>{linkify(_md_inline(item.title))}</h3>
   </header>
-  <div class="field"><h4>Where</h4><div class="md">{linkify(render_markdown(item.where))}</div></div>
-  <div class="field"><h4>Question</h4><div class="md">{linkify(render_markdown(item.question))}</div></div>
+  <div class="field"><h4>Where</h4><div class="md"{_DIR}>{linkify(render_markdown(item.where))}</div></div>
+  <div class="field"><h4>Question</h4><div class="md"{_DIR}>{linkify(render_markdown(item.question))}</div></div>
   {recommendation_html}
   {overlap_html}
   <div class="answer-block">
@@ -201,7 +209,7 @@ def _render_item_html(item: ClarificationItem, linkify=_identity,
       {recommendation_radio}
       {own_radio}
     </div>
-    <textarea rows="5" data-key="{key}" placeholder="Write your answer here..." {textarea_disabled}>{textarea_value}</textarea>
+    <textarea rows="5" data-key="{key}"{_DIR} placeholder="Write your answer here..." {textarea_disabled}>{textarea_value}</textarea>
   </div>
 </section>
 """.strip()
@@ -220,7 +228,7 @@ def _render_blocks_html(blocks: list[tuple[str, object]], linkify=_identity,
         if kind == "text":
             rendered = linkify(render_markdown(payload))  # type: ignore[arg-type]
             if rendered:
-                parts.append(f'<div class="doc-text">{rendered}</div>')
+                parts.append(f'<div class="doc-text"{_DIR}>{rendered}</div>')
         else:
             parts.append(_render_item_html(
                 payload, linkify,

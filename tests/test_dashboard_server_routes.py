@@ -218,7 +218,8 @@ def test_tree_returns_the_full_first_paint_payload(dash):
     assert body["spec"]["tree"]["name"] == dash.prd_dir.name
     assert set(body["clarify"]) == {
         "unanswered", "answered", "findings", "finalize", "implementReadiness", "settled",
-        "pendingOverlay", "overlayWarnThreshold", "skipMinorFindings", "severityPhase",
+        "pendingOverlay", "overlayWarnThreshold", "skipMinorFindings", "language",
+        "severityPhase",
     }
     assert body["backends"] == FAKE_BACKEND_STATUS
 
@@ -706,6 +707,26 @@ def test_clarify_skip_minor_persists_the_toggle(dash):
 def test_clarify_skip_minor_requires_a_boolean(dash):
     assert dash.post("/api/clarify/skip-minor", {"skip_minor_findings": "no"}) == (
         400, {"ok": False, "error": "Malformed request."})
+
+
+def test_clarify_language_persists_the_selection(dash):
+    assert dash.post("/api/clarify/language", {"clarification_language": "id"}) == (
+        200, {"ok": True, "clarificationLanguage": "id"})
+    assert tempa_config.load_config()["clarification_language"] == "id"
+
+
+@pytest.mark.parametrize("payload", [
+    {"clarification_language": "xx"},        # not one of CLARIFICATION_LANGUAGES
+    {"clarification_language": "Indonesian"},  # a label, not a code
+    {"clarification_language": None},
+    {},
+])
+def test_clarify_language_rejects_anything_not_offered(dash, payload):
+    """The code is substituted into the clarification prompt, so an unrecognized one would be
+    free text reaching the agent — reject it instead of storing it."""
+    status, body = dash.post("/api/clarify/language", payload)
+    assert (status, body["ok"]) == (400, False)
+    assert tempa_config.load_config()["clarification_language"] == "en"
 
 
 # ---------------------------------------------------------------------------

@@ -368,6 +368,35 @@ DEFAULT_REASONING_EFFORTS = {
 #     been run at least once — see _implement_readiness_status in
 #     dashboard_clarify_parse.py).
 IMPLEMENTATION_START_REQUIREMENTS = ("no_critical_or_major", "no_critical", "none")
+
+# Valid values for config.json's "clarification_language" (the Clarification page's
+# Evaluation card -> Language control) — the language a clarification round writes its
+# findings in, i.e. the prose the user reads and answers in the dashboard.
+#
+# Only the human-readable prose is translated. Every structural part of a findings file
+# stays exactly as prompt/clarification.md specifies it in English — the `clarify:` HTML
+# comment markers, the `**Where:**` / `**Question:**` / `**Recommendation:**` /
+# `**Your answer:**` labels (dashboard_clarify_parse.LABEL_RE matches them literally), the
+# severity values, the finding ids, the PRD file paths, and every requirement/rule id
+# copied from the PRD (dashboard_spec_refs turns those into links). See
+# tempa_prompts._output_language_block, which is what states that to the agent.
+#
+# Each entry is (code, English name used in the prompt, label shown in the dashboard).
+# Ten widely-spoken languages, English first as the default and Indonesian second.
+CLARIFICATION_LANGUAGES = (
+    ("en", "English", "English"),
+    ("id", "Indonesian (Bahasa Indonesia)", "Bahasa Indonesia"),
+    ("zh", "Simplified Chinese (简体中文)", "中文 (简体)"),
+    ("hi", "Hindi (हिन्दी)", "हिन्दी"),
+    ("es", "Spanish (Español)", "Español"),
+    ("ar", "Arabic (العربية)", "العربية"),
+    ("pt", "Portuguese (Português)", "Português"),
+    ("ru", "Russian (Русский)", "Русский"),
+    ("ja", "Japanese (日本語)", "日本語"),
+    ("fr", "French (Français)", "Français"),
+)
+CLARIFICATION_LANGUAGE_NAMES = {code: name for code, name, _label in CLARIFICATION_LANGUAGES}
+
 DEFAULT_EMAIL_NOTIFICATION_EVENTS = (
     "authentication_required", "implementation_failed", "plan_failed", "session_limit_reached",
     "qa_limit_reached", "qa_oscillation_detected", "clarification_answers_required", "clarification_limit_reached",
@@ -408,6 +437,7 @@ DEFAULT_CONFIG = {
     "last_auto_answer": 0,
     "allow_finalize_with_critical": False,
     "skip_minor_findings": True,
+    "clarification_language": "en",
     "clarify_severity_phases": True,
     "critical_phase_max_rounds": 10,
     "implementation_start_requirement": "no_critical_or_major",
@@ -789,6 +819,14 @@ def get_skip_minor_findings(config: dict) -> bool:
     """Return config.json's "skip_minor_findings" (dashboard toggle + CLI --skip-minor
     default), defaulting to True for a missing value."""
     return bool(config.get("skip_minor_findings", True))
+
+
+def get_clarification_language(config: dict) -> str:
+    """Return config.json's "clarification_language" — the language clarification findings
+    are written in (dashboard Evaluation card -> Language). Falls back to "en" for a missing
+    or unrecognized value, which is also what every pre-existing workspace has."""
+    value = config.get("clarification_language")
+    return value if value in CLARIFICATION_LANGUAGE_NAMES else "en"
 
 
 def get_clarify_severity_phases(config: dict) -> bool:

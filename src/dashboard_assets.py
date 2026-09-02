@@ -197,6 +197,14 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
         ensure_ascii=False,
     )
     skip_minor_findings_json = json.dumps(skip_minor_findings)
+    # The picker's options travel with the page rather than being hard-coded in the JS, so
+    # CLARIFICATION_LANGUAGES stays the single place a language is added or renamed.
+    clarify_language_json = json.dumps(
+        tempa_config.get_clarification_language(dashboard_config))
+    clarify_languages_json = json.dumps(
+        [{"code": code, "label": label} for code, _name, label in tempa_config.CLARIFICATION_LANGUAGES],
+        ensure_ascii=False,
+    )
     return (
         _page_template()
         .replace("/*__SPEC_TREE__*/null", tree_json)
@@ -217,6 +225,8 @@ def render_page(prd_dir: Path, clar_dir: Path, spec_tree: dict, clarify_unanswer
         .replace("/*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null", overlay_warn_threshold_json)
         .replace("/*__BACKENDS_STATUS__*/null", backends_status_json)
         .replace("/*__SKIP_MINOR_FINDINGS__*/null", skip_minor_findings_json)
+        .replace("/*__CLARIFY_LANGUAGE__*/null", clarify_language_json)
+        .replace("/*__CLARIFY_LANGUAGES__*/null", clarify_languages_json)
     )
 
 

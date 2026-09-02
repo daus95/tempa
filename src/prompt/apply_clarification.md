@@ -1,4 +1,4 @@
-Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has been fully applied to the PRD/spec in a previous apply pass, so it does NOT need to be read again:
+${output_language}Read exactly these clarification result file(s) — every other file already in ${sources.clarifications} has been fully applied to the PRD/spec in a previous apply pass, so it does NOT need to be read again:
 ${clarification_files}
 
 The files above are listed in chronological order, oldest round first. If two findings across these files decide the SAME point, the one from the LATER file wins on that point — apply only the later decision there, and do not merge the two.

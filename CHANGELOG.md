@@ -8,6 +8,35 @@ once the first tagged release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- Clarification findings can now be written in a language other than English. The
+  Clarification page's **Evaluation scope** card is now **Evaluation** and splits into two
+  columns: the existing "Only evaluate critical & major findings" switch, and a new
+  **Language** picker offering ten widely-spoken languages (English, Bahasa Indonesia,
+  中文, हिन्दी, Español, العربية, Português, Русский, 日本語, Français). It sets
+  config.json's `clarification_language` and applies from the next round onwards; rounds
+  already on disk are never rewritten, so a workspace that switches part-way keeps each round
+  in the language it was written in. Only the prose a person reads is translated — each
+  finding's title, its explanatory paragraphs, its question and its recommendation, plus the
+  answers `--auto-answer` writes. Everything a machine reads stays in English: the `clarify:`
+  markers and the `**Where:**` / `**Question:**` / `**Recommendation:**` / `**Your answer:**`
+  labels (a translated label would drop the finding out of the answer UI entirely), the
+  requirement/rule/field ids and PRD file paths the reference links resolve against, and the
+  coverage ledger. `clarify --apply` writes each decision into the PRD in the language that
+  document already uses, so the PRD is never dragged into another language one answer at a
+  time. English is unchanged down to the byte: a workspace that never touches the picker
+  sends exactly the prompt it sent before. Finding text now also carries `dir="auto"`, so a
+  right-to-left language (Arabic) lays out right-to-left while every left-to-right one renders
+  exactly as it did. See [docs/clarify-modes.md](docs/clarify-modes.md#output-language).
+
+### Changed
+
+- Clickable clarification filenames now look clickable: the file names in the Clarification
+  page's **Unanswered** / **Fully answered** tables and in the Home page's step-2 file list
+  are rendered in the accent colour and underline on hover, like every other link in the
+  dashboard. They were already clickable — nothing said so.
+
 ## [0.12.0] - 2026-09-02
 
 ### Added

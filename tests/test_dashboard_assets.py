@@ -43,6 +43,8 @@ DATA_PLACEHOLDERS = [
     "/*__CLARIFY_OVERLAY_WARN_THRESHOLD__*/null",
     "/*__BACKENDS_STATUS__*/null",
     "/*__SKIP_MINOR_FINDINGS__*/null",
+    "/*__CLARIFY_LANGUAGE__*/null",
+    "/*__CLARIFY_LANGUAGES__*/null",
 ]
 
 # Resources the browser would have to FETCH: any src= (script/img/iframe) and the href of
@@ -214,3 +216,24 @@ def test_the_diagram_styles_and_the_script_agree_on_their_class_names():
     css, js = _stylesheet(), dashboard_assets._dashboard_js()
     for name in ("mermaid-diagram", "mermaid-source", "mermaid-error"):
         assert name in css and name in js
+
+
+def test_every_more_toggle_has_a_hide_partner_inside_a_description():
+    """The "More…"/"Hide…" pair is wired by one delegated listener (assets/js/80-settings-form.js)
+    that walks up to the enclosing description element, so a toggle in a <p> whose class the
+    listener does not recognise — or a "More…" with no "Hide…" beside it — silently does
+    nothing when clicked.
+
+    Read from dashboard.html rather than the assembled page: the listener's own source
+    mentions the same attribute, and it is markup that is being checked here."""
+    markup = (dashboard_assets.ASSET_DIR / "dashboard.html").read_text(encoding="utf-8")
+    shows = markup.count('data-more-toggle="show"')
+    assert shows > 0
+    paragraph_re = re.compile("<p" + chr(92) + "b([^>]*)>(.*?)</p>", re.DOTALL)
+    paragraphs = [m for m in paragraph_re.finditer(markup)
+                  if 'data-more-toggle="show"' in m.group(2)]
+    assert len(paragraphs) == shows, "a More… toggle is not inside a <p> of its own"
+    for attrs, body in ((m.group(1), m.group(2)) for m in paragraphs):
+        assert "settings-field-desc" in attrs or "gate-hint" in attrs, attrs
+        assert 'data-more-toggle="hide"' in body
+        assert "settings-more-extra" in body

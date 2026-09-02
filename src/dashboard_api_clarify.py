@@ -216,3 +216,22 @@ def save_skip_minor(payload: dict | list | None) -> Response:
     config["skip_minor_findings"] = skip_minor_findings
     tempa_config.save_config(config)
     return 200, {"ok": True, "skipMinorFindings": skip_minor_findings}
+
+
+def save_clarify_language(payload: dict | list | None) -> Response:
+    """Persist the Clarification page's Evaluation -> Language selector (config.json's
+    "clarification_language"), the language a clarification round writes its findings in.
+
+    Same single-purpose shape as save_skip_minor above, and for the same reason. An
+    unrecognized code is rejected rather than stored: the value is substituted into the
+    clarification prompt (tempa_prompts._output_language_block), so anything not in
+    CLARIFICATION_LANGUAGES would be free text reaching the agent."""
+    if payload is None or not isinstance(payload, dict):
+        return 400, {"ok": False, "error": "Malformed request."}
+    language = payload.get("clarification_language")
+    if language not in tempa_config.CLARIFICATION_LANGUAGE_NAMES:
+        return 400, {"ok": False, "error": "Unsupported language."}
+    config = tempa_config.load_config()
+    config["clarification_language"] = language
+    tempa_config.save_config(config)
+    return 200, {"ok": True, "clarificationLanguage": language}

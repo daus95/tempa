@@ -13,8 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 from tempa_config import (
+    CLARIFICATION_LANGUAGE_NAMES,
     LAST_ROUND_NOTE_UNFINISHED_CHECK,
     PROMPT_DIR,
+    get_clarification_language,
     get_config_path,
     get_sources,
     read_principles,
@@ -703,6 +705,108 @@ def _render_carried_findings(carried: list[tuple[str, str, str, bool]] | None) -
     return "\n".join(lines)
 
 
+# What a findings file must keep in English no matter which language its prose is written
+# in. Every entry here is read by software rather than by a person, so a translated one is a
+# silent data loss, not a cosmetic difference:
+#   - the clarify: markers and the four bold labels are what dashboard_clarify_parse's
+#     ITEM_RE / ANSWER_RE / LABEL_RE match literally — a finding whose labels were translated
+#     parses as prose, disappears from the answer UI, and stops counting towards answered/total;
+#   - ids copied from the PRD are what dashboard_spec_refs resolves into links back to the
+#     line that defines them, so a translated id resolves to nothing.
+_LANGUAGE_KEEP_ENGLISH = """\
+Keep ALL of the following EXACTLY as this prompt specifies them, in English, byte for byte.
+They are read by software, not by a person:
+
+- Every `clarify:` HTML comment marker — `<!-- clarify:item ... -->`, `<!-- clarify:answer-start -->`,
+  `<!-- clarify:answer-end -->`, `<!-- clarify:enditem -->` — including their attribute names
+  (`id`, `severity`, `mode`) and their values (`critical`, `major`, `minor`).
+- The four bold labels, written character for character as `**Where:**`, `**Question:**`,
+  `**Recommendation:**` and `**Your answer:**`. Do not translate them, do not reword them, and
+  do not put a translation next to them. A finding whose labels are translated is dropped from
+  the answer UI entirely and can never be answered.
+- Finding ids (`C1`, `M2`, ...), and the PRD file paths and folder names in backticks, spelled
+  exactly as they are on disk.
+- Every requirement, rule, entity, field, state, endpoint, enum value and message id or name
+  taken from the PRD — `M07-FR-03`, `BR-07.2`, `Product.stock_qty`, **SaleItem**, "In use by N
+  product(s)". Quote and copy them verbatim in the PRD's own wording, even in the middle of a
+  translated sentence: the dashboard turns them into links straight to the PRD line that defines
+  them, and a translated or reworded one links to nothing. Never translate a quotation from the
+  PRD — quote the original and, if the sentence needs it, gloss it afterwards."""
+
+
+def _output_language_block(config: dict) -> str:
+    """The ${output_language} block for the clarification prompt — what language a round
+    writes its findings in (config.json's "clarification_language", set from the dashboard's
+    Evaluation card).
+
+    English renders "" so the prompt every existing workspace sends stays byte-identical;
+    only a workspace that actively picked another language gets the extra section."""
+    language = get_clarification_language(config)
+    if language == "en":
+        return ""
+    name = CLARIFICATION_LANGUAGE_NAMES[language]
+    return f"""=== OUTPUT LANGUAGE: {name} ===
+
+Write the human-readable prose of the findings file in {name}: each finding's `###` title, the
+section/location text on its `**Where:**` line, both explanatory paragraphs, the `**Question:**`
+sentence with any option bullets, and the `**Recommendation:**` text. Write it as someone fluent
+in {name} would — not a word-for-word rendering of an English sentence.
+
+{_LANGUAGE_KEEP_ENGLISH}
+
+The coverage ledger stays entirely in English — its markers, its column headers and its verdicts
+(`OK`, `CRITICAL`, `N/A`, `RESOLVED`, `STILL OPEN`, `WITHDRAWN`) alike. It is a machine-read
+record of what this round checked, not something the user reads.
+
+=== END OUTPUT LANGUAGE ===
+
+"""
+
+
+def _auto_answer_language_block(config: dict) -> str:
+    """The ${output_language} block for the auto-answer prompt. The answers it writes are read
+    in the same UI as the findings, so they follow the same language — and sit between the same
+    markers, so they carry the same keep-in-English rules."""
+    language = get_clarification_language(config)
+    if language == "en":
+        return ""
+    name = CLARIFICATION_LANGUAGE_NAMES[language]
+    return f"""=== OUTPUT LANGUAGE: {name} ===
+
+Write every answer you fill in in {name} — it is read in the same review UI as the finding above
+it.
+
+{_LANGUAGE_KEEP_ENGLISH}
+
+=== END OUTPUT LANGUAGE ===
+
+"""
+
+
+def _apply_language_block(config: dict) -> str:
+    """The ${output_language} block for the apply prompt.
+
+    Apply is the one clarification stage that writes into the PRD rather than into a findings
+    file, and the PRD is the user's own document — so this block exists to stop a non-English
+    answer from dragging the PRD into that language one applied decision at a time."""
+    language = get_clarification_language(config)
+    if language == "en":
+        return ""
+    name = CLARIFICATION_LANGUAGE_NAMES[language]
+    return f"""=== LANGUAGE ===
+
+This workspace reviews clarifications in {name}, so the findings and the answers under their
+`**Your answer:**` labels may be written in {name} — a backlog spanning a language change can
+hold both, and each file is whatever its own round was written in. The PRD is neither: write
+each decision into a PRD document in the language that document itself already uses, keeping
+its existing terminology, ids and heading style. Do not translate any part of the PRD, and do
+not leave a sentence of {name} in it.
+
+=== END LANGUAGE ===
+
+"""
+
+
 def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: list | None = None,
                                severity_scope: str | None = None, coverage_dir: str = "",
                                previous_ledger: tuple[str, str] | None = None,
@@ -743,6 +847,7 @@ def build_clarification_prompt(config: dict, skip_minor: bool = False, pending: 
         "coverage_dir": coverage_dir,
         "previous_coverage_ledger": _render_previous_ledger(previous_ledger),
         "carried_findings": _render_carried_findings(carried_findings),
+        "output_language": _output_language_block(config),
     }
     return build_prompt(template, params)
 
@@ -756,6 +861,7 @@ def build_apply_clarification_prompt(config: dict, files: list[Path]) -> str:
     sources = get_sources(config)
     template = load_prompt("apply_clarification")
     params = {
+        "output_language": _apply_language_block(config),
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),
@@ -771,6 +877,7 @@ def build_auto_answer_prompt(config: dict, files: list[Path]) -> str:
     sources = get_sources(config)
     template = load_prompt("auto_answer")
     params = {
+        "output_language": _auto_answer_language_block(config),
         "sources.prd": sources.get("prd", ""),
         "sources.clarifications": sources.get("clarifications", ""),
         "config_path": str(get_config_path()),

@@ -367,6 +367,12 @@ finish and stamp what it wrote, then skips the remaining files.
 See [docs/clarify-modes.md](docs/clarify-modes.md#pending-resolutions-overlay) for the
 details.
 
+Findings are written in English by default. The **Evaluation** card's **Language** picker
+switches that to any of ten languages (Bahasa Indonesia among them) from the next round
+onwards — the prose only: requirement ids, file paths and PRD wording stay as the PRD writes
+them so their links keep working, and the PRD is never translated. See
+[Output language](docs/clarify-modes.md#output-language).
+
 The page splits into an **Overview** tab (the Unanswered/Fully answered file tables below)
 and a **Log** tab (raw console output for whichever run is in progress) — same pattern as the
 Implementation page's Status/Log tabs (see Step 3 below). The run buttons and readiness

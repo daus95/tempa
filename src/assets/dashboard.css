@@ -227,7 +227,8 @@
     gap: 10px; padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
     background: var(--bg); cursor: pointer; font-size: 0.85rem; }
   .home-step2-file-item:hover { background: var(--border-strong); }
-  .home-step2-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .home-step2-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+  .home-step2-file-item:hover .home-step2-file-name { text-decoration: underline; }
 
   /* ---- shared tab bar (Implementation Status/Log, Clarification Overview/Log) ---- */
   .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border-strong);
@@ -471,6 +472,8 @@
     text-transform: uppercase; letter-spacing: 0.03em; }
   .clarify-overview-pane tbody tr { cursor: pointer; }
   .clarify-overview-pane tbody tr:hover td { background: var(--hover); }
+  .clarify-overview-pane .clarify-file-name { color: var(--accent); }
+  .clarify-overview-pane tbody tr:hover .clarify-file-name { text-decoration: underline; }
   .clarify-overview-pane .count-ok { color: var(--ok); }
   .clarify-overview-pane .count-pending { color: var(--major); font-weight: 600; }
   .clarify-overview-pane .status-complete, .clarify-overview-pane .status-pending {

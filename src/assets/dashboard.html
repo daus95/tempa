@@ -247,17 +247,25 @@
         </div>
         <div class="tab-panel" id="clarifyOverviewTabPanel">
           <div class="gate-panel" id="skipMinorCard">
-            <h3>Evaluation scope</h3>
-            <div class="settings-field">
-              <label class="settings-switch-row" for="skipMinorFindingsToggle">
-                <span class="settings-switch">
-                  <input type="checkbox" id="skipMinorFindingsToggle" checked>
-                  <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
-                </span>
-                <span>Only evaluate critical &amp; major findings</span>
-              </label>
-              <p class="gate-hint">When on, Start Clarification and Finalized Clarification skip minor
-                findings entirely instead of finding and reporting them.</p>
+            <h3>Evaluation</h3>
+            <div class="settings-grid-2">
+              <div class="settings-field">
+                <label class="settings-switch-row" for="skipMinorFindingsToggle">
+                  <span class="settings-switch">
+                    <input type="checkbox" id="skipMinorFindingsToggle" checked>
+                    <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
+                  </span>
+                  <span>Only evaluate critical &amp; major findings</span>
+                </label>
+                <p class="gate-hint">When on, Start Clarification and Finalized Clarification skip minor
+                  findings entirely instead of finding and reporting them.</p>
+              </div>
+              <div class="settings-field">
+                <label for="clarifyLanguageSelect">Language</label>
+                <select id="clarifyLanguageSelect"></select>
+                <p class="gate-hint">The language findings and answers are written in, from the next
+                  round onwards. <button type="button" class="settings-more-toggle" data-more-toggle="show">More…</button><span class="settings-more-extra hidden"> Only the prose you read: requirement ids, file paths and PRD wording stay as the PRD writes them, so their links keep working, and the PRD itself is never translated. Rounds already on disk keep the language they were written in. <button type="button" class="settings-more-toggle" data-more-toggle="hide">Hide…</button></span></p>
+              </div>
             </div>
           </div>
           <div class="gate-panel" id="finalizeGate">

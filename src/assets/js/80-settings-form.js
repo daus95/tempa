@@ -27,11 +27,13 @@ for (const [name, [btn]] of Object.entries(SETTINGS_TABS)) {
 
 // Inline "More…"/"Hide…" toggle for long field descriptions (see .settings-more-toggle in
 // dashboard.css). One delegated listener covers every instance across all tabs, including
-// any added later, so no per-field wiring is needed.
+// any added later, so no per-field wiring is needed. It also covers the .gate-hint
+// descriptions outside Settings (the Clarification page's Evaluation card), which are the
+// same thing under a different class.
 document.addEventListener("click", (e) => {
   const toggle = e.target.closest("[data-more-toggle]");
   if (!toggle) return;
-  const wrap = toggle.closest(".settings-field-desc");
+  const wrap = toggle.closest(".settings-field-desc, .gate-hint");
   const extra = wrap ? wrap.querySelector(".settings-more-extra") : null;
   const moreBtn = wrap ? wrap.querySelector('[data-more-toggle="show"]') : null;
   if (!extra || !moreBtn) return;

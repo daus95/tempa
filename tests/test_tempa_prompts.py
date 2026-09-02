@@ -552,6 +552,71 @@ def test_build_auto_answer_prompt(tmp_path, isolate_tempa_paths):
 
 
 # ---------------------------------------------------------------------------
+# ${output_language} — the Evaluation card's Language selector
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("builder", [
+    lambda config: tp.build_clarification_prompt(config),
+    lambda config: tp.build_auto_answer_prompt(config, []),
+    lambda config: tp.build_apply_clarification_prompt(config, []),
+])
+@pytest.mark.parametrize("language", [None, "en", "not-a-language"])
+def test_english_leaves_the_prompt_exactly_as_it_was(tmp_path, isolate_tempa_paths, builder,
+                                                     language):
+    """English — the default, and the fallback for an unrecognized code — renders no block at
+    all, so every workspace that never touched the picker sends a byte-identical prompt."""
+    for name in ("clarification", "auto_answer", "apply_clarification"):
+        _write_prompt(isolate_tempa_paths["prompt_dir"], name, "${output_language}BODY")
+    overrides = {} if language is None else {"clarification_language": language}
+    assert builder(_sample_config(tmp_path, **overrides)) == "BODY"
+
+
+def test_clarification_prompt_states_the_language_and_what_stays_english(tmp_path,
+                                                                        isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${output_language}BODY")
+    prompt = tp.build_clarification_prompt(
+        _sample_config(tmp_path, clarification_language="id"))
+    assert "Indonesian (Bahasa Indonesia)" in prompt
+    # The parser matches these literally (dashboard_clarify_parse.LABEL_RE / ITEM_RE), so a
+    # translated one drops the finding out of the answer UI entirely.
+    for marker in ("**Where:**", "**Question:**", "**Recommendation:**", "**Your answer:**",
+                   "clarify:item", "clarify:answer-start", "clarify:enditem"):
+        assert marker in prompt
+    # Spec references are resolved against the PRD's own wording (dashboard_spec_refs).
+    assert "verbatim" in prompt
+    assert prompt.endswith("BODY")
+
+
+def test_auto_answer_prompt_follows_the_same_language(tmp_path, isolate_tempa_paths):
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "auto_answer", "${output_language}BODY")
+    prompt = tp.build_auto_answer_prompt(
+        _sample_config(tmp_path, clarification_language="ja"), [])
+    assert "Japanese (日本語)" in prompt
+    assert "**Your answer:**" in prompt
+
+
+def test_apply_prompt_keeps_the_prd_in_its_own_language(tmp_path, isolate_tempa_paths):
+    """Apply is the one clarification stage that writes into the PRD, so its block says the
+    opposite of the other two: the answers are translated, the PRD is not."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "apply_clarification",
+                  "${output_language}BODY")
+    prompt = tp.build_apply_clarification_prompt(
+        _sample_config(tmp_path, clarification_language="id"), [])
+    assert "Do not translate any part of the PRD" in prompt
+
+
+def test_every_offered_language_renders_a_block(tmp_path, isolate_tempa_paths):
+    """Whatever the dashboard offers must be substitutable — a code with no prompt name would
+    reach the agent as a bare code or a KeyError."""
+    _write_prompt(isolate_tempa_paths["prompt_dir"], "clarification", "${output_language}BODY")
+    for code, name, _label in tempa_config.CLARIFICATION_LANGUAGES:
+        prompt = tp.build_clarification_prompt(_sample_config(tmp_path,
+                                                              clarification_language=code))
+        assert ("BODY" if code == "en" else name) in prompt
+        assert "${output_language}" not in prompt
+
+
+# ---------------------------------------------------------------------------
 # _plan_epics_params / build_plan_epics_prompt / build_review_epics_prompt
 # ---------------------------------------------------------------------------
 
