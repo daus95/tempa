@@ -234,11 +234,21 @@ def test_resolve_clar_dir(tmp_path):
     ("sonnet", "claude-sonnet-5"),
     ("haiku-4.5", "claude-haiku-4-5-20251001"),
     ("haiku", "claude-haiku-4-5-20251001"),
+    ("fable-5.1", "claude-fable-5-1"),
     ("fable-5", "claude-fable-5"),
-    ("fable", "claude-fable-5"),
+    ("fable", "claude-fable-5-1"),
 ])
 def test_resolve_model_alias_known(alias, expected):
     assert tempa_config._resolve_model_alias(alias) == expected
+
+
+def test_a_bare_family_alias_resolves_to_the_latest_of_that_family():
+    """The contract the `claude` CLI documents for its own --model aliases, and what
+    "opus"/"sonnet" have always done here. "fable" pointed at claude-fable-5 while Claude
+    Code's model picker offered Fable 5.1, so it quietly configured the older generation.
+    The versioned aliases stay exact, which is how you ask for a specific one."""
+    assert tempa_config._resolve_model_alias("fable") == "claude-fable-5-1"
+    assert tempa_config._resolve_model_alias("fable-5") == "claude-fable-5"
 
 
 def test_resolve_model_alias_whitespace_and_case_insensitive():

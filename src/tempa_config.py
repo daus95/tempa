@@ -325,8 +325,15 @@ MODEL_ALIASES = {
     "sonnet": "claude-sonnet-5",
     "haiku-4.5": "claude-haiku-4-5-20251001",
     "haiku": "claude-haiku-4-5-20251001",
+    "fable-5.1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",
-    "fable": "claude-fable-5",
+    # A bare family name resolves to the LATEST of that family, matching what the
+    # `claude` CLI documents for its own --model aliases ("an alias for the latest
+    # model") and what "opus"/"sonnet" above already do. It pointed at claude-fable-5
+    # while Claude Code's own model picker offered Fable 5.1, so `tempa set-model
+    # --implement fable` quietly configured the previous generation. The versioned
+    # aliases stay exact, which is how anyone who wants Fable 5 asks for it.
+    "fable": "claude-fable-5-1",
 }
 
 # Which CLI backend drives each harness stage. Stored under the "backends" key in

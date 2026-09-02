@@ -86,10 +86,26 @@ tempa show-models                              # show the model per stage
 
 ## Choosing a model in the dashboard
 
-Settings → AI Models gives each stage a **model picker** listing what that stage's backend
-serves, plus **Other model id…** for anything else. The list is a shortcut, not the set of
-ids Tempa accepts — pick *Other model id…* and type any id the CLI takes, including one
-released after this list was written.
+Settings → AI Models gives each stage a **model picker**, plus **Other model id…** for
+anything else.
+
+The list is a **recommendation, not the backend's catalog**. Tempa runs implementation and QA
+sessions unattended: a small or previous-generation model there does not fail in any visible
+way, it quietly produces worse code with nobody reviewing it as it goes. So the picker lists
+only current frontier reasoning models — Fable 5.1, Opus 5 and Sonnet 5 on Claude Code;
+GPT-5.6 Sol and Terra on Codex.
+
+Deliberately absent, and not an oversight:
+
+| Model | Why it is not suggested |
+|---|---|
+| Claude Haiku 4.5 | A small model, and the API's `effort` parameter does not apply to it at all. |
+| `gpt-5.6-luna` | Codex's own catalog: *"Fast and affordable agentic coding model."* |
+| `gpt-5.5` | Codex's own catalog: *"Proven previous-generation model."* |
+| `gpt-5.4`, `gpt-5.4-mini` | Previous generation; the `-mini` is *"for simpler coding tasks."* |
+
+None of this is a limit. Pick *Other model id…* and type any id the CLI accepts — a smaller
+model on purpose (a cheap trial run), or one released after this list was written.
 
 A model already configured but absent from the list — set with `tempa set-model`, edited
 into `config.json` by hand, saved by an older Tempa, or simply newer — loads as *Other model

@@ -10,6 +10,22 @@ once the first tagged release is cut.
 
 ### Changed
 
+- The model picker now offers **Claude Fable 5.1**, first, matching how Claude Code's own
+  model picker orders it.
+- The model list is documented as a **recommendation, not each backend's catalog**, in the
+  Settings help and in [docs/ai-models.md](docs/ai-models.md). Tempa runs implementation and
+  QA unattended, where a small or previous-generation model doesn't fail visibly — it quietly
+  writes worse code with nobody reviewing it as it goes, so only current frontier reasoning
+  models are suggested. Claude Haiku 4.5 (small, and the API's `effort` parameter doesn't
+  apply to it at all) and Codex's `gpt-5.6-luna` / `gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini` are
+  absent on purpose, and now say so rather than looking like an out-of-date list. Any of them
+  is still reachable through *Other model id…*.
+- The bare `fable` model alias now resolves to `claude-fable-5-1` rather than
+  `claude-fable-5`. A bare family alias means the latest of that family — the contract the
+  `claude` CLI documents for its own `--model` aliases, and what `opus`/`sonnet` already did
+  here. `tempa set-model --implement fable` was quietly configuring the previous generation.
+  `fable-5` still resolves exactly, and `fable-5.1` was added alongside it.
+
 - Settings → AI Models now picks the model from a **dropdown** listing what the chosen
   backend serves, instead of a bare text box. The suggestions were always there, behind an
   HTML `<datalist>`, but a datalist has no visible affordance at all — users could not tell
