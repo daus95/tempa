@@ -29,7 +29,14 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
-from tempa_backend import AUTONOMOUS_SYSTEM_PROMPT, Backend, resolve_exe
+from tempa_backend import (
+    AUTONOMOUS_SYSTEM_PROMPT,
+    Backend,
+    ModelBackendMismatchError,
+    model_backend_mismatch,
+    model_mismatch_message,
+    resolve_exe,
+)
 from tempa_config import (
     WORKING_DIR,
     get_backend_background_wait_sec,
@@ -187,6 +194,79 @@ def _handle_auth_error(text: str, process: subprocess.Popen, label: str, backend
     return True
 
 
+def _flag_model_error(message: str, label: str, details: dict[str, str]) -> None:
+    """Record a wrong-model stop and say so where the user will actually see it.
+
+    Shared by the pre-spawn check and the runtime marker handler so the two give one
+    account of the same problem. The console log is the point: the generic exception path
+    in `_run_backend_session` logs with `to_console=False` and buries the reason in a
+    session log file, which is exactly how a stage left on `claude-sonnet-5` after its
+    backend moved to `codex` reached its user as an unreadable failure.
+
+    Flagged globally, never retried: every later session on that stage would fail the same
+    way until a human edits the configuration — the same reasoning as `_handle_auth_error`.
+    """
+    _state.model_error_hit = True
+    _state.model_error_message = message
+    log(f"[{label}] {message}")
+    notify_attention(
+        AttentionEventType.BACKEND_MODEL_MISMATCH,
+        label,
+        f"{details.get('backend_label', 'The configured CLI backend')} cannot run model "
+        f"'{details.get('model', '')}'",
+        "Fix this stage's backend/model pair in the dashboard (Settings -> AI Models), or "
+        "with `tempa set-model` / `tempa set-backend`.",
+        details=details,
+    )
+    _state.stop_event.set()
+
+
+def _handle_model_mismatch(error: ModelBackendMismatchError, backend: Backend, label: str,
+                           log_path: Path) -> None:
+    """Report a mismatch caught before the CLI was ever spawned. Also written into the
+    session log file, since that empty file is where every layer above points the user."""
+    message = str(error)
+    _flag_model_error(message, label, {
+        "backend": error.backend_name,
+        "backend_label": backend.label,
+        "model": error.model,
+        "vendor": error.vendor,
+    })
+    with contextlib.suppress(Exception), open(log_path, "a", encoding="utf-8") as log_file:
+        log_file.write(f"\n{message}\n")
+
+
+def _is_model_error_text(text: str, backend: Backend) -> bool:
+    """True if the given CLI output text is the CLI rejecting the model it was handed —
+    retired, inaccessible to this account, or simply misspelled — rather than a usage
+    limit, an auth failure or a generic bug."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in backend.model_error_markers)
+
+
+def _handle_model_error(text: str, process: subprocess.Popen, label: str, backend: Backend,
+                        model: str) -> bool:
+    """Backstop for a bad model the static check deliberately let through (see
+    tempa_backend.model_backend_mismatch — an unrecognized id is never blocked, because the
+    model field is free text). If text is the CLI rejecting the model, flag a global stop,
+    terminate the process, and return True. Otherwise return False."""
+    if not _is_model_error_text(text, backend):
+        return False
+    hint = f" ({backend.model_catalog_hint})" if backend.model_catalog_hint else ""
+    _flag_model_error(
+        f"{backend.label} rejected the configured model '{model}'. Set this stage's model to "
+        f"one {backend.label} accepts{hint}, in the dashboard (Settings -> AI Models) or with "
+        f"`tempa set-model`.",
+        label,
+        {"backend": backend.name, "backend_label": backend.label, "model": model},
+    )
+    with contextlib.suppress(Exception):
+        process.terminate()
+    return True
+
+
 def _failure_marker_text(raw_line: str, data: dict | None) -> str:
     """Return text eligible for backend-failure marker matching.
 
@@ -288,9 +368,11 @@ def run_with_usage_limit_retry(run_fn: Callable[[], bool], label: str) -> bool:
     and, for as long as it fails specifically because the backend's usage limit was hit or
     its API reported itself overloaded, wait it out (wait_out_usage_limit /
     wait_out_server_overload) and call it again. Returns `run_fn()`'s own result once it
-    either succeeds or fails for any other reason (a real failure, or an auth error) — the
-    caller still checks `_state.auth_error_hit` itself afterward, exactly as if this retry
-    loop weren't here."""
+    either succeeds or fails for any other reason (a real failure, an auth error, or a
+    model the backend cannot run) — the caller still checks
+    `_state.backend_config_error_hit` itself afterward, exactly as if this retry loop
+    weren't here. Neither of those two is retried here: waiting cannot fix a credential or
+    a configuration, only a human can."""
     usage_limit_attempt = 0
     overload_attempt = 0
     while True:
@@ -355,8 +437,19 @@ def prepare_backend_invocation(
     the caller is responsible for having validated it against the model via
     `tempa_backend.is_valid_reasoning_effort` before getting here.
 
-    Raises FileNotFoundError if the backend's executable isn't on PATH.
+    Raises ModelBackendMismatchError if `model` belongs to a vendor this backend cannot
+    reach, and FileNotFoundError if the backend's executable isn't on PATH.
     """
+    # Before resolve_exe on purpose: this check is pure, and when both are wrong "install
+    # the CLI you should not be using" is the less useful of the two errors. This is also
+    # why the check lives here rather than in _run_backend_session — `tempa test`, the
+    # command whose entire job is "can Tempa drive this CLI", calls this function directly
+    # and would otherwise keep reporting the unreadable version of the failure.
+    vendor = model_backend_mismatch(backend, model)
+    if vendor:
+        raise ModelBackendMismatchError(
+            model_mismatch_message(backend, model, vendor), backend.name, model, vendor)
+
     exe = resolve_exe(backend)
     if not exe:
         raise FileNotFoundError(f"{backend.label} CLI not found in PATH (tried: {', '.join(backend.exe_names)})")
@@ -626,6 +719,7 @@ def _stream_backend_process(
     label: str,
     row_count: list[int],
     on_json_event: Callable[[dict], None] | None = None,
+    model: str = "",
 ) -> int:
     """Spawn `cmd`, feed `stdin_text` via stdin (may be empty — e.g. file_ref-mode
     backends need nothing on stdin), and stream stdout to `log_path` — the shared core
@@ -670,6 +764,7 @@ def _stream_backend_process(
             group.adopt(process)
             return _stream_contained_process(
                 backend, process, group, stdin_text, log_file, label, row_count, on_json_event,
+                model,
             )
         finally:
             _log_reclaimed(group.close(), group, label, log_file)
@@ -790,6 +885,7 @@ def _stream_contained_process(
     label: str,
     row_count: list[int],
     on_json_event: Callable[[dict], None] | None,
+    model: str = "",
 ) -> int:
     """The read loop itself, split out only so `_stream_backend_process` stays a legible
     spawn/contain/teardown shape. Everything here is what that function did inline before
@@ -825,6 +921,13 @@ def _stream_contained_process(
             log_file.flush()
             break
         if _handle_overloaded(marker_text, process, label, backend):
+            log_file.write(raw_line)
+            log_file.flush()
+            break
+        # `marker_text` matters more here than for any handler above it: a Tempa session
+        # routinely works on code that talks to an LLM, so model ids and model-rejection
+        # wording turn up in ordinary tool output. The narrowing keeps those ineligible.
+        if _handle_model_error(marker_text, process, label, backend, model):
             log_file.write(raw_line)
             log_file.flush()
             break
@@ -924,8 +1027,10 @@ def _run_backend_session(
         progress_thread = threading.Thread(target=_display_progress, daemon=True)
         progress_thread.start()
 
-        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, banner_label, row_count, on_json_event)
+        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, banner_label, row_count, on_json_event, model)
 
+    except ModelBackendMismatchError as e:
+        _handle_model_mismatch(e, backend, banner_label, log_path)
     except Exception as e:
         log(f"Error running [{banner_label}]: {e}", to_console=False)
         with open(log_path, "a", encoding="utf-8") as log_file:

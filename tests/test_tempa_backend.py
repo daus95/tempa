@@ -88,7 +88,8 @@ def test_claude_extract_session_id():
 def test_marker_lists_are_lowercase(backend):
     # tempa_session lowercases the scanned text before matching, so an
     # uppercase-containing marker here would never match anything.
-    for marker in backend.usage_limit_markers + backend.auth_error_markers + backend.overloaded_markers:
+    for marker in (backend.usage_limit_markers + backend.auth_error_markers
+                   + backend.overloaded_markers + backend.model_error_markers):
         assert marker == marker.lower()
 
 
@@ -263,6 +264,103 @@ def test_is_valid_reasoning_effort_valid_and_invalid_per_backend():
     assert tb.is_valid_reasoning_effort(tb.COPILOT, "auto", "none") is True
     assert tb.is_valid_reasoning_effort(tb.CODEX, "gpt-5.4", "ultra") is False
     assert tb.is_valid_reasoning_effort(tb.CODEX, "gpt-5.6-sol", "ultra") is True
+
+
+# ---------------------------------------------------------------------------
+# model_vendor / model_backend_mismatch
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("model,expected", [
+    ("claude-opus-5", "anthropic"),
+    ("claude-haiku-4-5-20251001", "anthropic"),
+    ("gpt-5.6-sol", "openai"),
+    ("codex-auto-review", "openai"),
+    ("o3-mini", "openai"),
+])
+def test_model_vendor_recognizes_each_family(model, expected):
+    assert tb.model_vendor(model) == expected
+
+
+def test_model_vendor_normalizes_case_and_whitespace():
+    assert tb.model_vendor("  Claude-Sonnet-5  ") == "anthropic"
+    assert tb.model_vendor("GPT-5.6-Sol") == "openai"
+
+
+@pytest.mark.parametrize("model", ["", "   ", "auto", "some-internal-model", "my-finetune-v3"])
+def test_model_vendor_is_none_for_anything_it_cannot_place(model):
+    """The model field is free text (docs/ai-models.md). An id from no known family belongs
+    to nobody, so it must never be attributed — and therefore never blocked."""
+    assert tb.model_vendor(model) is None
+
+
+def test_model_vendor_recognizes_bare_claude_aliases():
+    """Aliases are resolved only for a `claude` stage, so a literal "opus-5" really does
+    reach config.json under backends.clarify = "codex"."""
+    assert tb.model_vendor("opus-5") == "anthropic"
+    assert tb.model_vendor("sonnet") == "anthropic"
+
+
+def test_model_backend_mismatch_flags_the_other_vendors_model():
+    assert tb.model_backend_mismatch(tb.CODEX, "claude-sonnet-5") == "anthropic"
+    assert tb.model_backend_mismatch(tb.CODEX, "opus-5") == "anthropic"
+    assert tb.model_backend_mismatch(tb.CLAUDE, "gpt-5.6-sol") == "openai"
+
+
+def test_model_backend_mismatch_never_flags_copilot():
+    """Copilot proxies several providers, so an Anthropic model on it is a valid pair. This
+    is the regression that matters most: flagging it would break a working configuration."""
+    assert tb.model_backend_mismatch(tb.COPILOT, "claude-sonnet-5") is None
+    assert tb.model_backend_mismatch(tb.COPILOT, "gpt-5.6-sol") is None
+    assert tb.model_backend_mismatch(tb.COPILOT, "auto") is None
+
+
+@pytest.mark.parametrize("backend", tb.BACKENDS.values(), ids=lambda b: b.name)
+def test_model_backend_mismatch_passes_its_own_vendors_and_unknown_ids(backend):
+    assert tb.model_backend_mismatch(backend, "some-internal-model") is None
+    # Empty is legal at runtime: copilot/codex omit --model entirely when it is falsy.
+    assert tb.model_backend_mismatch(backend, "") is None
+
+
+def test_model_mismatch_message_names_the_fix_and_every_alternative():
+    message = tb.model_mismatch_message(tb.CODEX, "claude-sonnet-5", "anthropic")
+    assert "claude-sonnet-5" in message
+    assert "Anthropic" in message
+    assert tb.CODEX.model_catalog_hint in message
+    # Both backends that CAN run an Anthropic model are offered.
+    assert tb.CLAUDE.label in message
+    assert tb.COPILOT.label in message
+
+
+@pytest.mark.parametrize("backend", tb.BACKENDS.values(), ids=lambda b: b.name)
+def test_every_backend_declares_vendors_and_a_catalog_hint(backend):
+    assert backend.model_vendors
+    assert backend.model_catalog_hint
+
+
+def test_model_vendor_tables_are_lowercase():
+    for vendor, prefixes in tb.MODEL_VENDOR_PREFIXES:
+        assert vendor in tb.MODEL_VENDOR_LABELS
+        for prefix in prefixes:
+            assert prefix == prefix.lower()
+    for model_id in tb.MODEL_VENDOR_EXACT_IDS:
+        assert model_id == model_id.lower()
+
+
+def test_claude_aliases_do_not_drift_from_tempa_config():
+    """MODEL_VENDOR_EXACT_IDS duplicates tempa_config.MODEL_ALIASES so tempa_backend can
+    stay a dependency-free leaf module. This is what stops the copy from rotting."""
+    import tempa_config
+
+    for alias, full_id in tempa_config.MODEL_ALIASES.items():
+        assert tb.model_vendor(alias) == "anthropic", alias
+        assert tb.model_vendor(full_id) == "anthropic", full_id
+
+
+def test_codex_reasoning_catalog_models_are_all_openai():
+    """Ties the two hardcoded Codex catalogs together: a model Codex offers an effort list
+    for had better be one Codex is allowed to run."""
+    for model in tb.CODEX_MODEL_REASONING_LEVELS:
+        assert tb.model_backend_mismatch(tb.CODEX, model) is None, model
 
 
 # ---------------------------------------------------------------------------

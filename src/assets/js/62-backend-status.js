@@ -32,6 +32,7 @@ settingsDetectBackendsBtn.addEventListener("click", async () => {
     state.backendsStatus = data.backends || {};
     renderBackendStatus();
     populateBackendSelect(settingsBackendClarify, settingsBackendClarify.value);
+    populateBackendSelect(settingsBackendClarifyApply, settingsBackendClarifyApply.value);
     populateBackendSelect(settingsBackendPlan, settingsBackendPlan.value);
     populateBackendSelect(settingsBackendImplement, settingsBackendImplement.value);
     toast("CLI backend availability refreshed.");

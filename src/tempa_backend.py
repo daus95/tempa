@@ -87,6 +87,44 @@ CODEX_MODEL_REASONING_LEVELS = {
 # text, so an unrecognized/future model must still get a usable, conservative choice list).
 CODEX_DEFAULT_EFFORT_LEVELS = CODEX_UNIVERSAL_LEVELS + ("low", "medium", "high", "xhigh")
 
+# Which vendor's API actually serves a model id. Prefix families rather than an exact model
+# list on purpose: every exact catalog in this file carries a "this goes stale independently
+# of Tempa" caveat (see CODEX_MODEL_REASONING_LEVELS above and MODEL_OPTIONS_BY_BACKEND in
+# assets/js/80-settings-form.js), and a stale exact list here would silently stop protecting
+# anyone the day a vendor ships a new id. A family prefix does not go stale: "claude-" has
+# never named an OpenAI model and never will.
+#
+# An id matching no family has no known vendor and is therefore never blocked — the model
+# field is deliberately free text (see docs/ai-models.md), so an unrecognized or future id
+# must keep working. That makes this table fail-open by construction: it can only ever catch
+# the unambiguous mistake of pointing a backend at another vendor's model. "gemini-" is left
+# out for that reason — Copilot serves it, no backend here is Gemini-only, so listing it
+# would buy nothing and only risk a false block.
+MODEL_VENDOR_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("anthropic", ("claude-",)),
+    ("openai", ("gpt-", "o3-", "o4-", "codex-")),
+)
+
+# Human-readable vendor names, for the message a mismatch produces.
+MODEL_VENDOR_LABELS = {"anthropic": "Anthropic", "openai": "OpenAI"}
+
+# Ids that name a vendor without carrying its family prefix. Mirrors tempa_config's
+# MODEL_ALIASES, which is Claude-only and — the part that matters here — is resolved ONLY for
+# a `claude` stage (see dashboard_api_settings._validate_stage_settings and
+# tempa_commands.set_models), so a literal "opus-5" really does reach config.json under
+# backends.clarify = "codex". Kept here rather than imported so this module stays
+# dependency-free; tests/test_tempa_backend.py guards the two copies against drifting apart.
+MODEL_VENDOR_EXACT_IDS: dict[str, str] = {
+    "opus": "anthropic",
+    "opus-5": "anthropic",
+    "sonnet": "anthropic",
+    "sonnet-5": "anthropic",
+    "haiku": "anthropic",
+    "haiku-4.5": "anthropic",
+    "fable": "anthropic",
+    "fable-5": "anthropic",
+}
+
 
 def _no_background_wait_env(seconds: int | float) -> dict[str, str]:
     """Default `Backend.background_wait_env`: a CLI with no documented knob for how long it
@@ -107,8 +145,17 @@ class Backend:
     usage_limit_markers: tuple[str, ...]
     auth_error_markers: tuple[str, ...]
     overloaded_markers: tuple[str, ...]
+    # Markers this CLI prints when it rejects the model it was handed. The static
+    # backend/model check (see model_backend_mismatch) catches the unambiguous case before
+    # the CLI is ever spawned; this is the backstop for everything it deliberately lets
+    # through — a retired model, one the account has no access to, a typo'd id.
+    model_error_markers: tuple[str, ...]
     friendly_auth_error_message: Callable[[str], str]
     reasoning_effort_choices: Callable[[str], tuple[str, ...]]
+    # Which vendors' models this CLI can actually reach — see MODEL_VENDOR_PREFIXES. Required
+    # rather than defaulted: a backend added later that forgot it would silently opt out of
+    # the check with no symptom at all.
+    model_vendors: frozenset[str]
     # Environment variables that raise this CLI's own ceiling on how long it waits for
     # background work (sub-agents, backgrounded shells) before killing it, given Tempa's
     # configured wait in seconds. Applied as DEFAULTS by tempa_session._backend_env — an
@@ -124,6 +171,9 @@ class Backend:
     # `resolve_exe` cannot catch that case: it finds the launcher on PATH and is satisfied,
     # while the executable that launcher points at is gone.
     install_command: str = ""
+    # How to list the model ids this CLI accepts, quoted at the user by both the static
+    # mismatch message and the runtime model-rejection one so they give the same next step.
+    model_catalog_hint: str = ""
 
 
 def resolve_exe(backend: Backend) -> str | None:
@@ -158,6 +208,83 @@ def is_valid_reasoning_effort(backend: Backend, model: str, effort: str) -> bool
     """"" (unset — use the CLI/model's own default) is always valid; otherwise `effort`
     must be one of backend.reasoning_effort_choices(model)."""
     return not effort or effort in backend.reasoning_effort_choices(model)
+
+
+class ModelBackendMismatchError(ValueError):
+    """The configured model unambiguously belongs to a vendor this backend cannot reach.
+
+    Raised before the CLI is spawned (see tempa_session.prepare_backend_invocation), because
+    the CLI's own complaint about it is unreadable: the reported case had a stage left on
+    model `claude-sonnet-5` after its backend was switched to `codex`, and the failure
+    reached the user as nothing but an `[agent-runner error]` line in a log file.
+
+    Subclasses ValueError so the pre-existing `except Exception` wrappers around that call
+    keep behaving sanely, and carries the parts structured so handlers can build an
+    attention event's details without re-parsing the prose.
+    """
+
+    def __init__(self, message: str, backend_name: str, model: str, vendor: str) -> None:
+        super().__init__(message)
+        self.backend_name = backend_name
+        self.model = model
+        self.vendor = vendor
+
+
+def model_vendor(model: str) -> str | None:
+    """The vendor whose API serves `model`, or None when nothing about the id identifies one.
+
+    None is the answer for an unrecognized or future id, not an error: the model field is
+    free text and must keep working for ids this table has never heard of (Copilot's `auto`,
+    a private fine-tune, next quarter's release). Normalized the same way
+    CODEX.reasoning_effort_choices normalizes."""
+    value = model.strip().lower()
+    if not value:
+        return None
+    if value in MODEL_VENDOR_EXACT_IDS:
+        return MODEL_VENDOR_EXACT_IDS[value]
+    for vendor, prefixes in MODEL_VENDOR_PREFIXES:
+        if value.startswith(prefixes):
+            return vendor
+    return None
+
+
+def model_backend_mismatch(backend: Backend, model: str) -> str | None:
+    """The vendor `model` belongs to, when `backend` cannot serve that vendor — else None.
+
+    None means "usable, or not knowably wrong". An empty model returns None because it is
+    legal at runtime: _copilot_build_cmd and _codex_build_cmd both omit --model entirely
+    when it is falsy, leaving the CLI on its own default."""
+    vendor = model_vendor(model)
+    if vendor is None or vendor in backend.model_vendors:
+        return None
+    return vendor
+
+
+def backends_serving(vendor: str) -> tuple[Backend, ...]:
+    """Every backend that can run `vendor`'s models, in registry order."""
+    return tuple(b for b in BACKENDS.values() if vendor in b.model_vendors)
+
+
+def model_mismatch_message(backend: Backend, model: str, vendor: str) -> str:
+    """The one user-facing sentence for a mismatch, shared verbatim by the dashboard save
+    validator, the `set-model`/`set-backend` commands and the pre-spawn check — so the user
+    never has to reconcile three different accounts of the same problem.
+
+    The "or switch this stage's backend to X" tail is derived from BACKENDS rather than
+    written out, so it names every real alternative (Copilot serves both vendors, and is the
+    right answer surprisingly often) and stays correct if a backend is ever added."""
+    vendor_label = MODEL_VENDOR_LABELS.get(vendor, vendor)
+    hint = f" ({backend.model_catalog_hint})" if backend.model_catalog_hint else ""
+    alternatives = [b.label for b in backends_serving(vendor)]
+    if len(alternatives) > 1:
+        alternatives_text = ", ".join(alternatives[:-1]) + " or " + alternatives[-1]
+    else:
+        alternatives_text = alternatives[0] if alternatives else ""
+    switch = f", or switch this stage's backend to {alternatives_text}" if alternatives_text else ""
+    return (
+        f"Model '{model}' is an {vendor_label} model, and {backend.label} cannot run it. "
+        f"Set this stage's model to one {backend.label} accepts{hint}{switch}."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +415,18 @@ CLAUDE = Backend(
         "529 overloaded",
         "overloaded_error",
     ),
+    # Guesses, not forced live (same tradeoff as the usage-limit markers on the other two
+    # backends). "not_found_error" is Anthropic's own error type and is the weaker of the
+    # pair — a session working on an Anthropic-API app could print it — so it survives only
+    # because _failure_marker_text narrows matching to real failure output. Drop it if a
+    # false positive is ever observed.
+    model_error_markers=(
+        "invalid model name",
+        "not_found_error",
+    ),
     friendly_auth_error_message=_claude_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CLAUDE_EFFORT_LEVELS,
+    model_vendors=frozenset({"anthropic"}),
     background_wait_env=_claude_background_wait_env,
     # Printed verbatim (plain stderr, merged into the stream) when the ceiling above expires:
     #   "Background tasks still running after 600s; terminating. Set
@@ -297,6 +434,7 @@ CLAUDE = Backend(
     # Matched without the seconds count, which varies with the configured ceiling.
     background_terminated_markers=("background tasks still running after",),
     install_command="npm install -g @anthropic-ai/claude-code",
+    model_catalog_hint="run `claude --help` or see Anthropic's model docs for the current ids",
 )
 
 
@@ -381,9 +519,21 @@ COPILOT = Backend(
     # No transient-overload wording confirmed live for this backend yet — left empty
     # rather than guessing (see the false-positive caution above for auth_error_markers).
     overloaded_markers=(),
+    # Guesses (see the caution on auth_error_markers above — full phrases only, nothing that
+    # could fall out of a random hex UUID).
+    model_error_markers=(
+        "unknown model",
+        "is not a valid model",
+    ),
     friendly_auth_error_message=_copilot_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: COPILOT_EFFORT_LEVELS,
+    # Both vendors, deliberately: Copilot is a proxy in front of several providers, so
+    # `claude-sonnet-5` on this backend is perfectly valid and must never be flagged. This
+    # is the one entry that looks like a mistake and isn't.
+    model_vendors=frozenset({"anthropic", "openai"}),
     install_command="npm install -g @github/copilot",
+    model_catalog_hint="run `copilot --help`, or check which models your organization's "
+                       "Copilot policy allows",
 )
 
 
@@ -459,9 +609,19 @@ CODEX = Backend(
     # No transient-overload wording confirmed live for this backend yet — left empty
     # rather than guessing (see the false-positive caution above for auth_error_markers).
     overloaded_markers=(),
+    # "model_not_found" and the long phrase below are OpenAI's own verbatim 404 body for an
+    # unknown/inaccessible model — distinctive enough to be safe as raw substrings.
+    # "unsupported model" is a guess.
+    model_error_markers=(
+        "model_not_found",
+        "does not exist or you do not have access to it",
+        "unsupported model",
+    ),
     friendly_auth_error_message=_codex_friendly_auth_error_message,
     reasoning_effort_choices=lambda model: CODEX_MODEL_REASONING_LEVELS.get(model.strip().lower(), CODEX_DEFAULT_EFFORT_LEVELS),
+    model_vendors=frozenset({"openai"}),
     install_command="npm install -g @openai/codex",
+    model_catalog_hint="run `codex debug models` to list them",
 )
 
 

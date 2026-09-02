@@ -10,6 +10,24 @@ once the first tagged release is cut.
 
 ### Added
 
+- Tempa now checks that a stage's AI model can actually run on that stage's CLI backend, and
+  says so before anything is spawned. Pointing a backend at another vendor's model — most
+  often a stage left on `claude-sonnet-5` after its backend was switched to `codex` — used to
+  save without complaint and then fail with an error from the CLI that never reached the
+  console. Models are recognized by vendor family rather than by an exact list, so the model
+  field stays free text: an id Tempa cannot place (a private fine-tune, a future release,
+  Copilot's `auto`) is never blocked, and GitHub Copilot CLI, which proxies several providers,
+  never mismatches. The dashboard shows an inline warning under the model field and refuses
+  the save; `tempa set-backend` refuses the change and names the `tempa set-model` to run
+  first, while `tempa set-model` warns but still writes, so migrating a stage between backends
+  stays possible; `tempa show-models`/`show-backends` mark an affected row. A wrong pair that
+  somehow gets past all of that stops before the CLI is spawned, and raises a new
+  **Backend/model mismatch** email alert. See [docs/ai-models.md](docs/ai-models.md).
+- If a model does reach the CLI and is rejected there — a retired id, or one the account has
+  no access to — Tempa now recognizes the CLI's own model-rejection output and stops with a
+  readable message instead of failing opaquely, the same way it already handles authentication
+  failures.
+
 - The dashboard now recognizes when there is nothing left to clarify. Once every finding is
   answered and the latest round reports no critical or major findings (with majors actually
   swept, and minors either resolved or out of scope via "Only evaluate critical & major

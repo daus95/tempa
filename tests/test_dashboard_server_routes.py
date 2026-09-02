@@ -898,6 +898,78 @@ def test_config_save_rejects_an_invalid_reasoning_effort(dash):
     assert body["error"].startswith("The clarify reasoning effort must be empty or one of: ")
 
 
+def test_config_save_rejects_a_model_the_backend_cannot_run(dash):
+    """The reported bug, caught at the door: a stage left on an Anthropic model after its
+    backend was switched to Codex used to save fine and then fail unreadably at run time."""
+    payload = _config_payload(
+        backends={**{s: "claude" for s in STAGES}, "clarify": "codex"},
+        models={**{s: "claude-sonnet-5" for s in STAGES}},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 400
+    assert body["error"].startswith("The clarify model cannot run on the selected backend.")
+    assert "OpenAI Codex CLI" in body["error"]
+
+
+def test_config_save_rejects_an_anthropic_backend_holding_an_openai_model(dash):
+    payload = _config_payload(
+        backends={s: "claude" for s in STAGES},
+        models={**{s: "claude-sonnet-5" for s in STAGES}, "implement": "gpt-5.6-sol"},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 400
+    assert body["error"].startswith("The implement model cannot run on the selected backend.")
+
+
+def test_config_save_accepts_an_anthropic_model_on_copilot(dash):
+    """Copilot proxies several providers, so this pair is valid — the check must not break
+    a configuration that works today."""
+    payload = _config_payload(
+        backends={s: "copilot" for s in STAGES},
+        models={s: "claude-sonnet-5" for s in STAGES},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 200
+    assert body["config"]["models"] == {stage: "claude-sonnet-5" for stage in STAGES}
+
+
+def test_config_save_accepts_a_model_id_from_no_known_vendor(dash):
+    """The model field stays free text: an id this table has never heard of (a private
+    fine-tune, next quarter's release) belongs to nobody and is nobody's to reject."""
+    payload = _config_payload(
+        backends={s: "codex" for s in STAGES},
+        models={s: "some-internal-model" for s in STAGES},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 200
+    assert body["config"]["models"] == {stage: "some-internal-model" for stage in STAGES}
+
+
+def test_config_save_rejects_a_bare_claude_alias_on_a_codex_stage(dash):
+    """Aliases are resolved only for a `claude` stage, so a literal "opus-5" would
+    otherwise be stored verbatim and handed to Codex as-is."""
+    payload = _config_payload(
+        backends={**{s: "claude" for s in STAGES}, "plan": "codex"},
+        models={**{s: "claude-sonnet-5" for s in STAGES}, "plan": "opus-5"},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 400
+    assert body["error"].startswith("The plan model cannot run on the selected backend.")
+
+
+def test_config_save_reports_the_model_mismatch_ahead_of_an_invalid_effort(dash):
+    """Precedence: a model the backend cannot run at all would otherwise be reported as an
+    unsupported effort level, sending the user to fix the wrong field."""
+    payload = _config_payload(
+        backends={**{s: "claude" for s in STAGES}, "clarify": "codex"},
+        models={**{s: "claude-sonnet-5" for s in STAGES}},
+        reasoning_efforts={**{s: "" for s in STAGES}, "clarify": "turbo"},
+    )
+    status, body = dash.post("/api/config/save", payload)
+    assert status == 400
+    assert "cannot run on the selected backend" in body["error"]
+
+
 @pytest.mark.parametrize("field,message", [
     ("features_per_session", "Features per Session must be empty or a positive whole number."),
     ("max_session_run", "Max Session Runs must be empty or a positive whole number."),

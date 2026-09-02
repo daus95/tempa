@@ -678,11 +678,11 @@ def run_clarify_once(noui: bool = False, skip_minor: bool = False) -> None:
         lambda: run_clarification_session(prompt, 1, get_backend_def(get_backend(config, "clarify")), get_model(config, "clarify"), get_reasoning_effort(config, "clarify")),
         "Clarification evaluation",
     ):
-        if _state.auth_error_hit:
+        if _state.backend_config_error_hit:
             sys.exit(3)
         log("Clarification evaluation failed.")
         sys.exit(1)
-    if _state.auth_error_hit:
+    if _state.backend_config_error_hit:
         sys.exit(3)
 
     evidence = _ledger_evidence(clar_dir, carried_ledger, carried_ids)
@@ -824,11 +824,11 @@ def _run_auto_answer_step(config: dict, unanswered_files: list[Path]) -> bool:
         ),
         "Auto-answer",
     ):
-        if _state.auth_error_hit:
+        if _state.backend_config_error_hit:
             sys.exit(3)
         log("Auto-answer failed.")
         return False
-    if _state.auth_error_hit:
+    if _state.backend_config_error_hit:
         sys.exit(3)
     return True
 
@@ -1031,7 +1031,7 @@ def _finalize_evaluate_round(config: dict, clar_dir: Path, run_number: int, roun
         ),
         f"Clarify (finalize) round #{run_number} — evaluate",
     )
-    if _state.auth_error_hit:
+    if _state.backend_config_error_hit:
         sys.exit(3)
     if not success:
         log(f"Clarification run #{run_number} failed — stopping the loop.")
@@ -1636,11 +1636,11 @@ def _run_apply_step(config: dict, resume_session_id: str | None = None) -> bool:
         return run_apply_clarification_session(prompt, 1, apply_backend, apply_model, apply_effort, resume_session_id=sid)
 
     if not run_with_usage_limit_retry(_attempt_apply, "Apply"):
-        if _state.auth_error_hit:
+        if _state.backend_config_error_hit:
             sys.exit(3)
         log("Apply clarification failed.")
         return False
-    if _state.auth_error_hit:
+    if _state.backend_config_error_hit:
         sys.exit(3)
 
     config = load_config()

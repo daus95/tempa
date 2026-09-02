@@ -25,9 +25,10 @@ Use **Send Test Email** in the dashboard or:
 tempa notifications test
 ```
 
-Emails are sent for authentication failures, permanent implementation/planning/clarification
-failures, run-limit safeguards, unanswered critical/major clarification findings, verification
-failures, and the interactive "run another clarification round" prompt. They do not approve
+Emails are sent for authentication failures, a stage configured with a model its CLI backend
+cannot run, permanent implementation/planning/clarification failures, run-limit safeguards,
+unanswered critical/major clarification findings, verification failures, and the interactive
+"run another clarification round" prompt. They do not approve
 actions; return to the dashboard or CLI to continue.
 
 Tempa intentionally sends no email for automatic recovery: usage-limit waits, provider retries,

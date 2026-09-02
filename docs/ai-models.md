@@ -15,6 +15,9 @@ Each stage (`clarify`, `clarify_apply`, `plan`, `implement`) is also driven by a
 | `copilot` | GitHub Copilot CLI (`copilot`) | Model catalog is Copilot's own — pass a real model id or `auto`. |
 | `codex` | OpenAI Codex CLI (`codex`) | Model catalog is Codex's own — pass a real model id. |
 
+Tempa checks that the stage's model can actually run on the stage's backend before it starts
+a session — see [Backend/model compatibility](#backendmodel-compatibility) below.
+
 ```bash
 tempa set-backend --clarify claude --clarify-apply codex --plan copilot --implement codex
 tempa show-backends                              # show the backend per stage
@@ -80,6 +83,39 @@ tempa show-models                              # show the model per stage
   Aliases are Claude-specific; for a `copilot`/`codex` stage the value is stored exactly
   as given, since those CLIs' model catalogs aren't hardcoded into Tempa.
 - A stage that isn't specified keeps its previous/default value.
+
+## Backend/model compatibility
+
+The model field is free text, but Tempa refuses one specific mistake: **pointing a backend at
+another vendor's model**. Leaving a stage on `claude-sonnet-5` after switching its backend to
+`codex` used to save fine and then fail at run time with an error from the CLI that never
+reached the console — this is that failure, caught up front.
+
+Tempa recognizes model ids by **vendor family** (`claude-*` and the Claude aliases →
+Anthropic; `gpt-*`, `o3-*`, `o4-*`, `codex-*` → OpenAI) rather than by an exact model list, so
+the check does not go stale as vendors ship new ids. Three consequences worth knowing:
+
+- **An id from no known family is never blocked.** `auto`, a private fine-tune, next quarter's
+  release — Tempa cannot attribute it, so it passes through everywhere and reaches the CLI
+  exactly as typed. The free-text model field keeps working.
+- **`copilot` never mismatches.** GitHub Copilot CLI proxies several providers, so
+  `copilot` + `claude-sonnet-5` and `copilot` + `gpt-5.6-sol` are both perfectly valid pairs.
+- **Only the pair is wrong, never the model on its own.** The message names both halves and
+  every backend that *could* run that model.
+
+Where it applies:
+
+| Where | Behaviour |
+|---|---|
+| Dashboard → Settings → AI Models | An inline red note appears under the model field as soon as the pair goes wrong, and **Save Settings** is refused with a message naming the stage. |
+| `tempa set-backend` | **Refused.** The stage's model is already whatever you want it to be, so a mismatch here means the pair is simply wrong. The message names the `tempa set-model` command to run first. |
+| `tempa set-model` | **Warned, but saved.** Blocking both commands would make migrating a stage impossible — each would reject the half-finished pair the other one needs first. So `set-model` then `set-backend` always works, and the transitional pair still cannot run. |
+| `tempa show-models` / `show-backends` | A mismatched stage's row is marked `[!] not runnable on <backend>`. |
+| Before any session starts | The run stops **before the CLI is spawned**, on the console, with the same message — and raises a `Backend/model mismatch` alert if email notifications are on. |
+
+If a model still reaches the CLI and is rejected there (a retired id, or one this account has
+no access to), Tempa recognizes the CLI's own model-rejection output and stops the same way,
+rather than retrying or failing silently.
 
 ## Reasoning Effort
 

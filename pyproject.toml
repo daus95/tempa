@@ -2,6 +2,9 @@
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "browser: drives the real dashboard page in a headless browser (needs `playwright install chromium`)",
+]
 
 [tool.coverage.run]
 source = ["src"]

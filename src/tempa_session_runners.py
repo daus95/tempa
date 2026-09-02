@@ -122,6 +122,9 @@ def _log_session_result(label: str, exit_code: int, log_path: Path, usage_limit_
     one-time log tail) for a finished session. Returns True iff exit_code == 0 and the
     session ran to completion — no usage limit, server overload, or backend-side
     termination of the session's own background work."""
+    if _state.model_error_hit:
+        log(f"{label} stopped — the configured model was rejected (see message above).")
+        return False
     if _state.auth_error_hit:
         log(f"{label} stopped — authentication failed (see message above).")
         return False
@@ -266,7 +269,7 @@ def _record_qa_verdict_and_guard(config: dict, index: int, session_label: str, l
     epic = config["epic"][index]
     if epic.get("qa_status") != "done":
         return
-    if (_state.usage_limit_hit or _state.auth_error_hit
+    if (_state.usage_limit_hit or _state.backend_config_error_hit
             or _state.server_overloaded_hit or _state.backend_stuck_after_done_hit
             or _state.background_tasks_terminated_hit):
         return
