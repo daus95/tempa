@@ -365,6 +365,7 @@ DEFAULT_EMAIL_NOTIFICATION_EVENTS = (
     "authentication_required", "implementation_failed", "plan_failed", "session_limit_reached",
     "qa_limit_reached", "qa_oscillation_detected", "clarification_answers_required", "clarification_limit_reached",
     "clarification_failed", "confirmation_required", "verification_failed", "backend_test_failed",
+    "backend_model_mismatch",
 )
 
 

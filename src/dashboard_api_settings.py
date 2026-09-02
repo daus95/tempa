@@ -81,8 +81,9 @@ def read_config(backend_status: dict) -> Response:
 
 def _validate_stage_settings(payload: dict) -> tuple[str | None, dict]:
     """Backend, model and reasoning effort per stage. Validated together because each one
-    constrains the next: the backend decides which model strings are aliases, and
-    backend+model together decide which reasoning-effort levels exist."""
+    constrains the next: the backend decides which model strings are aliases, the backend
+    decides which vendors' models are reachable at all, and backend+model together decide
+    which reasoning-effort levels exist."""
     models_in = payload.get("models")
     backends_in = payload.get("backends")
     reasoning_efforts_in = payload.get("reasoning_efforts")
@@ -105,6 +106,14 @@ def _validate_stage_settings(payload: dict) -> tuple[str | None, dict]:
         # Friendly aliases (opus-5, sonnet-5, ...) are Claude-only — for copilot/codex
         # the model string is stored as-is (see tempa_config._resolve_model_alias).
         models[stage] = tempa_config._resolve_model_alias(value) if backends[stage] == "claude" else value
+        # Checked here, on the post-alias value, and ahead of the reasoning-effort loop
+        # below: a model the backend cannot run at all would otherwise be reported as an
+        # unsupported effort level, which sends the user to fix the wrong field.
+        backend_def = tempa_backend.get_backend_def(backends[stage])
+        vendor = tempa_backend.model_backend_mismatch(backend_def, models[stage])
+        if vendor:
+            return (f"The {stage} model cannot run on the selected backend. "
+                    + tempa_backend.model_mismatch_message(backend_def, models[stage], vendor)), {}
 
     reasoning_efforts = {}
     for stage in STAGES:

@@ -39,6 +39,7 @@ class AttentionEventType(StrEnum):
     CONFIRMATION_REQUIRED = "confirmation_required"
     VERIFICATION_FAILED = "verification_failed"
     BACKEND_TEST_FAILED = "backend_test_failed"
+    BACKEND_MODEL_MISMATCH = "backend_model_mismatch"
 
 
 DEFAULT_ENABLED_EVENTS = tuple(event.value for event in AttentionEventType)

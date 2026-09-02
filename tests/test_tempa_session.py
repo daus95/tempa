@@ -33,6 +33,8 @@ def reset_runner_state():
     ts._state.usage_limit_hit = False
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
+    ts._state.model_error_hit = False
+    ts._state.model_error_message = ""
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
     ts._state.background_tasks_terminated_hit = False
@@ -43,6 +45,8 @@ def reset_runner_state():
     ts._state.usage_limit_hit = False
     ts._state.auth_error_hit = False
     ts._state.auth_error_message = ""
+    ts._state.model_error_hit = False
+    ts._state.model_error_message = ""
     ts._state.server_overloaded_hit = False
     ts._state.backend_stuck_after_done_hit = False
     ts._state.background_tasks_terminated_hit = False
@@ -226,6 +230,44 @@ def test_prepare_invocation_stdin_backend_returns_full_prompt_as_stdin(monkeypat
     assert not (tmp_path / "session_20260101_000000.prompt.md").exists()
 
 
+def test_prepare_invocation_rejects_a_model_the_backend_cannot_run(monkeypatch, tmp_path):
+    """The reported bug: a stage left on claude-sonnet-5 after its backend moved to codex.
+    It has to fail here, before anything is spawned — the CLI's own complaint about it
+    reached the user as an unreadable `[agent-runner error]` line in a log file."""
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "codex")
+    with pytest.raises(tb.ModelBackendMismatchError) as excinfo:
+        ts.prepare_backend_invocation(
+            tb.CODEX, "claude-sonnet-5", None, "do the thing", tmp_path / "s.txt")
+    assert excinfo.value.vendor == "anthropic"
+    assert excinfo.value.model == "claude-sonnet-5"
+    assert excinfo.value.backend_name == "codex"
+
+
+def test_prepare_invocation_checks_the_model_before_looking_for_the_executable(monkeypatch, tmp_path):
+    """Ordering: when both are wrong, "install the CLI you should not be using" is the less
+    useful of the two errors."""
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: None)
+    with pytest.raises(tb.ModelBackendMismatchError):
+        ts.prepare_backend_invocation(
+            tb.CODEX, "claude-sonnet-5", None, "do the thing", tmp_path / "s.txt")
+
+
+def test_prepare_invocation_allows_an_anthropic_model_on_copilot(monkeypatch, tmp_path):
+    """Copilot proxies several providers — this pair is valid and must keep working."""
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "copilot")
+    cmd, _ = ts.prepare_backend_invocation(
+        tb.COPILOT, "claude-sonnet-5", None, "do the thing", tmp_path / "s.txt")
+    assert "claude-sonnet-5" in cmd
+
+
+@pytest.mark.parametrize("model", ["some-internal-model", ""])
+def test_prepare_invocation_allows_models_it_cannot_place(monkeypatch, tmp_path, model):
+    """Free text stays free text: an unrecognized id, and an empty one (both copilot and
+    codex simply omit --model then), are nobody's to reject."""
+    monkeypatch.setattr(ts, "resolve_exe", lambda backend: "codex")
+    ts.prepare_backend_invocation(tb.CODEX, model, None, "do the thing", tmp_path / "s.txt")
+
+
 def test_prepare_invocation_claude_keeps_prompt_bare_system_prompt_via_flag(monkeypatch, tmp_path):
     monkeypatch.setattr(ts, "resolve_exe", lambda backend: "claude")
     log_path = tmp_path / "session_20260101_000000.txt"
@@ -315,6 +357,50 @@ def test_handle_auth_error_sets_friendly_message():
     assert ts._state.auth_error_hit is True
     assert "ANTHROPIC_API_KEY" in ts._state.auth_error_message
     process.terminate.assert_called_once()
+
+
+def test_handle_model_error_sets_state_terminates_and_notifies(monkeypatch):
+    notifier = Mock()
+    monkeypatch.setattr(ts, "notify_attention", notifier)
+    process = Mock()
+    handled = ts._handle_model_error("model_not_found", process, "label", tb.CODEX, "gpt-9")
+    assert handled is True
+    assert ts._state.model_error_hit is True
+    assert "gpt-9" in ts._state.model_error_message
+    assert ts._state.stop_event.is_set()
+    process.terminate.assert_called_once()
+    notifier.assert_called_once()
+
+
+def test_handle_model_error_no_match_returns_false_without_side_effects():
+    process = Mock()
+    handled = ts._handle_model_error("all good", process, "label", tb.CODEX, "gpt-9")
+    assert handled is False
+    assert ts._state.model_error_hit is False
+    process.terminate.assert_not_called()
+
+
+def test_is_model_error_text_one_backends_marker_does_not_match_another():
+    assert ts._is_model_error_text("model_not_found", tb.CODEX) is True
+    assert ts._is_model_error_text("model_not_found", tb.CLAUDE) is False
+    assert ts._is_model_error_text("invalid model name", tb.CLAUDE) is True
+    assert ts._is_model_error_text("", tb.CODEX) is False
+
+
+def test_model_error_marker_inside_a_successful_event_is_not_eligible():
+    """A Tempa session routinely works on code that talks to an LLM, so this exact wording
+    turns up in ordinary tool output. _failure_marker_text is what keeps that ineligible."""
+    line = '{"type": "item.completed", "item": {"text": "the API returns model_not_found"}}'
+    assert ts._failure_marker_text(line, json.loads(line)) == ""
+
+
+def test_backend_config_error_hit_covers_both_unrecoverable_stops():
+    assert ts._state.backend_config_error_hit is False
+    ts._state.model_error_hit = True
+    assert ts._state.backend_config_error_hit is True
+    ts._state.model_error_hit = False
+    ts._state.auth_error_hit = True
+    assert ts._state.backend_config_error_hit is True
 
 
 def test_handle_overloaded_sets_state_and_terminates_process():

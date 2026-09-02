@@ -52,6 +52,12 @@ class _RunnerState:
         self.usage_limit_hit = False
         self.auth_error_hit = False
         self.auth_error_message = ""
+        # The configured backend/model pair is wrong — either caught before the CLI was
+        # spawned (tempa_session.prepare_backend_invocation) or reported by the CLI itself.
+        # Deliberately NOT reset per session in _stream_backend_process, exactly like
+        # auth_error_hit: it is fatal for the whole process, not for one session.
+        self.model_error_hit = False
+        self.model_error_message = ""
         self.server_overloaded_hit = False
         self.backend_stuck_after_done_hit = False
         self.background_tasks_terminated_hit = False
@@ -73,6 +79,15 @@ class _RunnerState:
         # from "what a psql query printed". Reset per session in _stream_backend_process, the same
         # way the flags above are.
         self.last_agent_message = ""
+
+    @property
+    def backend_config_error_hit(self) -> bool:
+        """A stop that no amount of waiting or retrying can clear: the configured
+        credentials, or the configured backend/model pair, are wrong and a human has to
+        change them. Unlike a usage limit or a server overload, the next session would fail
+        in exactly the same way, so every caller that decides "give up now vs. wait and
+        retry" asks this rather than either flag on its own."""
+        return self.auth_error_hit or self.model_error_hit
         # Set only by the poll loop itself, and only once it has confirmed no session
         # thread is running — so "the user asked to stop and we reached a clean seam"
         # stays distinguishable from every other reason stop_event gets set (a failure,

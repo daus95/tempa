@@ -671,7 +671,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
             log("No task (epic/feature/QA) to work on — running plan automatically "
                 "before implementation.")
         if not _plan_epics_run(config):
-            if _state.auth_error_hit:
+            if _state.backend_config_error_hit:
                 sys.exit(3)
             log("Plan failed — agent runner stopping.")
             notify_attention(
@@ -730,7 +730,7 @@ def main(features_override: int | None = None, replan: bool = False) -> None:
         # — wait for it before reading any of the flags below (see _await_session_thread).
         _await_session_thread()
 
-        if _state.auth_error_hit:
+        if _state.backend_config_error_hit:
             log("Agent runner stopped — authentication failed (see message above). "
                 "Re-authenticate the configured CLI backend, then run this command again.")
             sys.exit(3)
@@ -790,8 +790,8 @@ def _plan_epics_run(config: dict) -> bool:
     write .md files to specs/pbi/epics + append to config.json, then review & fix.
 
     Called from within implement (not a separate command) — see main(). Returns True if
-    generate + review succeed; False on a real failure or an auth error (check
-    _state.auth_error_hit) — a usage-limit stop during either step is waited out and
+    generate + review succeed; False on a real failure or a backend-configuration error
+    (check _state.backend_config_error_hit) — a usage-limit stop during either step is waited out and
     retried in place (run_with_usage_limit_retry), so it never causes this to return
     False."""
     sources = get_sources(config)
@@ -817,7 +817,7 @@ def _plan_epics_run(config: dict) -> bool:
         ),
         "Plan (generate epics)",
     ):
-        if not _state.auth_error_hit:
+        if not _state.backend_config_error_hit:
             log("Generate epic failed — stopping.")
         return False
 
@@ -833,7 +833,7 @@ def _plan_epics_run(config: dict) -> bool:
         ),
         "Plan (review epics)",
     ):
-        if not _state.auth_error_hit:
+        if not _state.backend_config_error_hit:
             log("Review epic failed — stopping.")
         return False
 

@@ -51,6 +51,29 @@ _REBIND_ATTEMPTS = 5
 _REBIND_DELAY_SEC = 0.5
 
 
+def configure_server(server: ThreadingHTTPServer, prd_dir: Path, clar_dir: Path,
+                     page_html: str) -> None:
+    """Attach the per-server state every request handler reads off `self.server`.
+
+    Split out of run_dashboard so a test can stand the real handler up on an ephemeral port
+    with exactly the same state production gets — an attribute added here can't then be
+    missing there, which is the only way a browser test could pass against a server the
+    real one doesn't resemble."""
+    server.prd_dir = prd_dir
+    server.clar_dir = clar_dir
+    # Not a parameter like the two above: the epic-spec folder has no CLI entry point that
+    # opens the dashboard "at" it, so it is only ever derived from the active workspace —
+    # and re-derived, like prd_dir/clar_dir, whenever that workspace changes.
+    server.epics_dir = _resolve_source_dir("epics", "pbi/epics")
+    server.page_html = page_html
+    server.any_saved = False
+    server.clarify_run = _new_clarify_run_state()
+    server.implement_run = _new_implement_run_state()
+    # Keyed per-epic (unlike clarify_run/implement_run's single global slot) since more
+    # than one epic's verification may run at once — see dashboard_verify.py.
+    server.verify_runs = {}
+
+
 def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home",
                    port: int = 0, open_browser: bool = True) -> bool:
     """Serve the dashboard and block until interrupted with Ctrl+C. `initial_view` is one
@@ -84,19 +107,7 @@ def run_dashboard(prd_dir: Path, clar_dir: Path, initial_view: str = "home",
     if server is None:
         print(f"Could not rebind port {port}; falling back to a new port.")
         server = ThreadingHTTPServer(("127.0.0.1", 0), _DashboardHandler)
-    server.prd_dir = prd_dir
-    server.clar_dir = clar_dir
-    # Not a parameter like the two above: the epic-spec folder has no CLI entry point that
-    # opens the dashboard "at" it, so it is only ever derived from the active workspace —
-    # and re-derived, like prd_dir/clar_dir, whenever that workspace changes.
-    server.epics_dir = _resolve_source_dir("epics", "pbi/epics")
-    server.page_html = page_html
-    server.any_saved = False
-    server.clarify_run = _new_clarify_run_state()
-    server.implement_run = _new_implement_run_state()
-    # Keyed per-epic (unlike clarify_run/implement_run's single global slot) since more
-    # than one epic's verification may run at once — see dashboard_verify.py.
-    server.verify_runs = {}
+    configure_server(server, prd_dir, clar_dir, page_html)
 
     bound_port = server.server_address[1]
     url = f"http://127.0.0.1:{bound_port}/"

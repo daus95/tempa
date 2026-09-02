@@ -672,7 +672,7 @@ def apply_session_outcome(
     if (
         exit_code != 0
         and not _state.usage_limit_hit
-        and not _state.auth_error_hit
+        and not _state.backend_config_error_hit
         and not _state.server_overloaded_hit
         and not _state.backend_stuck_after_done_hit
         and not _state.background_tasks_terminated_hit
@@ -710,7 +710,7 @@ def apply_session_outcome(
         log(f"Session [{session_label}] was cut short by {backend.label} terminating its "
             "own background work, so this round is left out of the no-progress count — "
             "the epic stays resumable and continues on the next poll.")
-    elif exit_code == 0 and not (_state.usage_limit_hit or _state.auth_error_hit or _state.server_overloaded_hit):
+    elif exit_code == 0 and not (_state.usage_limit_hit or _state.backend_config_error_hit or _state.server_overloaded_hit):
         # The session finished "successfully" (exit 0) but that alone doesn't mean it made
         # progress — a backend that's genuinely blocked on something outside this epic (a
         # dependency owned by a not-yet-implemented epic, say) will explain that and exit 0

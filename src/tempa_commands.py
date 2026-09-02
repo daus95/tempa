@@ -14,7 +14,14 @@ from datetime import datetime
 from pathlib import Path
 
 from dashboard_ui import run_dashboard
-from tempa_backend import BACKENDS, get_backend_def, is_valid_reasoning_effort
+from tempa_backend import (
+    BACKENDS,
+    ModelBackendMismatchError,
+    get_backend_def,
+    is_valid_reasoning_effort,
+    model_backend_mismatch,
+    model_mismatch_message,
+)
 from tempa_config import (
     DEFAULT_WORKSPACE,
     WORKING_DIR,
@@ -102,7 +109,18 @@ def run_test() -> None:
             backend, get_model(config, "implement"), None, test_prompt, log_path,
             get_reasoning_effort(config, "implement"),
         )
-        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, "permission test", [0])
+        exit_code = _stream_backend_process(backend, cmd, stdin_text, log_path, "permission test", [0],
+                                            model=get_model(config, "implement"))
+    except ModelBackendMismatchError as e:
+        # The whole point of `tempa test` is to answer "can Tempa drive this CLI", so the
+        # one configuration mistake it must never report as a generic error is this one.
+        log(f"TEST FAILED — {e}")
+        notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
+                         f"{backend.label} cannot run model '{e.model}'",
+                         "Fix this stage's backend/model pair with `tempa set-model` / "
+                         "`tempa set-backend`, or in the dashboard (Settings -> AI Models).",
+                         details={"backend": e.backend_name, "model": e.model, "vendor": e.vendor})
+        return
     except Exception as e:
         log(f"TEST FAILED — error running {backend.label}: {e}")
         notify_attention(AttentionEventType.BACKEND_TEST_FAILED, "Backend test",
@@ -113,7 +131,9 @@ def run_test() -> None:
     if test_file.exists():
         test_file.unlink()
 
-    if _state.auth_error_hit:
+    if _state.model_error_hit:
+        log(f"TEST stopped — the configured model was rejected (see message above; log: {log_path.name})")
+    elif _state.auth_error_hit:
         log(f"TEST stopped — authentication failed (see message above; log: {log_path.name})")
     elif _state.usage_limit_hit:
         log(f"TEST stopped — usage limit reached (see log: {log_path.name})")
@@ -177,7 +197,7 @@ def run_verify(epic: str) -> None:
     run_with_usage_limit_retry(_run_once, f"Verification for [{epic}]")
     exit_code, log_path = session_result[0]
 
-    if _state.auth_error_hit:
+    if _state.backend_config_error_hit:
         sys.exit(3)
 
     if exit_code != 0:
@@ -394,14 +414,31 @@ STAGE_LABELS = {
 }
 
 
+def _mismatch_suffix(backend_name: str, model: str, blame: str) -> str:
+    """A short marker appended to a stage's row when its backend/model pair cannot run.
+
+    The only way someone with a pre-existing bad config.json finds out from a terminal
+    without starting a session — `show-models`/`show-backends` are where they look.
+    `blame` picks which half of the pair the row is about, so each table names the OTHER
+    one: a backends table saying "not runnable on OpenAI Codex CLI" next to a row that
+    already says OpenAI Codex CLI reads as the backend failing against itself."""
+    backend = get_backend_def(backend_name)
+    if not model_backend_mismatch(backend, model):
+        return ""
+    return (f"   [!] not runnable on {backend.label}" if blame == "model"
+            else f"   [!] cannot run model '{model}'")
+
+
 def print_models(config: dict | None = None) -> None:
     """Display the AI model configured for each harness stage."""
     if config is None:
         config = load_config()
     models = get_models(config)
+    backends = get_backends(config)
     _banner("AI MODEL PER STAGE")
     for stage in ("clarify", "clarify_apply", "plan", "implement"):
-        print(f"  {STAGE_LABELS[stage]:<34} {models.get(stage, '?')}", flush=True)
+        print(f"  {STAGE_LABELS[stage]:<34} {models.get(stage, '?')}"
+              f"{_mismatch_suffix(backends.get(stage, 'claude'), models.get(stage, ''), 'model')}", flush=True)
 
 
 def print_backends(config: dict | None = None) -> None:
@@ -409,10 +446,12 @@ def print_backends(config: dict | None = None) -> None:
     if config is None:
         config = load_config()
     backends = get_backends(config)
+    models = get_models(config)
     _banner("CLI BACKEND PER STAGE")
     for stage in ("clarify", "clarify_apply", "plan", "implement"):
         name = backends.get(stage, "claude")
-        print(f"  {STAGE_LABELS[stage]:<34} {name:<10} ({get_backend_def(name).label})", flush=True)
+        print(f"  {STAGE_LABELS[stage]:<34} {name:<10} ({get_backend_def(name).label})"
+              f"{_mismatch_suffix(name, models.get(stage, ''), 'backend')}", flush=True)
 
 
 def print_efforts(config: dict | None = None) -> None:
@@ -506,9 +545,21 @@ def set_models(args: argparse.Namespace) -> None:
     for stage in ("clarify", "clarify_apply", "plan", "implement"):
         value = getattr(args, stage)
         if value is not None:
-            backend = backends.get(stage, "claude")
-            models[stage] = _resolve_model_alias(value) if backend == "claude" else value
+            backend_name = backends.get(stage, "claude")
+            models[stage] = _resolve_model_alias(value) if backend_name == "claude" else value
             changed = True
+            # A warning rather than a refusal, on purpose. Blocking here as well as in
+            # `set-backend` would make migrating a stage between backends impossible: each
+            # command would reject the half-finished pair the other one needs first. The
+            # pair still cannot RUN — prepare_backend_invocation refuses it before spawning
+            # anything — so nothing is lost by letting the transition through.
+            backend_def = get_backend_def(backend_name)
+            vendor = model_backend_mismatch(backend_def, models[stage])
+            if vendor:
+                stage_flag = "--" + stage.replace("_", "-")
+                log(f"WARNING: {model_mismatch_message(backend_def, models[stage], vendor)} "
+                    f"Run `tempa set-backend {stage_flag} <backend>` to finish the switch — "
+                    f"until then Tempa will refuse to start a {stage} session.")
 
     config["models"] = models
     save_config(config)
@@ -529,6 +580,7 @@ def set_backends(args: argparse.Namespace) -> None:
     """
     config = load_config()
     backends = get_backends(config)
+    models = get_models(config)
 
     changed = False
     for stage in ("clarify", "clarify_apply", "plan", "implement"):
@@ -536,6 +588,18 @@ def set_backends(args: argparse.Namespace) -> None:
         if value is not None:
             if value not in BACKENDS:
                 log(f"ERROR: unknown backend '{value}' — must be one of: {', '.join(BACKENDS)}")
+                sys.exit(1)
+            # Blocked here (and only warned about in `set-model`) because this is the end of
+            # the migration, not the middle of it: the model for this stage is already
+            # whatever the user wants, so a mismatch now means the pair is simply wrong.
+            # Validated before save_config below, so a rejected flag writes nothing.
+            backend_def = get_backend_def(value)
+            model = models.get(stage, "")
+            vendor = model_backend_mismatch(backend_def, model)
+            if vendor:
+                stage_flag = "--" + stage.replace("_", "-")
+                log(f"ERROR: {model_mismatch_message(backend_def, model, vendor)} "
+                    f"Set the model first: `tempa set-model {stage_flag} <model>`.")
                 sys.exit(1)
             backends[stage] = value
             changed = True

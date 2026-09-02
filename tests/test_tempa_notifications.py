@@ -1,8 +1,32 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from unittest.mock import Mock
 
+import tempa_config
 import tempa_notifications as tn
+
+_SETTINGS_FORM_JS = Path(__file__).resolve().parents[1] / "src" / "assets" / "js" / "80-settings-form.js"
+
+
+def test_every_event_type_is_renderable_in_the_settings_form():
+    """Load-bearing, not cosmetic: selectedEmailEvents() collects only the checkboxes the
+    form actually rendered, so an event type missing from EMAIL_ALERT_EVENTS is silently
+    stripped out of config.json on the user's next Settings save — even if they had it
+    enabled."""
+    js = _SETTINGS_FORM_JS.read_text(encoding="utf-8")
+    block = js.split("const EMAIL_ALERT_EVENTS = [", 1)[1].split("];", 1)[0]
+    rendered = set(re.findall(r'\["([a-z_]+)"', block))
+    missing = {event.value for event in tn.AttentionEventType} - rendered
+    assert not missing, f"event types the Settings form cannot render: {sorted(missing)}"
+
+
+def test_default_enabled_events_are_all_real_event_types():
+    """DEFAULT_EMAIL_NOTIFICATION_EVENTS is a curated subset (purely informational events
+    are off by default), but every name in it still has to be one that exists."""
+    known = {event.value for event in tn.AttentionEventType}
+    assert set(tempa_config.DEFAULT_EMAIL_NOTIFICATION_EVENTS) <= known
 
 
 def _settings(**overrides):

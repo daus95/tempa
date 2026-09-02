@@ -109,6 +109,49 @@ const CODEX_MODEL_REASONING_LEVELS = {
 };
 const CODEX_DEFAULT_EFFORT_LEVELS = [...CODEX_UNIVERSAL_LEVELS, "low", "medium", "high", "xhigh"];
 
+// Vendor families — mirrors tempa_backend.py's MODEL_VENDOR_PREFIXES / MODEL_VENDOR_EXACT_IDS
+// and each Backend.model_vendors. As with the effort catalogs above, the server is the
+// authoritative validator (dashboard_api_settings._validate_stage_settings rejects the save);
+// this copy only lets the form say so before the user gets that far.
+//
+// An id matching no family has no known vendor and is never flagged — the model field is
+// free text and an unrecognized or future id has to keep working. Note copilot lists BOTH
+// vendors: it proxies several providers, so claude-sonnet-5 on Copilot is valid.
+const MODEL_VENDOR_PREFIXES = [
+  ["anthropic", ["claude-"]],
+  ["openai", ["gpt-", "o3-", "o4-", "codex-"]],
+];
+const MODEL_VENDOR_LABELS = { anthropic: "Anthropic", openai: "OpenAI" };
+const MODEL_VENDOR_EXACT_IDS = {
+  "opus": "anthropic", "opus-5": "anthropic",
+  "sonnet": "anthropic", "sonnet-5": "anthropic",
+  "haiku": "anthropic", "haiku-4.5": "anthropic",
+  "fable": "anthropic", "fable-5": "anthropic",
+};
+const BACKEND_MODEL_VENDORS = {
+  claude: ["anthropic"],
+  codex: ["openai"],
+  copilot: ["anthropic", "openai"],
+};
+
+function modelVendor(model) {
+  const value = (model || "").trim().toLowerCase();
+  if (!value) return null;
+  if (MODEL_VENDOR_EXACT_IDS[value]) return MODEL_VENDOR_EXACT_IDS[value];
+  for (const [vendor, prefixes] of MODEL_VENDOR_PREFIXES) {
+    if (prefixes.some((prefix) => value.startsWith(prefix))) return vendor;
+  }
+  return null;
+}
+
+// The offending vendor when this backend cannot serve it, else null.
+function modelBackendMismatch(backendName, model) {
+  const vendor = modelVendor(model);
+  if (!vendor) return null;
+  const served = BACKEND_MODEL_VENDORS[backendName] || BACKEND_MODEL_VENDORS.claude;
+  return served.includes(vendor) ? null : vendor;
+}
+
 const SMTP_PROVIDER_PRESETS = {
   gmail: {
     host: "smtp.gmail.com", port: 587, security: "starttls",
@@ -158,6 +201,8 @@ const EMAIL_ALERT_EVENTS = [
   ["confirmation_required", "Confirmation required", "The terminal is waiting for your choice to run another clarification round."],
   ["verification_failed", "Verification failed", "An epic verification failed or did not produce its report."],
   ["backend_test_failed", "Backend test failed", "The configured AI CLI permission test did not complete."],
+  ["backend_model_mismatch", "Backend/model mismatch", "A stage is configured with a model its CLI backend cannot run, so the session was stopped before the CLI was even started."],
+  ["implementation_qa_state_repaired", "QA state repaired", "Tempa found an inconsistent QA record for an epic and repaired it — informational, no action needed unless it recurs."],
 ];
 
 function renderEmailEventChoices(selectedEvents) {
@@ -232,10 +277,23 @@ function populateModelDatalist(datalistEl, backendName) {
   }
 }
 
-function updateModelAvailabilityNote(noteEl, backendName) {
+// The mismatch warning takes precedence over the availability note, though the two can
+// never actually collide: copilot is the only backend with a note, and it serves every
+// vendor this table knows about, so it never mismatches.
+function updateModelAvailabilityNote(noteEl, backendName, model) {
   if (!noteEl) return;
+  const vendor = modelBackendMismatch(backendName, model);
+  if (vendor) {
+    const backendLabel = (BACKEND_OPTIONS.find((o) => o.value === backendName) || {}).label || backendName;
+    noteEl.textContent = `${MODEL_VENDOR_LABELS[vendor] || vendor} model — ${backendLabel} cannot run it. `
+      + "Pick a model this backend serves, or change the backend. Saving is blocked until you do.";
+    noteEl.classList.add("warn");
+    noteEl.classList.remove("hidden");
+    return;
+  }
   const note = MODEL_AVAILABILITY_NOTES[backendName];
   noteEl.textContent = note || "";
+  noteEl.classList.remove("warn");
   noteEl.classList.toggle("hidden", !note);
 }
 
@@ -268,10 +326,11 @@ function populateBackendSelect(selectEl, currentValue) {
 function wireBackendModelStage(backendSelect, modelInput, modelDatalist, modelNote, effortSelect) {
   backendSelect.addEventListener("change", () => {
     populateModelDatalist(modelDatalist, backendSelect.value);
-    updateModelAvailabilityNote(modelNote, backendSelect.value);
+    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
     populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
   });
   modelInput.addEventListener("input", () => {
+    updateModelAvailabilityNote(modelNote, backendSelect.value, modelInput.value);
     populateEffortSelect(effortSelect, backendSelect.value, modelInput.value, effortSelect.value);
   });
 }
@@ -291,14 +350,17 @@ function fillSettingsForm(config) {
   populateModelDatalist(modelSuggestionsClarifyApply, config.backends.clarify_apply);
   populateModelDatalist(modelSuggestionsPlan, config.backends.plan);
   populateModelDatalist(modelSuggestionsImplement, config.backends.implement);
-  updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify);
-  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply);
-  updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan);
-  updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement);
   settingsModelClarify.value = config.models.clarify;
   settingsModelClarifyApply.value = config.models.clarify_apply;
   settingsModelPlan.value = config.models.plan;
   settingsModelImplement.value = config.models.implement;
+  // After the model inputs are populated, not before: the note now depends on the model as
+  // well as the backend, so computing it first would hide a mismatch already saved in
+  // config.json until the user happened to touch a field.
+  updateModelAvailabilityNote(settingsModelNoteClarify, config.backends.clarify, config.models.clarify);
+  updateModelAvailabilityNote(settingsModelNoteClarifyApply, config.backends.clarify_apply, config.models.clarify_apply);
+  updateModelAvailabilityNote(settingsModelNotePlan, config.backends.plan, config.models.plan);
+  updateModelAvailabilityNote(settingsModelNoteImplement, config.backends.implement, config.models.implement);
   populateEffortSelect(settingsEffortClarify, config.backends.clarify, config.models.clarify, config.reasoning_efforts.clarify);
   populateEffortSelect(settingsEffortClarifyApply, config.backends.clarify_apply, config.models.clarify_apply, config.reasoning_efforts.clarify_apply);
   populateEffortSelect(settingsEffortPlan, config.backends.plan, config.models.plan, config.reasoning_efforts.plan);
