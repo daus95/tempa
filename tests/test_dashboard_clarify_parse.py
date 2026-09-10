@@ -69,6 +69,30 @@ def test_parse_file_answer_without_markers():
     assert items[0].existing_answer == "plain answer"
 
 
+def test_parse_file_answer_block_without_label():
+    """A round that writes the answer block with no "**Your answer:**" label above it
+    (format drift observed in live workspaces) must still parse into a reviewable
+    finding — the answer-start/end markers are the authoritative anchors."""
+    text = (
+        '<!-- clarify:item id="C1" severity="critical" -->\n'
+        "### The OAuth attach transfer leaves live sessions\n"
+        "**Where:** PRD.md — §8\n"
+        "**Question:** what?\n"
+        "**Recommendation:** revoke the rows\n"
+        "<!-- clarify:answer-start -->\n"
+        "\n"
+        "<!-- clarify:answer-end -->\n"
+        "<!-- clarify:enditem -->\n"
+    )
+    items, _ = dcp.parse_file(Path("f.md"), text, 0)
+    assert len(items) == 1
+    assert items[0].raw_id == "C1"
+    assert items[0].severity == "critical"
+    assert items[0].existing_answer == ""
+    assert items[0].resolved_answer == ""
+    assert items[0].has_markers is True
+
+
 def test_parse_file_multiple_items_all_severities():
     text = (
         _item("1", "critical", "A", "w", "q", "r", "")

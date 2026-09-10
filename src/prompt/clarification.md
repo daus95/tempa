@@ -195,6 +195,7 @@ Rules:
 - `id` must be short and unique within the file (e.g. `C1`, `M1`, `N1`, ...).
 - Do not create a separate "Recommendations" section — each finding must carry its own recommendation directly beneath its question.
 - Leave the space between `<!-- clarify:answer-start -->` and `<!-- clarify:answer-end -->` blank (a few empty lines), so a human reviewer — or the clarification-answer UI — can write an answer there, overriding the recommendation.
+- Always put the `**Your answer:**` label immediately above the answer block — the dashboard's parser keys on that label to recognise the finding; a finding written without it never appears in the review UI and the round is silently invisible.
 - Keep every `clarify:` HTML comment marker exactly as shown, including on re-runs — the answer UI depends on them to locate and update each finding. The answer UI may itself write `<!-- clarify:answer-start mode="recommendation" -->` (with an empty body) when a human chooses "Follow the recommendation" instead of typing an answer — treat that the same as any other answered finding; do not alter or remove the `mode` attribute yourself.
 
 Save the results as a NEW file in ${sources.clarifications} — name it `clarification-<YYYYMMDD-HHMMSS>.md` using the current date/time, so it doesn't collide with any file already in that folder.
